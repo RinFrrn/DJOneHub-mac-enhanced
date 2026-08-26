@@ -104,6 +104,7 @@ type app struct {
 	activeCall         *callRecord
 	callHistory        []callRecord
 	callPollInterval   time.Duration
+	callPollWake       chan struct{}
 	callLastPoll       time.Time
 	callLastPollError  string
 	callConfigured     bool
@@ -1153,7 +1154,7 @@ func (a *app) routes() http.Handler {
 
 func (a *app) platformInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":               "1.2.4",
+		"version":               "1.2.11",
 		"os":                    runtime.GOOS,
 		"web_console":           runtime.GOOS == "windows" || a.webConsole,
 		"call_audio":            runtime.GOOS == "darwin",

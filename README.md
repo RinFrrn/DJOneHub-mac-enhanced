@@ -6,7 +6,7 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 
 ## 文档导航
 
-- [当前版本与更新](#v1210通话首音与逐通话路由)
+- [当前版本与更新](#v1211通话建立阶段动态轮询)
 - [版本演进](#版本演进)
 - [下载与安装](#下载与平台状态)
 - [完整使用说明](#完整使用说明)
@@ -14,11 +14,28 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 - [日志卸载与故障排查](#日志与本地数据)
 - [从源码构建](#从源码构建)
 
-主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.10 章节为准。
+主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.11 章节为准。
+
+## v1.2.11：通话建立阶段动态轮询
+
+v1.2.11 源码已更新；安装包发布状态请查看 [RinFrrn fork 的 Releases](https://github.com/RinFrrn/DJOneHub-mac-enhanced/releases)。
+
+### 更快识别接通状态
+
+- 空闲及已接通阶段继续以 1 秒间隔查询 `AT+CLCC`，避免长期占用共享 AT 通道。
+- `dialing`、`alerting`、`incoming`、`waiting` 建链阶段临时提升为 250 毫秒轮询，减少蜂窝网络已经接通、App 尚未切换到通话中的等待时间。
+- `ATD`、`ATA` 和 `ATH` 成功后立即唤醒通话轮询器，不必等待当前定时器自然到期；重复唤醒会合并为一个待处理信号，避免并发发送 `AT+CLCC`。
+- 进入 `active` 或回到空闲后自动恢复 1 秒间隔。本轮只优化 Go 后端，不修改 `DJOneHubNotifier.app` 的 CoreAudio 启动顺序。
+
+### 延续 v1.2.10 的可靠性约束
+
+- 模块侧 MaVo/UAC 路由仍在拨号和响铃阶段提前预热，Mac 媒体循环仍只在 `active` 后开启。
+- 每通结束约 1.5 秒后拆除模块语音 helper，下一通重新预热，不跨独立通话复用可能失效的音频会话。
+- 已在 Apple Silicon + QDC507 实机验证呼出、呼入、连续来电和挂断后再次来电；补充动态间隔与唤醒合并测试，并通过 Go 全量测试和竞态检测。
 
 ## v1.2.10：通话首音与逐通话路由
 
-v1.2.10 源码已更新；安装包发布状态请查看 [RinFrrn fork 的 Releases](https://github.com/RinFrrn/DJOneHub-mac-enhanced/releases)。
+v1.2.10 建立了本轮通话可靠性的基础，其改动已完整保留在 v1.2.11；历史安装包状态可查看 [RinFrrn fork 的 Releases](https://github.com/RinFrrn/DJOneHub-mac-enhanced/releases)。
 
 ### 通话首音优化
 
@@ -82,7 +99,8 @@ DJOneHub 从本机网页工具逐步演进为独立 macOS App。早期能力没�
 | v1.2.4 | 重构为独立 App，整合拨号、通话、短信、通讯录、设置和系统提醒。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.4) · [发布说明](docs/RELEASE_NOTES_v1.2.4.md) |
 | v1.2.5 — v1.2.8 | 增加语音运行时确认下载、移动设备模式，并持续修复首次启用与下载恢复。 | [Releases](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases) |
 | v1.2.9 | 修复 USB 配置识别、安装包混入旧通知 App 和连接模式入口问题。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.9) |
-| v1.2.10 | 提前预热 MaVo 通话路由、缩短通话状态检测，并恢复逐通话 helper 生命周期以避免后续来电无声。 | 当前源码；Release 待发布。 |
+| v1.2.10 | 提前预热 MaVo 通话路由、缩短通话状态检测，并恢复逐通话 helper 生命周期以避免后续来电无声。 | 已合并到 v1.2.11。 |
+| v1.2.11 | 建链阶段使用 250 毫秒动态轮询，并在拨号、接听和挂断命令后立即唤醒状态检测。 | 当前源码；Release 待发布。 |
 
 v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/README-v0.1.7-preview.md`](docs/history/README-v0.1.7-preview.md)，可用于核对早期安装方式、界面和设计边界。
 
@@ -144,8 +162,8 @@ v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/RE
 
 | 平台 | 包 | 当前状态 |
 | --- | --- | --- |
-| macOS 13+ | `DJOneHub-macOS-universal-v1.2.10.dmg` | 源码与 Apple Silicon 实机通话验证完成；Release 安装包待发布。包内应包含 arm64 + x86_64，Intel 尚未真机验证。 |
-| Windows x86-64 | `DJOneHub-Windows-amd64-v1.2.10.zip` | 可由当前源码构建；本轮通话音频优化仅适用于 macOS，Windows 仍未完成真实模块验证。 |
+| macOS 13+ | `DJOneHub-macOS-universal-v1.2.11.dmg` | 源码与 Apple Silicon 实机通话验证完成；Release 安装包待发布。包内应包含 arm64 + x86_64，Intel 尚未真机验证。 |
+| Windows x86-64 | `DJOneHub-Windows-amd64-v1.2.11.zip` | 可由当前源码构建；本轮通话音频优化仅适用于 macOS，Windows 仍未完成真实模块验证。 |
 
 Windows 目前不承诺模块功能可用；它不提供 macOS 专用的 USB AT/eSIM、USB 4G 自动策略、原生通知、MapKit 或双向通话音频。
 
@@ -387,11 +405,11 @@ Mac 双向通话仍需要模块侧语音运行时。该运行时**不随本仓�
 
 ```sh
 # macOS Universal
-scripts/package-macos-universal.sh v1.2.10
-scripts/build-dmg-universal.sh v1.2.10
+scripts/package-macos-universal.sh v1.2.11
+scripts/build-dmg-universal.sh v1.2.11
 
 # Windows x86-64
-scripts/package-windows-amd64.sh v1.2.10
+scripts/package-windows-amd64.sh v1.2.11
 ```
 
 构建 macOS 包需要完整 Xcode、Go、`pkg-config` 与网络下载官方 libusb 源码。Windows 包在 Mac 上只能交叉编译，不能替代 Windows 真机验证。

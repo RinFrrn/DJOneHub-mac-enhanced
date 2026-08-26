@@ -37,6 +37,9 @@ const (
 	// the shared AT channel. The previous three-second interval was a visible
 	// part of the silent window after the network had already connected a call.
 	defaultCallPollInterval = time.Second
+	// While a call is being established, CLCC is cheap and latency-sensitive.
+	// Return to the normal interval as soon as the call becomes active.
+	callSetupPollInterval = 250 * time.Millisecond
 	// The QDC507 helper must be restarted for each independent call session.
 	// Give the native host one poll cycle to close UAC after hang-up, then tear
 	// the module route down. The next call is prewarmed while dialing/ringing.
@@ -97,6 +100,13 @@ func (a *app) startCallPoller(ctx context.Context) {
 	if interval <= 0 {
 		interval = defaultCallPollInterval
 	}
+	a.callMu.Lock()
+	if a.callPollWake == nil {
+		a.callPollWake = make(chan struct{}, 1)
+	}
+	wake := a.callPollWake
+	a.callMu.Unlock()
+
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	for {
@@ -104,11 +114,59 @@ func (a *app) startCallPoller(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			if err := a.pollCallOnce(); err != nil {
-				log.Printf("call poll failed: %v", err)
-			}
-			timer.Reset(interval)
+		case <-wake:
+			// A dial/answer command completed. Interrupt the normal timer so
+			// CLCC observes the new state without waiting up to one second.
 		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		if err := a.pollCallOnce(); err != nil {
+			log.Printf("call poll failed: %v", err)
+		}
+		timer.Reset(a.nextCallPollInterval(interval))
+	}
+}
+
+func (a *app) nextCallPollInterval(normal time.Duration) time.Duration {
+	if normal <= 0 {
+		normal = defaultCallPollInterval
+	}
+	a.callMu.RLock()
+	state := ""
+	if a.activeCall != nil {
+		state = a.activeCall.State
+	}
+	a.callMu.RUnlock()
+	if shouldFastPollCallState(state) {
+		return callSetupPollInterval
+	}
+	return normal
+}
+
+func shouldFastPollCallState(state string) bool {
+	switch state {
+	case "dialing", "alerting", "incoming", "waiting":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *app) wakeCallPoller() {
+	a.callMu.RLock()
+	wake := a.callPollWake
+	a.callMu.RUnlock()
+	if wake == nil {
+		return
+	}
+	select {
+	case wake <- struct{}{}:
+	default:
+		// A pending wake already guarantees an immediate CLCC poll.
 	}
 }
 
@@ -290,12 +348,7 @@ func (a *app) applyCallPoll(calls []parsedCall, now time.Time) {
 }
 
 func shouldPrewarmModuleVoice(state string) bool {
-	switch state {
-	case "dialing", "alerting", "incoming", "waiting":
-		return true
-	default:
-		return false
-	}
+	return shouldFastPollCallState(state)
 }
 
 // prewarmModuleVoiceRoute is deliberately asynchronous: incoming-call UI and
@@ -487,6 +540,7 @@ func (a *app) answerCall(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	log.Printf("answer call: ATA -> %s", strings.TrimSpace(response))
+	a.wakeCallPoller()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"answered": true,
 		"response": response,
@@ -513,6 +567,7 @@ func (a *app) hangupCall(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	log.Printf("hangup call: -> %s", strings.TrimSpace(response))
+	a.wakeCallPoller()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hung_up":  true,
 		"response": response,
@@ -575,6 +630,7 @@ func (a *app) dialCall(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("dial call: ATD%s; -> %s", number, strings.TrimSpace(response))
 	a.prewarmModuleVoiceRoute("dial")
+	a.wakeCallPoller()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dialing":  true,
 		"number":   number,

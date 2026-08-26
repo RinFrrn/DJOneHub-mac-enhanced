@@ -51,6 +51,35 @@ func TestShouldPrewarmModuleVoice(t *testing.T) {
 	}
 }
 
+func TestNextCallPollIntervalIsFastOnlyDuringSetup(t *testing.T) {
+	a := &app{}
+	for _, state := range []string{"dialing", "alerting", "incoming", "waiting"} {
+		a.activeCall = &callRecord{State: state}
+		if got := a.nextCallPollInterval(defaultCallPollInterval); got != callSetupPollInterval {
+			t.Fatalf("nextCallPollInterval()=%s for %q, want %s", got, state, callSetupPollInterval)
+		}
+	}
+	for _, state := range []string{"active", "held", "unknown"} {
+		a.activeCall = &callRecord{State: state}
+		if got := a.nextCallPollInterval(defaultCallPollInterval); got != defaultCallPollInterval {
+			t.Fatalf("nextCallPollInterval()=%s for %q, want %s", got, state, defaultCallPollInterval)
+		}
+	}
+	a.activeCall = nil
+	if got := a.nextCallPollInterval(defaultCallPollInterval); got != defaultCallPollInterval {
+		t.Fatalf("nextCallPollInterval()=%s while idle, want %s", got, defaultCallPollInterval)
+	}
+}
+
+func TestWakeCallPollerCoalescesPendingWake(t *testing.T) {
+	a := &app{callPollWake: make(chan struct{}, 1)}
+	a.wakeCallPoller()
+	a.wakeCallPoller()
+	if got := len(a.callPollWake); got != 1 {
+		t.Fatalf("pending wake count=%d, want 1", got)
+	}
+}
+
 func TestNewCallCancelsPendingVoiceRouteStop(t *testing.T) {
 	a := &app{}
 	a.scheduleModuleVoiceRouteStop(time.Hour)
