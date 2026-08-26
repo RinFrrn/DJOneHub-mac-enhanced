@@ -53,13 +53,11 @@ func (a *app) voiceStatus() map[string]any {
 	}
 }
 
-// kickModuleVoice used to start the complete D4/UAC route during application
-// launch. MaVo's verified lifecycle keeps the media route closed until CLCC
-// reports an active call, so startup must not claim or enable the UAC path.
-// Runtime preparation will be split from route activation separately; until
-// then ensureModuleVoiceRoute remains the single, call-scoped entry point.
+// kickModuleVoice intentionally leaves the media route closed at application
+// launch. Call handling prewarms it when CLCC first reports dialing/ringing,
+// while the native microphone and USB media loop still wait for active.
 func (a *app) kickModuleVoice() {
-	log.Printf("module voice: media route deferred until call becomes active")
+	log.Printf("module voice: media route deferred until a call starts")
 }
 
 func (a *app) setVoiceStatus(ready bool, err error, detail string) {
@@ -117,9 +115,8 @@ func (a *app) ensureModuleVoiceRouteLocked() error {
 	return nil
 }
 
-// ensureModuleVoiceRouteBudgeted waits up to budget for the voice route;
-// used before dial/answer so the HTTP request stays within the client timeout.
-// The background prep keeps running even when the budget expires.
+// ensureModuleVoiceRouteBudgeted waits up to budget for diagnostics and module
+// setup callers. The background prep keeps running when the budget expires.
 func (a *app) ensureModuleVoiceRouteBudgeted(budget time.Duration) error {
 	a.moduleVoiceMu.Lock()
 	ready := a.moduleVoiceReady

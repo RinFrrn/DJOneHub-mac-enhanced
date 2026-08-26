@@ -38,8 +38,43 @@ func TestValidateCallATResponseRejectsModemError(t *testing.T) {
 	}
 }
 
+func TestShouldPrewarmModuleVoice(t *testing.T) {
+	for _, state := range []string{"dialing", "alerting", "incoming", "waiting"} {
+		if !shouldPrewarmModuleVoice(state) {
+			t.Fatalf("shouldPrewarmModuleVoice(%q)=false, want true", state)
+		}
+	}
+	for _, state := range []string{"active", "held", "unknown"} {
+		if shouldPrewarmModuleVoice(state) {
+			t.Fatalf("shouldPrewarmModuleVoice(%q)=true, want false", state)
+		}
+	}
+}
+
+func TestNewCallCancelsPendingVoiceRouteStop(t *testing.T) {
+	a := &app{}
+	a.scheduleModuleVoiceRouteStop(time.Hour)
+	a.callMu.RLock()
+	if a.moduleVoiceStopTimer == nil {
+		a.callMu.RUnlock()
+		t.Fatal("voice route stop timer was not scheduled")
+	}
+	a.callMu.RUnlock()
+
+	now := time.Date(2026, 8, 26, 20, 0, 0, 0, time.Local)
+	a.applyCallPoll([]parsedCall{{
+		Index: 1, Direction: "outgoing", State: "dialing", Number: "10086",
+	}}, now)
+
+	a.callMu.RLock()
+	defer a.callMu.RUnlock()
+	if a.moduleVoiceStopTimer != nil {
+		t.Fatal("new call did not cancel the previous route stop timer")
+	}
+}
+
 func TestCallLifecycleMarksMissed(t *testing.T) {
-	a := &app{callPollInterval: 3 * time.Second, callNotifier: func(callRecord) {}}
+	a := &app{callPollInterval: defaultCallPollInterval, callNotifier: func(callRecord) {}}
 	started := time.Date(2026, 7, 26, 10, 0, 0, 0, time.Local)
 	a.applyCallPoll([]parsedCall{{
 		Index: 1, Direction: "incoming", State: "incoming", Number: "10086",
@@ -55,7 +90,7 @@ func TestCallLifecycleMarksMissed(t *testing.T) {
 }
 
 func TestAnsweredCallIsNotMissed(t *testing.T) {
-	a := &app{callPollInterval: 3 * time.Second, callNotifier: func(callRecord) {}}
+	a := &app{callPollInterval: defaultCallPollInterval, callNotifier: func(callRecord) {}}
 	started := time.Date(2026, 7, 26, 10, 0, 0, 0, time.Local)
 	a.applyCallPoll([]parsedCall{{
 		Index: 1, Direction: "incoming", State: "incoming", Number: "10086",

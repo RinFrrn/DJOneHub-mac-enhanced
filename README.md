@@ -6,7 +6,7 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 
 ## 文档导航
 
-- [当前版本与更新](#v129v125--v129-更新汇总)
+- [当前版本与更新](#v1210通话首音与逐通话路由)
 - [版本演进](#版本演进)
 - [下载与安装](#下载与平台状态)
 - [完整使用说明](#完整使用说明)
@@ -14,7 +14,24 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 - [日志卸载与故障排查](#日志与本地数据)
 - [从源码构建](#从源码构建)
 
-主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.9 章节为准。
+主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.10 章节为准。
+
+## v1.2.10：通话首音与逐通话路由
+
+v1.2.10 源码已更新；安装包发布状态请查看 [RinFrrn fork 的 Releases](https://github.com/RinFrrn/DJOneHub-mac-enhanced/releases)。
+
+### 通话首音优化
+
+- 通话状态 `AT+CLCC` 轮询间隔由 3 秒缩短到 1 秒，减少网络已经接通、App 尚未识别为通话中的等待时间。
+- 在拨号成功以及 `dialing`、`alerting`、`incoming`、`waiting` 阶段异步预热模块侧 MaVo/UAC 路由，不再等到 `active` 后才开始通过 ADB 部署并启动语音链路。
+- Mac 麦克风、扬声器和 USB 媒体循环仍只在 `active` 后开启，避免响铃阶段提前采集或播放通话音频。
+
+### 逐通话路由可靠性
+
+- QDC507 模块侧语音 helper 不再跨独立通话长时间复用。挂断后保留约 1.5 秒供原生音频宿主关闭 UAC，随后停止模块路由；下一通在拨号或响铃阶段重新预热。
+- 新通话会取消上一通尚未执行的延迟停止任务，避免旧计时器在新通话过程中关闭语音路由。
+- 增加预热状态去重和路由操作串行化保护，避免高频 `CLCC` 轮询、拨号和接听同时触发重复部署。
+- 补充预热状态与延迟停止取消的单元测试，并通过完整 Go 测试及通话后端竞态检测。
 
 ## v1.2.9：v1.2.5 — v1.2.9 更新汇总
 
@@ -65,6 +82,7 @@ DJOneHub 从本机网页工具逐步演进为独立 macOS App。早期能力没�
 | v1.2.4 | 重构为独立 App，整合拨号、通话、短信、通讯录、设置和系统提醒。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.4) · [发布说明](docs/RELEASE_NOTES_v1.2.4.md) |
 | v1.2.5 — v1.2.8 | 增加语音运行时确认下载、移动设备模式，并持续修复首次启用与下载恢复。 | [Releases](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases) |
 | v1.2.9 | 修复 USB 配置识别、安装包混入旧通知 App 和连接模式入口问题。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.9) |
+| v1.2.10 | 提前预热 MaVo 通话路由、缩短通话状态检测，并恢复逐通话 helper 生命周期以避免后续来电无声。 | 当前源码；Release 待发布。 |
 
 v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/README-v0.1.7-preview.md`](docs/history/README-v0.1.7-preview.md)，可用于核对早期安装方式、界面和设计边界。
 
@@ -126,8 +144,8 @@ v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/RE
 
 | 平台 | 包 | 当前状态 |
 | --- | --- | --- |
-| macOS 13+ | `DJOneHub-macOS-universal-v1.2.9.dmg` | Apple Silicon 实机验证；包内含 arm64 + x86_64，Intel 尚未真机验证。 |
-| Windows x86-64 | `DJOneHub-Windows-amd64-v1.2.9.zip` | 内含 `DJOneHub.exe`；尚未在真实 Windows + 模块上验证。 |
+| macOS 13+ | `DJOneHub-macOS-universal-v1.2.10.dmg` | 源码与 Apple Silicon 实机通话验证完成；Release 安装包待发布。包内应包含 arm64 + x86_64，Intel 尚未真机验证。 |
+| Windows x86-64 | `DJOneHub-Windows-amd64-v1.2.10.zip` | 可由当前源码构建；本轮通话音频优化仅适用于 macOS，Windows 仍未完成真实模块验证。 |
 
 Windows 目前不承诺模块功能可用；它不提供 macOS 专用的 USB AT/eSIM、USB 4G 自动策略、原生通知、MapKit 或双向通话音频。
 
@@ -369,11 +387,11 @@ Mac 双向通话仍需要模块侧语音运行时。该运行时**不随本仓�
 
 ```sh
 # macOS Universal
-scripts/package-macos-universal.sh v1.2.9
-scripts/build-dmg-universal.sh v1.2.9
+scripts/package-macos-universal.sh v1.2.10
+scripts/build-dmg-universal.sh v1.2.10
 
 # Windows x86-64
-scripts/package-windows-amd64.sh v1.2.9
+scripts/package-windows-amd64.sh v1.2.10
 ```
 
 构建 macOS 包需要完整 Xcode、Go、`pkg-config` 与网络下载官方 libusb 源码。Windows 包在 Mac 上只能交叉编译，不能替代 Windows 真机验证。

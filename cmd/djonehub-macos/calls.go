@@ -32,6 +32,17 @@ type parsedCall struct {
 
 var clccPattern = regexp.MustCompile(`\+CLCC:\s*(\d+),(\d+),(\d+),(\d+),(\d+)(?:,"([^"]*)",(\d+))?`)
 
+const (
+	// One second keeps CLCC detection responsive without continuously occupying
+	// the shared AT channel. The previous three-second interval was a visible
+	// part of the silent window after the network had already connected a call.
+	defaultCallPollInterval = time.Second
+	// The QDC507 helper must be restarted for each independent call session.
+	// Give the native host one poll cycle to close UAC after hang-up, then tear
+	// the module route down. The next call is prewarmed while dialing/ringing.
+	moduleVoiceTeardownDelay = 1500 * time.Millisecond
+)
+
 func parseCLCC(response string) []parsedCall {
 	matches := clccPattern.FindAllStringSubmatch(response, -1)
 	out := make([]parsedCall, 0, len(matches))
@@ -84,7 +95,7 @@ func mapCallState(raw string) string {
 func (a *app) startCallPoller(ctx context.Context) {
 	interval := a.callPollInterval
 	if interval <= 0 {
-		interval = 3 * time.Second
+		interval = defaultCallPollInterval
 	}
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -186,14 +197,12 @@ func (a *app) applyCallPoll(calls []parsedCall, now time.Time) {
 			a.lastAudioHealthLog = time.Time{}
 			log.Printf("voice audio routing stopped")
 		}
-		if callEnded {
-			go func() {
-				time.Sleep(1500 * time.Millisecond)
-				a.stopModuleVoiceRoute()
-			}()
+		if callEnded && (swiftAudioHost || a.audio != nil) {
+			a.scheduleModuleVoiceRouteStop(moduleVoiceTeardownDelay)
 		}
 		return
 	}
+	a.cancelModuleVoiceRouteStopLocked()
 
 	if a.activeCall == nil || a.activeCall.Index != selected.Index || a.activeCall.Direction != selected.Direction {
 		record := &callRecord{
@@ -235,8 +244,13 @@ func (a *app) applyCallPoll(calls []parsedCall, now time.Time) {
 			a.callNotifier(*notify)
 		}
 	}
-	// Match MaVo's verified lifecycle: the call is established first and media
-	// starts only after CLCC reports one active voice call.
+	// Prepare the module half while the call is dialing or ringing. The native
+	// host still opens the microphone and USB media endpoints only after CLCC
+	// reports active, preserving MaVo's media ordering without making the other
+	// party wait for ADB deployment and UAC route setup after answer.
+	if shouldPrewarmModuleVoice(selected.State) {
+		a.prewarmModuleVoiceRoute(selected.State)
+	}
 	a.callMu.RLock()
 	swiftAudioHost := a.swiftAudioHost
 	a.callMu.RUnlock()
@@ -273,6 +287,81 @@ func (a *app) applyCallPoll(calls []parsedCall, now time.Time) {
 			stats["mod_in_calls"], stats["mod_out_calls"], stats["mac_in_calls"], stats["mac_out_calls"],
 			stats["far_ring_used"], a.audio.formatChanges())
 	}
+}
+
+func shouldPrewarmModuleVoice(state string) bool {
+	switch state {
+	case "dialing", "alerting", "incoming", "waiting":
+		return true
+	default:
+		return false
+	}
+}
+
+// prewarmModuleVoiceRoute is deliberately asynchronous: incoming-call UI and
+// CLCC polling must remain responsive while the ADB runtime is being prepared.
+func (a *app) prewarmModuleVoiceRoute(reason string) {
+	a.callMu.Lock()
+	hasAudioHost := a.swiftAudioHost || a.audio != nil
+	if hasAudioHost {
+		// A dial/answer request can arrive before the next CLCC poll. Cancel a
+		// pending idle teardown here as well as in applyCallPoll.
+		a.cancelModuleVoiceRouteStopLocked()
+	}
+	a.callMu.Unlock()
+	if !hasAudioHost {
+		return
+	}
+
+	a.moduleVoiceMu.Lock()
+	if a.moduleVoiceReady || a.moduleVoiceWarming {
+		a.moduleVoiceMu.Unlock()
+		return
+	}
+	a.moduleVoiceWarming = true
+	a.moduleVoiceMu.Unlock()
+
+	go func() {
+		log.Printf("module voice: prewarming route for call state %q", reason)
+		err := a.ensureModuleVoiceRoute()
+		a.moduleVoiceMu.Lock()
+		a.moduleVoiceWarming = false
+		a.moduleVoiceMu.Unlock()
+		if err != nil {
+			log.Printf("module voice: prewarm failed for call state %q: %v", reason, err)
+			return
+		}
+		log.Printf("module voice: prewarm ready for call state %q", reason)
+	}()
+}
+
+// cancelModuleVoiceRouteStopLocked is called whenever CLCC sees a call. It
+// prevents the previous call's grace-period timer from stopping the route
+// underneath a new call.
+func (a *app) cancelModuleVoiceRouteStopLocked() {
+	a.moduleVoiceStopGeneration++
+	if a.moduleVoiceStopTimer != nil {
+		a.moduleVoiceStopTimer.Stop()
+		a.moduleVoiceStopTimer = nil
+	}
+}
+
+func (a *app) scheduleModuleVoiceRouteStop(delay time.Duration) {
+	a.callMu.Lock()
+	a.cancelModuleVoiceRouteStopLocked()
+	generation := a.moduleVoiceStopGeneration
+	a.moduleVoiceStopTimer = time.AfterFunc(delay, func() {
+		a.callMu.Lock()
+		defer a.callMu.Unlock()
+		if generation != a.moduleVoiceStopGeneration || a.activeCall != nil {
+			return
+		}
+		a.moduleVoiceStopTimer = nil
+		// Keep callMu held across teardown so a simultaneous new CLCC state
+		// cannot observe stale ready=true and then have its route removed.
+		a.stopModuleVoiceRoute()
+	})
+	a.callMu.Unlock()
 }
 
 func callStatePriority(state string) int {
@@ -386,6 +475,7 @@ func (a *app) answerCall(w http.ResponseWriter, _ *http.Request) {
 	}
 	a.lastAnswerAt = time.Now()
 	a.callMu.Unlock()
+	a.prewarmModuleVoiceRoute("answer")
 
 	response, err := a.runATCommand("ATA", 5*time.Second)
 	if err != nil {
@@ -484,6 +574,7 @@ func (a *app) dialCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("dial call: ATD%s; -> %s", number, strings.TrimSpace(response))
+	a.prewarmModuleVoiceRoute("dial")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dialing":  true,
 		"number":   number,

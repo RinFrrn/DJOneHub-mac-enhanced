@@ -118,12 +118,15 @@ type app struct {
 	// every host-audio callback and media loop.
 	swiftAudioHost bool
 
-	moduleVoiceMu     sync.Mutex
-	moduleVoiceOpMu   sync.Mutex
-	moduleVoiceReady  bool
-	moduleVoiceLast   time.Time
-	moduleVoiceErr    string
-	moduleVoiceDetail string
+	moduleVoiceMu             sync.Mutex
+	moduleVoiceOpMu           sync.Mutex
+	moduleVoiceReady          bool
+	moduleVoiceLast           time.Time
+	moduleVoiceErr            string
+	moduleVoiceDetail         string
+	moduleVoiceWarming        bool
+	moduleVoiceStopTimer      *time.Timer
+	moduleVoiceStopGeneration uint64
 
 	moduleSetupMu sync.RWMutex
 	moduleSetup   moduleSetupStatus
@@ -323,7 +326,7 @@ func main() {
 				smsPollInterval:  8 * time.Second,
 				smsAutoCleanupME: true,
 				smsReassembler:   smscodec.NewReassembler(),
-				callPollInterval: 3 * time.Second,
+				callPollInterval: defaultCallPollInterval,
 				audio:            newAudioRouter(),
 				webConsole:       webConsole,
 			}
@@ -383,7 +386,7 @@ func main() {
 	instance := &app{
 		modem: manager, port: port,
 		smsPollInterval: 8 * time.Second, smsAutoCleanupME: true,
-		callPollInterval: 3 * time.Second,
+		callPollInterval: defaultCallPollInterval,
 		audio:            newAudioRouter(),
 		webConsole:       webConsole,
 	}
@@ -510,7 +513,7 @@ func newDemoApp() *app {
 		demo:             true,
 		port:             "Demo · Quectel EG25-G",
 		smsPollInterval:  8 * time.Second,
-		callPollInterval: 3 * time.Second,
+		callPollInterval: defaultCallPollInterval,
 		sms: []receivedSMS{
 			{
 				Sender:    "10086",
