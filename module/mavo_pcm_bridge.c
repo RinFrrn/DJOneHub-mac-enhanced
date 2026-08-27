@@ -53,7 +53,10 @@
 #define VOICE_UPLINK_MIXER "VoLTE_Tx Mixer AFE_PCM_TX_VoLTE"
 #define VOICE_AUDIO_ENABLE_PATH "/sys/class/android_usb/f_audio/audio_enable"
 #define NETWORK_DOWNLINK_PCM_DEVICE "hw:0,6"
-#define NETWORK_PCM_FRAME_BYTES 320U
+#define NETWORK_PCM_FRAME_BYTES 256U
+#define NETWORK_PCM_FRAME_SAMPLES (NETWORK_PCM_FRAME_BYTES / 2U)
+#define NETWORK_PCM_FRAME_USEC \
+    ((NETWORK_PCM_FRAME_SAMPLES * 1000000U) / PCM_RATE)
 #define NETWORK_PROBE_DURATION_USEC 3000000U
 #define NETWORK_PACKET_HEADER_BYTES 20U
 #define NETWORK_PACKET_TAG_BYTES 16U
@@ -66,7 +69,7 @@
 #define NETWORK_DIRECTION_DOWNLINK 2U
 #define NETWORK_AUDIO_PORT 45751U
 #define NETWORK_SESSION_TIMEOUT_USEC 3000000LL
-#define NETWORK_POLL_USEC 20000U
+#define NETWORK_POLL_USEC NETWORK_PCM_FRAME_USEC
 
 #define IDLE_RETRY_USEC 20000U
 #define STARTUP_RETRY_USEC 200000U
@@ -792,26 +795,40 @@ static int run_network_pcm_probe(struct vendor_audio *api, int verbose)
 {
     struct timespec started;
     struct timespec now;
-    void *pcm = NULL;
+    void *uplink_pcm = NULL;
+    void *downlink_pcm = NULL;
     unsigned char buffer[NETWORK_PCM_FRAME_BYTES];
     unsigned long frames = 0UL;
     unsigned long nonzero_samples = 0UL;
+    unsigned int uplink_buffer_length;
+    unsigned int downlink_buffer_length;
     unsigned int peak = 0U;
     int result = EXIT_FAILURE;
 
     if (install_signal_handlers() != 0) {
         return EXIT_FAILURE;
     }
-    pcm = api->pcm_open(NETWORK_DOWNLINK_PCM_DEVICE, PCM_CAPTURE_FLAGS,
-                        PCM_RATE, PCM_CHANNELS, PCM_FORMAT_S16_LE,
-                        PCM_HOSTLESS);
-    if (pcm == NULL) {
+    uplink_pcm = api->pcm_open("hw:0,5", PCM_PLAYBACK_FLAGS, PCM_RATE,
+                               PCM_CHANNELS, PCM_FORMAT_S16_LE, PCM_HOSTLESS);
+    if (uplink_pcm == NULL) {
+        log_message("error", "could not open network uplink PCM hw:0,5");
+        goto cleanup;
+    }
+    downlink_pcm = api->pcm_open(NETWORK_DOWNLINK_PCM_DEVICE,
+                                 PCM_CAPTURE_FLAGS, PCM_RATE, PCM_CHANNELS,
+                                 PCM_FORMAT_S16_LE, PCM_HOSTLESS);
+    if (downlink_pcm == NULL) {
         log_message("error", "could not open network downlink PCM %s",
                     NETWORK_DOWNLINK_PCM_DEVICE);
-        return EXIT_FAILURE;
+        goto cleanup;
     }
-    if (api->pcm_buffer_len(pcm) != NETWORK_PCM_FRAME_BYTES) {
-        log_message("error", "network downlink PCM buffer is not %u bytes",
+    uplink_buffer_length = api->pcm_buffer_len(uplink_pcm);
+    downlink_buffer_length = api->pcm_buffer_len(downlink_pcm);
+    log_message("info", "network PCM buffers: uplink=%u downlink=%u bytes",
+                uplink_buffer_length, downlink_buffer_length);
+    if (uplink_buffer_length != NETWORK_PCM_FRAME_BYTES ||
+        downlink_buffer_length != NETWORK_PCM_FRAME_BYTES) {
+        log_message("error", "network PCM devices must expose %u-byte buffers",
                     NETWORK_PCM_FRAME_BYTES);
         goto cleanup;
     }
@@ -824,7 +841,7 @@ static int run_network_pcm_probe(struct vendor_audio *api, int verbose)
         int64_t elapsed_usec;
         unsigned int index;
 
-        if (api->pcm_read(pcm, buffer, NETWORK_PCM_FRAME_BYTES) != 0) {
+        if (api->pcm_read(downlink_pcm, buffer, NETWORK_PCM_FRAME_BYTES) != 0) {
             log_message("error", "network downlink PCM read failed");
             goto cleanup;
         }
@@ -872,8 +889,12 @@ static int run_network_pcm_probe(struct vendor_audio *api, int verbose)
     }
 
 cleanup:
-    if (api->pcm_close(pcm) != 0) {
+    if (downlink_pcm != NULL && api->pcm_close(downlink_pcm) != 0) {
         log_message("warn", "could not close network downlink PCM cleanly");
+        result = EXIT_FAILURE;
+    }
+    if (uplink_pcm != NULL && api->pcm_close(uplink_pcm) != 0) {
+        log_message("warn", "could not close network uplink PCM cleanly");
         result = EXIT_FAILURE;
     }
     return result;
@@ -1006,7 +1027,7 @@ static void make_audio_packet(const struct network_session *session,
     store_u16_be(packet + 6U, NETWORK_PCM_FRAME_BYTES);
     store_u32_be(packet + 8U, session->session_id);
     store_u32_be(packet + 12U, sequence);
-    store_u32_be(packet + 16U, sequence * NETWORK_PCM_FRAME_BYTES);
+    store_u32_be(packet + 16U, sequence * NETWORK_PCM_FRAME_SAMPLES);
     memcpy(packet + NETWORK_PACKET_HEADER_BYTES, payload,
            NETWORK_PCM_FRAME_BYTES);
     hmac_sha256(session->key, sizeof(session->key), packet,
@@ -1022,6 +1043,7 @@ static int valid_audio_packet(const struct network_session *session,
                               unsigned char payload[NETWORK_PCM_FRAME_BYTES])
 {
     unsigned char digest[32];
+    uint32_t packet_sequence;
 
     if (length != NETWORK_PACKET_BYTES ||
         source->sin_family != AF_INET ||
@@ -1034,6 +1056,12 @@ static int valid_audio_packet(const struct network_session *session,
         load_u32_be(packet + 8U) != session->session_id) {
         return 0;
     }
+    packet_sequence = load_u32_be(packet + 12U);
+    if (packet_sequence == 0U ||
+        load_u32_be(packet + 16U) !=
+            packet_sequence * NETWORK_PCM_FRAME_SAMPLES) {
+        return 0;
+    }
     hmac_sha256(session->key, sizeof(session->key), packet,
                 NETWORK_PACKET_HEADER_BYTES + NETWORK_PCM_FRAME_BYTES, digest);
     if (!secure_equal(packet + NETWORK_PACKET_HEADER_BYTES +
@@ -1041,7 +1069,7 @@ static int valid_audio_packet(const struct network_session *session,
                       digest, NETWORK_PACKET_TAG_BYTES)) {
         return 0;
     }
-    *sequence = load_u32_be(packet + 12U);
+    *sequence = packet_sequence;
     memcpy(payload, packet + NETWORK_PACKET_HEADER_BYTES,
            NETWORK_PCM_FRAME_BYTES);
     return 1;
@@ -1136,13 +1164,38 @@ static void *network_downlink_thread(void *opaque)
     struct network_session *session = opaque;
     unsigned char payload[NETWORK_PCM_FRAME_BYTES];
     unsigned char packet[NETWORK_PACKET_BYTES];
+    int64_t next_send_usec;
     ssize_t sent;
 
+    next_send_usec = monotonic_usec();
+    if (next_send_usec < 0LL) {
+        mark_network_failed(session, "network downlink clock failed");
+        return NULL;
+    }
     while (!should_stop()) {
+        int64_t current_usec;
+
         if (session->api->pcm_read(session->downlink_pcm, payload,
                                    NETWORK_PCM_FRAME_BYTES) != 0) {
             mark_network_failed(session, "network downlink PCM read failed");
             break;
+        }
+        current_usec = monotonic_usec();
+        if (current_usec < 0LL) {
+            mark_network_failed(session, "network downlink clock failed");
+            break;
+        }
+        if (current_usec < next_send_usec) {
+            int64_t delay_usec = next_send_usec - current_usec;
+
+            usleep((unsigned int)delay_usec);
+            if (should_stop()) {
+                break;
+            }
+        } else if (current_usec - next_send_usec >
+                   (int64_t)NETWORK_PCM_FRAME_USEC) {
+            /* Do not emit a catch-up burst if the PCM source stalls. */
+            next_send_usec = current_usec;
         }
         ++session->tx_sequence;
         make_audio_packet(session, NETWORK_DIRECTION_DOWNLINK,
@@ -1160,6 +1213,7 @@ static void *network_downlink_thread(void *opaque)
             mark_network_failed(session, "short network downlink packet");
             break;
         }
+        next_send_usec += (int64_t)NETWORK_PCM_FRAME_USEC;
         (void)pthread_testcancel();
     }
     return NULL;
@@ -1235,7 +1289,8 @@ static int setup_network_session(struct network_session *session,
             NETWORK_PCM_FRAME_BYTES ||
         session->api->pcm_buffer_len(session->downlink_pcm) !=
             NETWORK_PCM_FRAME_BYTES) {
-        log_message("error", "network PCM devices must expose 320-byte buffers");
+        log_message("error", "network PCM devices must expose %u-byte buffers",
+                    NETWORK_PCM_FRAME_BYTES);
         return -1;
     }
     return 0;

@@ -24,9 +24,10 @@ STRIP=${STRIP:-"${CROSS_COMPILE}strip"}
 usage()
 {
     printf '%s\n' \
-        "Usage: $0 [--container|--local]" \
+        "Usage: $0 [--container|--local|--module-sysroot]" \
         "  --container  use the pinned Debian builder (default)" \
-        "  --local      use an installed arm-linux-gnueabi toolchain"
+        "  --local      use an installed arm-linux-gnueabi toolchain" \
+        "  --module-sysroot  link against an extracted QDC507 rootfs"
 }
 
 require_tool()
@@ -186,6 +187,146 @@ build_local()
     printf 'audit: %s\n' "$audit_report"
 }
 
+build_module_sysroot()
+{
+    require_tool "$CC"
+    require_tool "$READELF"
+    require_tool "$STRINGS"
+    require_tool "$STRIP"
+    require_tool sha256sum
+
+    module_rootfs=${MAVO_MODULE_ROOTFS:?set MAVO_MODULE_ROOTFS to the extracted QDC507 rootfs}
+    cross_dev_root=${MAVO_CROSS_DEV_ROOT:?set MAVO_CROSS_DEV_ROOT to the extracted usr/arm-linux-gnueabi directory}
+    target_triple=$($CC -dumpmachine)
+    linux_headers=${MAVO_LINUX_HEADERS:-"/usr/$target_triple/include"}
+    gcc_headers=$($CC -print-file-name=include)
+    module_lib_dir="$module_rootfs/lib"
+
+    for file in \
+        "$module_lib_dir/libc.so.6" \
+        "$module_lib_dir/libdl.so.2" \
+        "$module_lib_dir/libpthread.so.0" \
+        "$module_lib_dir/ld-linux.so.3" \
+        "$cross_dev_root/include/stdio.h" \
+        "$cross_dev_root/lib/crt1.o" \
+        "$cross_dev_root/lib/crti.o" \
+        "$cross_dev_root/lib/crtn.o" \
+        "$cross_dev_root/lib/libc_nonshared.a" \
+        "$linux_headers/linux/types.h" \
+        "$gcc_headers/stddef.h"; do
+        if [ ! -e "$file" ]; then
+            printf 'missing module-sysroot input: %s\n' "$file" >&2
+            exit 1
+        fi
+    done
+
+    mkdir -p "$OUT_DIR"
+    temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/mavo-pcm-module-build.XXXXXX")
+    trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
+
+    object="$temporary_dir/mavo_pcm_bridge.o"
+    debug_binary="$OUT_DIR/mavo-pcm-bridge.armv7.debug"
+    release_binary="$OUT_DIR/mavo-pcm-bridge.armv7"
+    audit_report="$OUT_DIR/mavo-pcm-bridge.armv7.audit.txt"
+    checksum_file="$OUT_DIR/mavo-pcm-bridge.armv7.sha256"
+
+    # Ubuntu 26 arm-linux-gnueabi defaults to the 64-bit time/off_t ABI.  The
+    # QDC507 ships glibc 2.22 and has neither fcntl64 nor the time64 entry
+    # points, so explicitly retain its original 32-bit ABI.  The libc headers
+    # and startup objects come from the pinned Bullseye cross-dev package;
+    # shared objects come from the same module image used for deployment.
+    common_flags="-std=c11 -O2 -g -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon -fno-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 -U_TIME_BITS -U_FILE_OFFSET_BITS -ffile-prefix-map=$PROJECT_DIR=/usr/src/mavo -fdebug-prefix-map=$PROJECT_DIR=/usr/src/mavo -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes -Wundef -Werror"
+    # shellcheck disable=SC2086
+    "$CC" $common_flags -nostdinc \
+        -isystem "$cross_dev_root/include" \
+        -isystem "$gcc_headers" \
+        -isystem "$linux_headers" \
+        -pthread -fsyntax-only "$SOURCE"
+    # shellcheck disable=SC2086
+    "$CC" $common_flags -nostdinc \
+        -isystem "$cross_dev_root/include" \
+        -isystem "$gcc_headers" \
+        -isystem "$linux_headers" \
+        -fanalyzer -pthread -c "$SOURCE" \
+        -o "$temporary_dir/mavo_pcm_bridge.analyzer.o"
+    # shellcheck disable=SC2086
+    "$CC" $common_flags -nostdinc \
+        -isystem "$cross_dev_root/include" \
+        -isystem "$gcc_headers" \
+        -isystem "$linux_headers" \
+        -pthread -c "$SOURCE" -o "$object"
+
+    crtbegin=$($CC -print-file-name=crtbegin.o)
+    crtend=$($CC -print-file-name=crtend.o)
+    libgcc=$($CC -print-file-name=libgcc.a)
+    for file in "$crtbegin" "$crtend" "$libgcc"; do
+        if [ ! -e "$file" ]; then
+            printf 'missing compiler runtime input: %s\n' "$file" >&2
+            exit 1
+        fi
+    done
+
+    "$CC" -nostdlib -no-pie \
+        -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed,--build-id=sha1,--export-dynamic-symbol=main \
+        -Wl,--dynamic-linker=/lib/ld-linux.so.3 \
+        -o "$debug_binary" \
+        "$cross_dev_root/lib/crt1.o" \
+        "$cross_dev_root/lib/crti.o" \
+        "$crtbegin" \
+        "$object" \
+        -L"$module_lib_dir" \
+        -Wl,-rpath-link,"$module_lib_dir" \
+        -Wl,--no-as-needed \
+        -Wl,-l:libpthread.so.0 \
+        -Wl,-l:libdl.so.2 \
+        -Wl,--as-needed \
+        -Wl,-l:libc.so.6 \
+        "$cross_dev_root/lib/libc_nonshared.a" \
+        "$libgcc" \
+        -Wl,--no-as-needed \
+        -Wl,-l:ld-linux.so.3 \
+        "$crtend" \
+        "$cross_dev_root/lib/crtn.o"
+    "$STRIP" --strip-unneeded -o "$release_binary" "$debug_binary"
+
+    audit_binary "$debug_binary"
+    audit_binary "$release_binary"
+
+    {
+        printf 'source=%s\n' "$SOURCE"
+        printf 'source_sha256='
+        sha256sum "$SOURCE" | awk '{print $1}'
+        printf 'compiler=%s\n' "$($CC -dumpfullversion -dumpversion)"
+        printf 'binutils=%s\n' \
+            "$($READELF --version | sed -n '1s/.* //p')"
+        printf 'target=ARMv7 EABI5 soft-float (arm-linux-gnueabi)\n'
+        printf 'module_rootfs=%s\n' "$module_rootfs"
+        printf 'module_libc_sha256='
+        sha256sum "$module_lib_dir/libc.so.6" | awk '{print $1}'
+        printf 'cross_libc_nonshared_sha256='
+        sha256sum "$cross_dev_root/lib/libc_nonshared.a" | awk '{print $1}'
+        printf 'maximum_glibc=2.22\n'
+        printf 'runtime_needed=%s\n' \
+            "$($READELF -d "$release_binary" |
+               sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p' |
+               tr '\n' ' ')"
+        "$READELF" --file-header "$release_binary"
+        "$READELF" --arch-specific "$release_binary"
+        "$READELF" --version-info "$release_binary"
+    } >"$audit_report"
+
+    (
+        cd "$OUT_DIR"
+        sha256sum \
+            "$(basename "$debug_binary")" \
+            "$(basename "$release_binary")" \
+            "$(basename "$audit_report")" >"$(basename "$checksum_file")"
+    )
+
+    printf 'built against module sysroot: %s\n' "$release_binary"
+    printf 'audit: %s\n' "$audit_report"
+}
+
 build_container()
 {
     require_tool docker
@@ -218,6 +359,7 @@ build_container()
 case ${1:-"--container"} in
     --container) build_container ;;
     --local) build_local ;;
+    --module-sysroot) build_module_sysroot ;;
     --help|-h) usage ;;
     *) usage >&2; exit 2 ;;
 esac

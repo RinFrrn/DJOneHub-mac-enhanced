@@ -187,12 +187,16 @@ TTY 模式保留原行为；UDP 模式使用 `recvfrom()`/`sendto()`，只接受
 
 当前阶段 A 已在 `module/mavo_pcm_bridge.c` 中提供实验性实现：
 
-- `--probe-network-pcm` 只读取 `hw:0,6` 约 3 秒，检查 320 字节帧并报告峰值与非零采样；不会启用 USB Audio 或写持久区。
+- `--probe-network-pcm` 打开 `hw:0,5` / `hw:0,6`，核对两端实机均为 256
+  字节 period，再读取 D6 约 3 秒并报告峰值与非零采样；不会启用 USB Audio 或写持久区。
 - `--network-session` 要求显式提供 `--peer-address`、`--peer-port`、`--token-file`、`--interface` 和非零 `--session-id`。
-- 媒体包使用 20 字节头、320 字节 PCM S16LE 载荷和 16 字节 HMAC-SHA256 标签；校验 peer、session、方向、长度及递增序号。
+- 媒体包使用 20 字节头、256 字节 PCM S16LE 载荷和 16 字节 HMAC-SHA256 标签；校验 peer、session、方向、长度、8 kHz 时间戳及递增序号。
 - 网络模式复用 D4 VoLTE route，但跳过 `/sys/class/android_usb/f_audio/audio_enable`；D5 用作上行播放、D6 用作下行采集。
 
-这仍不是生产完成态：D5/D6 方向必须在真实模块上先用探测模式确认；当前没有抖动缓冲、控制面握手或 iOS 客户端，session-id 需由后续控制 daemon 按通话生成。
+实机已确认 D5/D6 的 period 都是 256 字节，但尚未在活动电话中确认 D6 非零下行与
+D5 上行方向。空闲态 D6 会快速返回零帧，模块侧发送循环因此必须用单调时钟限制为
+16 ms 一帧，不能依赖 PCM read 自身节拍。这仍不是生产完成态：当前没有抖动缓冲、
+控制面握手或 iOS 客户端，session-id 需由后续控制 daemon 按通话生成。
 
 ## 5. 音频协议
 
@@ -202,11 +206,13 @@ TTY 模式保留原行为；UDP 模式使用 `recvfrom()`/`sendto()`，只接受
 采样率：8000 Hz
 声道：1
 格式：PCM S16LE
-帧长：20 ms
-每帧：160 samples / 320 bytes
+硬件 period：16 ms
+每帧：128 samples / 256 bytes
 ```
 
-USB Ethernet 的带宽足够，PCM 可以减少编码延迟和首次实现的不确定性。
+USB Ethernet 的带宽足够，PCM 可以减少编码延迟和首次实现的不确定性。iOS
+VoiceProcessingIO 的回调大小不保证等于 128 samples，客户端必须通过有界环形缓冲重分帧，
+不能把 10 ms 或 20 ms 的宿主帧长直接强加给模块 PCM。
 
 建议包头：
 
@@ -215,11 +221,11 @@ struct __attribute__((packed)) audio_packet {
     uint32_t magic;          /* "DJOA" */
     uint8_t version;         /* 1 */
     uint8_t direction;       /* 1=uplink, 2=downlink */
-    uint16_t payload_bytes;  /* 320 */
+    uint16_t payload_bytes;  /* 256 */
     uint32_t session_id;
     uint32_t sequence;
     uint32_t timestamp;      /* 8 kHz sample clock */
-    uint8_t payload[320];
+    uint8_t payload[256];
     uint8_t auth_tag[16];
 };
 ```
