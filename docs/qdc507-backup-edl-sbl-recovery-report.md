@@ -636,9 +636,196 @@ AND device boots normally
 
 救援工作的核心不是“多试几个命令”，而是让每一步都缩小不确定性，并确保失败不会扩大已授权的写入范围。
 
-## 14. 相关文档
+## 14. 对 iOS 模块侧设计的风险复盘
+
+本次事故发生后，对 `ios-module-gateway-design.md` 进行了逐项复盘。总体结论是：当前设计方向能够避免日常运行触碰 SBL/MIBIB，基本不会重演本次“启动分区为空、固定 9008”的硬砖；但持久化、启动熔断和 USB 配置回滚仍不够具体，实施不当时仍可能产生“模块能够启动，但 iPhone 和 Mac 都无法连接”的软砖。
+
+### 14.1 逐项对照
+
+| 本次踩坑 | 当前设计 | 结论 |
+|---|---|---|
+| SBL/MIBIB 被擦写 | 初期只在 `/tmp` 临时部署，明确不修改 boot、MTD 或 rootfs | 能避免，必须保持这一边界 |
+| Streaming/分区表写协议不兼容 | iOS 正常功能只依赖已启动的 Linux、USB Ethernet 和用户空间服务 | 能避免，EDL 只保留为离线救援路径 |
+| helper 跨通话复用导致后续无声 | 每通电话独立启动/停止 session，退出时逆序回滚 | 已覆盖 |
+| 驱动与内核不匹配 | 检查内核版本、文件哈希和加载顺序 | 部分覆盖，还需校验 `vermagic` 和依赖 |
+| helper 失败后循环重启/刷机 | 明确失败时停止，不自动刷机、不自动重启 | 已覆盖 |
+| USB Audio/USB Ethernet 状态残留 | 网络模式不启用 `f_audio`，helper 退出时恢复 route | 大体覆盖，持久 USB 配置仍缺少超时回滚 |
+| 运行态扫描 MTD 导致 NAND 全局卡死 | 当前备份要求读取所有 `/dev/mtdXro` | 未避免，必须修改 |
+| 持久化中途断电或文件只写了一半 | 尚未定义原子安装和双版本回滚 | 未覆盖 |
+| init 配置错误导致启动循环 | 只有 fail closed，没有失败计数和安全模式 | 覆盖不足 |
+| 模块进入 9008 后由 iPhone 恢复 | 普通 iPhone App 无法访问 Qualcomm EDL | 无法覆盖，必须保留 Mac/Linux 救援环境 |
+
+### 14.2 当前设计已经吸收的经验
+
+设计把 iOS 功能放在模块正常 Linux 启动后的用户空间：
+
+- `djonehubd` 负责白名单电话控制；
+- `mavo-pcm-gateway` 负责每通电话的媒体 session；
+- iPhone 只通过 USB Ethernet 访问受控协议；
+- 日常流程不需要 Sahara、Streaming、Firehose 或 MIBIB 分区写入；
+- 驱动或音频失败时只回滚当前 session，不重启或刷写模块。
+
+只要不突破这一边界，用户空间 helper 的普通故障不会直接破坏 SBL。每通电话独立 helper 还直接解决了此前第二通电话无声、旧 PCM 句柄和 mixer 状态残留的问题。
+
+设计也把持久化放在最后阶段：先通过 Mac ADB 临时部署到 `/tmp`，完成连续多通电话测试，再考虑 UBI 数据分区和 init。这是正确顺序，不能为了尽早实现“iPhone 独立使用”而跳过。
+
+### 14.3 必须修正的备份要求
+
+当前设计要求在持久化前读取所有 `/dev/mtdXro`。本次实测已经证明，正常 Linux 运行态读取 `mibib`、`efs2` 等部分原始 MTD 可能让 NAND 路径全局卡死，因此这条要求不应照做。
+
+建议替换为：
+
+1. 正常模式第一优先级保存同一设备的运行态 SBL。
+2. 使用经过验证的二进制透明通道，并立即核对长度和 SHA-256。
+3. 保存 `/proc/mtd`、UBI、mount、cmdline、内核、ALSA 和文件系统元数据。
+4. `/etc`、`/usrdata` 使用文件系统级快照。
+5. 其余 MTD 分区使用已经验证的 EDL 只读路径。
+6. 备份工具默认拒绝 `w/wl/ws/wf/e/es`。
+7. 备份阶段不测试 partition override、分区表转换或 erase。
+
+### 14.4 原子双版本持久化
+
+不能直接覆盖当前正在使用的 helper 或 daemon。建议采用不可变 release 目录：
+
+```text
+/usrdata/djonehub/
+├── releases/
+│   ├── <version-a>/
+│   └── <version-b>/
+├── current -> releases/<version-a>
+├── previous -> releases/<version-b>
+├── state/
+└── disabled
+```
+
+安装顺序：
+
+1. 把新版本写入新的 release 目录。
+2. 对每个文件执行长度、SHA-256、ELF 架构和权限检查。
+3. 执行 `fsync`，确保文件和目录已经落盘。
+4. 在临时模式中完成启动和自检。
+5. 使用原子 `rename` 切换 `current`。
+6. 保留 `previous`，直到新版本通过冷启动和真实通话验收。
+
+断电发生在步骤 1–4 时，`current` 不应改变；切换后失败则回到 `previous`。不要原地覆盖二进制，也不要让 init 指向一个仍在写入的文件。
+
+### 14.5 启动失败熔断与安全模式
+
+持久启动应增加有界失败计数。满足任一条件就禁用新版本并回退：
+
+- daemon 连续三次启动失败；
+- 启动后 30 秒仍无法打开内部 AT/QMI 控制入口；
+- USB Ethernet 没有建立或绑定地址不正确；
+- helper 在短时间内反复崩溃；
+- 内核模块加载或设备节点检查失败；
+- 当前版本 manifest/hash 验证失败。
+
+回退动作只能停止服务、卸载本次加载的模块、恢复 mixer/USB Audio 状态和切换 `previous`。不能用“重启模块再试一次”形成无限循环。
+
+建议保留 `disabled` 哨兵文件：存在时 init 不启动 DJOneHub 运行时，但模块正常 USB、AT、ADB 和网络组合仍应出现，便于通过 Mac 修复。
+
+### 14.6 root 权限拆分
+
+加载 `.ko`、访问 mixer 和准备 PCM 可能需要 root，但长期控制服务不应因此获得任意闪存和重启能力。
+
+建议拆分为：
+
+```text
+privileged-launcher
+├── 验证 manifest、kernel、vermagic
+├── 按固定路径加载允许的模块
+├── 建立必要设备权限
+└── 完成后退出
+
+djonehubd / mavo-pcm-gateway
+├── 降权运行
+├── 不访问 /dev/mtd* 或 /dev/mem
+├── 不写 restart reason
+├── 不执行 reboot/EDL
+└── 不接受任意 shell/AT/路径参数
+```
+
+如果旧内核无法提供完整 capability/seccomp 隔离，也应通过代码审计和固定路径 allowlist 删除所有通用文件写入、`system()`、reboot 和 MTD 操作入口。
+
+### 14.7 USB 配置回滚
+
+模块正常启动但 USB gadget 配置错误，会形成软砖：既不是 9008，也无法被 iPhone/Mac 的预期驱动识别。
+
+持久 daemon 启动时不应无条件重复执行 `AT+QCFG="USBCFG"`。如果确实需要切换：
+
+1. 读取并保存当前真实配置。
+2. 只允许经过实机验证的 USB 组合。
+3. 写入后等待重新枚举，并重新读取实际值。
+4. 在超时时间内没有出现预期 VID:PID/接口时，恢复旧配置。
+5. 连续两次失败后写入 `disabled` 并停止，不再循环切换。
+6. Mac 完整模式和 iPhone Ethernet 模式都必须保留可恢复入口。
+
+动态的 `f_audio/audio_enable` 只应属于当前通话 session，由 helper 退出时回滚，不能被当作永久 USB 模式开关。
+
+### 14.8 驱动校验要求
+
+只检查 `uname -r == 3.18.44` 不够。加载模块前还应确认：
+
+- `.ko` SHA-256 在 manifest 中；
+- ELF 架构为目标 ARM ABI；
+- `vermagic` 与运行内核一致；
+- 依赖模块和符号存在；
+- 没有不同版本的旧驱动已加载；
+- 加载后预期 PCM/设备节点出现；
+- 卸载顺序经过测试并能恢复加载前状态。
+
+持久加载前，必须先用 `/tmp` 临时版本完成多轮加载、真实通话、挂断、卸载和再次加载验证。
+
+### 14.9 iPhone 不能替代救援主机
+
+iOS App 的能力从模块正常 Linux 与 USB Ethernet 建立之后才开始。模块如果停在 `05c6:9008`，普通 iPhone App 无法上传 EDL programmer，也无法读取或恢复 NAND。
+
+因此正式发布 iOS 模块方案时必须同时保留独立救援包：
+
+- 私有完整备份和 `SHA256SUMS`；
+- 同一设备运行态 SBL；
+- 已验证的 Firehose programmer；
+- 可重建的 EDL 工具版本和依赖；
+- Mac/Linux USB 主机；
+- 默认只读的 geometry/readback 脚本；
+- 需要再次明确授权才能运行的独立恢复脚本。
+
+iPhone 端不能显示“可恢复模块”之类超出其能力的承诺。
+
+### 14.10 验收门槛
+
+持久化前建议增加以下门槛：
+
+1. `/tmp` 临时部署下完成连续多通拨出、来电、拒接、挂断和第二通音频验证。
+2. helper 异常退出后 mixer、PCM 和 `f_audio` 全部恢复。
+3. daemon 被强制杀死后模块 USB/AT 仍然可用。
+4. 安装过程中在不同阶段断电，旧版本仍可启动。
+5. 新版本 manifest 或二进制被故意破坏时自动回退。
+6. 内部 AT、USB Ethernet 或 PCM 不存在时进入 `disabled`，不重启模块。
+7. 完成多轮冷启动、物理重插和 Mac/iPhone 模式切换。
+8. 恢复包在独立环境完成只读 geometry、SBL readback 和哈希验证演练。
+
+### 14.11 风险分层
+
+补齐上述保护后，故障应被限制在以下层级：
+
+```text
+音频 helper 失败
+    ↓ 自动退出并回滚 mixer/PCM
+控制 daemon 失败
+    ↓ iPhone 功能不可用，但模块继续正常启动
+新 release 失败
+    ↓ 自动回退 previous
+持久启动连续失败
+    ↓ disabled 安全模式，不再循环启动
+NAND/SBL 故障
+    ↓ 只允许独立 Mac/Linux EDL 救援流程处理
+```
+
+因此，当前 iOS 架构可以避免本次同级别事故的核心原因，是因为它不需要日常进入 EDL、修改分区表或写 SBL。真正需要在实施前补齐的是：删除运行态全 MTD 扫描要求，增加原子双版本安装、启动熔断、权限隔离、USB 配置回滚和独立救援包。
+
+## 15. 相关文档
 
 - [iOS 模块侧电话网关设计](ios-module-gateway-design.md)
 - 私有备份中的 `BACKUP_REPORT.md`
 - 私有备份中的 `SHA256SUMS`
-
