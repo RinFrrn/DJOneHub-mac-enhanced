@@ -180,6 +180,15 @@ transport_send_downlink(context, buffer, size);
 
 TTY 模式保留原行为；UDP 模式使用 `recvfrom()`/`sendto()`，只接受已经完成鉴权和 session 协商的 peer。
 
+当前阶段 A 已在 `module/mavo_pcm_bridge.c` 中提供实验性实现：
+
+- `--probe-network-pcm` 只读取 `hw:0,6` 约 3 秒，检查 320 字节帧并报告峰值与非零采样；不会启用 USB Audio 或写持久区。
+- `--network-session` 要求显式提供 `--peer-address`、`--peer-port`、`--token-file`、`--interface` 和非零 `--session-id`。
+- 媒体包使用 20 字节头、320 字节 PCM S16LE 载荷和 16 字节 HMAC-SHA256 标签；校验 peer、session、方向、长度及递增序号。
+- 网络模式复用 D4 VoLTE route，但跳过 `/sys/class/android_usb/f_audio/audio_enable`；D5 用作上行播放、D6 用作下行采集。
+
+这仍不是生产完成态：D5/D6 方向必须在真实模块上先用探测模式确认；当前没有抖动缓冲、控制面握手或 iOS 客户端，session-id 需由后续控制 daemon 按通话生成。
+
 ## 5. 音频协议
 
 第一版直接使用 PCM，不使用 Opus：

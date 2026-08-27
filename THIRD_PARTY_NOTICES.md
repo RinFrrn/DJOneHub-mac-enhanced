@@ -14,9 +14,10 @@ The macOS release package includes **libusb 1.0.30**, distributed under the GNU 
 - Source: <https://github.com/libusb/libusb/releases/tag/v1.0.30>
 - License text in the release package: `licenses/libusb-COPYING`
 
-This public-source tree intentionally does **not** contain the MaVo module-side
-voice runtime or any kernel-module binary. Its integration and status APIs stay
-in the source solely so that call control and diagnostics remain buildable.
+This public-source tree contains the auditable MaVo module-side helper source
+under `module/`, but intentionally does **not** contain a compiled module-side
+voice runtime or any kernel-module binary. Its runtime must be cross-compiled
+and deployed separately after hardware-specific validation.
 See [OPEN_SOURCE_SCOPE.md](OPEN_SOURCE_SCOPE.md) for the excluded files and the
 conditions required to publish a complete audio runtime.
 
@@ -28,8 +29,9 @@ project, with the reference fixed at commit
 (`Fix USB contention and cellular recovery`).
 
 - Project license: [MIT](https://github.com/moluncn/mavo/blob/main/LICENSE)
-- Adapted areas: UAC device probing, modem bridge declarations and macOS audio host integration
-- This repository does **not** redistribute MaVo's module-side runtime or any kernel-module binary.
+- Adapted areas: UAC device probing, modem bridge declarations, macOS audio host integration,
+  and the experimental ARMv7 PCM/USB-Ethernet helper source under `module/`.
+- This repository does **not** redistribute a compiled MaVo module-side runtime or any kernel-module binary.
 
 Copyright for the adapted MaVo code remains with its respective contributors;
 the MIT license continues to apply to that code.
