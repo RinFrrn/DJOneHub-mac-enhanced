@@ -26,6 +26,13 @@
 - fake vendor 库下 D6 探测 3 秒回归通过。
 - ARMv7 交叉编译尚未执行：当前环境没有 `arm-linux-gnueabi-gcc`，Docker 构建也受环境用量限制。
 
+## USB/ADB 盘点经验
+
+macOS 可在 IORegistry 中看到 `2CA3:4006` 及 `ADB Interface`（子类 66），但系统
+`adb devices` 仍可能为空，因为 DJOneHub 使用项目内 libusb 客户端直接访问该厂商
+接口，而不是系统 ADB daemon。若没有 `UsbExclusiveOwner`，应继续使用 DJOneHub 的
+USB ADB 路径，不要据此判断模块未连接。
+
 ## 尚未声称完成
 
 - 尚未在真实模块上验证 D5/D6 的方向和 320 字节 buffer；必须先运行探测模式。

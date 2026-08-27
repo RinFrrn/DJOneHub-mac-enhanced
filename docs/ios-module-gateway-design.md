@@ -53,6 +53,11 @@ USB Ethernet
 4. 启动 `--voice-route-session`。
 5. 挂断后停止 helper，并执行 USB Audio 与 voice route 回滚。
 
+注意：macOS 端使用项目内的 libusb ADB 客户端直接 claim 厂商接口（当前设备在
+macOS IORegistry 中显示为 `ADB Interface@5`、`bInterfaceSubClass=66`），不是系统
+`adb` 守护进程。因而即使模块已被 macOS 枚举，命令行 `adb devices` 也可能为空；
+判断模块是否可用应以 IORegistry 和 DJOneHub 自带的 USB ADB 客户端为准。
+
 iPhone 无法执行这条 ADB 控制链，因此驱动准备、电话控制和音频 session 管理最终都必须由模块上的常驻 daemon 接管。
 
 ## 3. 进程职责
