@@ -36,7 +36,13 @@ final class CallCenter: ObservableObject {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollOnce()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                // Once a call is dialing/ringing, the backend is also using
+                // its fast CLCC cadence. Poll the API at the same cadence so
+                // a prewarmed UAC engine is enabled immediately on active.
+                let delay: UInt64 = self?.shouldFastPollCallSetup == true
+                    ? 250_000_000
+                    : 1_000_000_000
+                try? await Task.sleep(nanoseconds: delay)
             }
         }
     }
@@ -96,8 +102,17 @@ final class CallCenter: ObservableObject {
             if status.active?.id != previousID, status.active == nil || previousID == nil {
                 isMuted = false
             }
-            if let active = status.active, active.state == "active" {
-                startMaVoAudioIfNeeded(for: active)
+            if let active = status.active {
+                // Outgoing setup is user initiated, so the native UAC/engine
+                // may be opened while dialing. For incoming calls it is
+                // started from answer(), avoiding microphone access while the
+                // phone is merely ringing.
+                if shouldPrepareMaVo(for: active.state) {
+                    startMaVoAudioIfNeeded(for: active)
+                }
+                if maVoAudio.isRunning {
+                    maVoAudio.setMediaEnabled(active.state == "active")
+                }
             }
         } catch {
             isOnline = false
@@ -126,11 +141,21 @@ final class CallCenter: ObservableObject {
     }
 
     func answer() {
+        if let active = activeCall,
+           active.direction == "incoming",
+           active.state == "incoming" || active.state == "waiting" {
+            // Begin UAC/AVAudioEngine startup as soon as the user accepts the
+            // call. Media remains disabled until CLCC reports active.
+            startMaVoAudioIfNeeded(for: active)
+        }
         Task {
             do {
                 try await api.answerCall()
                 lastActionError = nil
             } catch {
+                maVoAudio.stop()
+                maVoAudioCallID = nil
+                maVoAudioStarting = false
                 lastActionError = "接听失败：\(error.localizedDescription)"
             }
         }
@@ -217,7 +242,12 @@ final class CallCenter: ObservableObject {
                         self.maVoAudioStarting = false
                         switch result {
                         case .success:
-                            self.maVoAudio.setMediaEnabled(true)
+                            // The route may finish opening before CLCC flips
+                            // from dialing/incoming to active. Keep the engine
+                            // alive but gate PCM until the call is established.
+                            let mediaEnabled = self.activeCall?.id == call.id &&
+                                self.activeCall?.state == "active"
+                            self.maVoAudio.setMediaEnabled(mediaEnabled)
                             self.lastActionError = nil
                         case .failure(let message):
                             self.lastActionError = "MaVo 音频启动失败：\(message)"
@@ -246,6 +276,16 @@ final class CallCenter: ObservableObject {
             try await Task.sleep(for: .milliseconds(500))
         }
         throw APIError.http(409, "等待模块 UAC 语音路由超过 40 秒。请在设置中查看初始化诊断。")
+    }
+
+    private var shouldFastPollCallSetup: Bool {
+        guard let state = activeCall?.state else { return false }
+        return state == "dialing" || state == "alerting" ||
+            state == "incoming" || state == "waiting"
+    }
+
+    private func shouldPrepareMaVo(for state: String) -> Bool {
+        state == "dialing" || state == "alerting" || state == "active"
     }
 
     func callDuration(now: Date = Date()) -> TimeInterval {
