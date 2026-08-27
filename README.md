@@ -13,6 +13,8 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 - [常用命令](#常用命令)
 - [日志卸载与故障排查](#日志与本地数据)
 - [从源码构建](#从源码构建)
+- [iOS 模块侧电话网关设计](docs/ios-module-gateway-design.md)
+- [QDC507 全量备份、EDL 排障与 SBL 恢复报告](docs/qdc507-backup-edl-sbl-recovery-report.md)
 
 主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.11 章节为准。
 
