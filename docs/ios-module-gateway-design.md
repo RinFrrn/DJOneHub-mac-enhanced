@@ -4,7 +4,7 @@
 
 目标是在不依赖 Mac 或另一台常驻设备的情况下，让 iPhone 通过 USB 直连大疆第一代 4G 模块，在前台完成拨号、接听、挂断和双向通话。
 
-当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过模块已有的 USB Ethernet 向 iPhone 提供受控的网络协议。
+当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机当前启用的是 Qualcomm 厂商 `rmnet`，不是已经可用的通用 USB Ethernet；ECM/NCM 组合验证是独立前置门槛。
 
 推荐架构：
 
@@ -22,7 +22,7 @@
     ├── UDP 接收 iPhone 上行 PCM
     └── UDP 发送运营商下行 PCM
 
-USB Ethernet
+USB 网络（待验证 ECM/NCM；当前 rmnet 不可直接使用）
 └── iPhone App
     ├── Network.framework 控制和音频
     ├── AVAudioEngine/VoiceProcessingIO
@@ -59,6 +59,26 @@ macOS IORegistry 中显示为 `ADB Interface@5`、`bInterfaceSubClass=66`），�
 判断模块是否可用应以 IORegistry 和 DJOneHub 自带的 USB ADB 客户端为准。
 
 iPhone 无法执行这条 ADB 控制链，因此驱动准备、电话控制和音频 session 管理最终都必须由模块上的常驻 daemon 接管。
+
+### 2.1 USB 网络实机盘点
+
+本次从模块运行态读取到：
+
+```text
+/sys/class/android_usb/android0/functions = diag,serial,rmnet,ffs,audio
+bridge0 = 192.168.225.1/24
+bridge0/brif = 空
+```
+
+模块内核同时暴露 `f_ecm`、`f_ncm`、`f_rndis` 和 `f_usb_mbim` 等 function 节点，
+但“节点存在”不等于该组合已经配置、能枚举或被 iPhone 支持。当前 macOS 未出现对应
+`en*` 接口，说明 `rmnet` 不能作为本方案假定的通用 IP 链路；普通 iOS App 也不能直接
+claim 这个厂商 USB function。
+
+因此后续必须在不持久化的试验模式中分别验证 ECM/NCM：保存当前完整 USB tuple，设置
+自动回滚窗口，确认 Mac 和真实 iPhone 的枚举、DHCP/静态地址、ADB/AT 救援入口及冷启动
+恢复。未通过这项测试前，不得把“USB Ethernet 可用”作为既成事实，也不得永久改写
+`USBCFG`。
 
 ## 3. 进程职责
 
@@ -127,7 +147,7 @@ static int voice_route_stop(
 /* 现有 macOS UAC */
 voice_route_start(api, 1, &route);
 
-/* iPhone USB Ethernet */
+/* iPhone USB network after ECM/NCM validation */
 voice_route_start(api, 0, &route);
 ```
 
@@ -137,7 +157,8 @@ voice_route_start(api, 0, &route);
 /sys/class/android_usb/f_audio/audio_enable = 0
 ```
 
-这样可继续使用当前 iPhone/iPad USB 组合，只暴露 USB Ethernet，避免 iOS 抢占系统 USB Audio 路由。
+这样可以避免 iOS 抢占系统 USB Audio 路由，但不能继续假定当前 `rmnet` 组合可用；
+必须先得到经过实机验证且可回滚的 ECM/NCM 组合。
 
 ### 4.2 增加网络模式参数
 

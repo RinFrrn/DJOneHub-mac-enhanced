@@ -824,6 +824,27 @@ NAND/SBL 故障
 
 因此，当前 iOS 架构可以避免本次同级别事故的核心原因，是因为它不需要日常进入 EDL、修改分区表或写 SBL。真正需要在实施前补齐的是：删除运行态全 MTD 扫描要求，增加原子双版本安装、启动熔断、权限隔离、USB 配置回滚和独立救援包。
 
+### 14.12 `rmnet` 不能被当作已验证的 USB Ethernet
+
+阶段 A 实机盘点发现当前 gadget functions 为：
+
+```text
+diag,serial,rmnet,ffs,audio
+```
+
+模块内部虽有 `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空，macOS 也没有枚举出
+对应 USB 网卡。`rmnet` 是 Qualcomm 厂商数据 function，不能因为模块内部出现一个 IP
+地址就把它等同于 iPhone 可访问的 ECM/NCM 网络。模块同时存在 `f_ecm`、`f_ncm`、
+`f_rndis`、`f_usb_mbim` 节点，只能证明内核包含相关 function，不能证明任一组合安全可用。
+
+这正是 14.7 所述“USB 配置软砖”风险的实际例子。后续测试 ECM/NCM 必须：
+
+1. 保存当前完整 USB tuple 和正常枚举证据；
+2. 先采用 RAM/临时组合或具备独立超时回滚的试验机制；
+3. 同时验证真实 iPhone、Mac、AT、ADB 和模块冷启动；
+4. 失败后自动恢复 `diag,serial,rmnet,ffs,audio`，不得靠 iPhone 执行救援；
+5. 未通过前不写持久 `USBCFG`，不把“USB Ethernet 已可用”写进发布承诺。
+
 ## 15. 相关文档
 
 - [iOS 模块侧电话网关设计](ios-module-gateway-design.md)

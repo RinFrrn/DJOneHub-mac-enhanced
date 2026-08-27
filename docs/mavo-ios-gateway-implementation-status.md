@@ -109,7 +109,9 @@ USB ADB 路径，不要据此判断模块未连接。
 
 - 尚未在活动电话中获得 D6 非零语音，也未验证 D5 确为上行；需要带对端语音的实通话。
 - 当前媒体循环没有 40–60 ms 抖动缓冲，也没有控制面握手；session-id 需由后续 daemon 每通电话生成并传给双方。
-- 模块已有 `bridge0=192.168.225.1/24`，但本次 macOS 没有枚举出对应 USB 网络接口；
-  尚未证明当前 USB composition 能让 iPhone 形成可用的 IP 链路。
+- 模块当前 USB functions 为 `diag,serial,rmnet,ffs,audio`；虽然内部已有
+  `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空且 macOS 没有对应 `en*` 接口。
+  当前 `rmnet` 不是普通 iPhone App 可使用的 USB Ethernet，必须另行验证可回滚的
+  ECM/NCM composition，IP 链路仍是阶段 A 的阻塞项。
 - 电话 AT/QMI 控制、iOS `Network.framework`/`VoiceProcessingIO` 客户端、持久化启动仍未实施。
 - 未写入模块持久分区，也未修改发布包。
