@@ -874,9 +874,30 @@ MTD 或持久 USB 配置。模块自带 `aplay` 也有两个非标准行为：�
 `audio_enable=0`、Auxpcm ACDB 已校准，D0 playback/capture 仍在 prepare 阶段返回
 `EINVAL`。当前 runtime manifest 也不要求 D0，不能把保留的默认代码误当作已支持路径。
 
-下一步应优先让真实 iPhone 验证现有双向 UAC，把 ECM/NCM 限制为控制面；若 iOS 无法按
-应用需求访问 UAC，才修改内核驱动暴露方向正确的用户态 PCM。两条路径都不需要写 MTD，
-仍应先在 `/tmp` 与临时 USB 配置下验证。
+现有 UAC 仍值得用真实 iPhone 做枚举和拆向诊断，但下节的 Apple Audio Session 约束
+已经否定它作为完整 iPhone 通话媒体方案。生产路线必须修改内核驱动暴露方向正确的
+用户态 PCM，并验证 ECM/NCM 控制与媒体。该路线不需要写 MTD，仍应先在 `/tmp` 与临时
+USB 配置下验证。
+
+### 14.14 iOS UAC 双路由限制与真机探针
+
+本机 Xcode 27 / iOS 27 SDK 的公开头文件确认 `AVAudioSessionPortUSBAudio` 同时适用于
+输入和输出，但完整手持通话所需的设备集合不是一套普通双向 USB 声卡可以满足的：
+
+- iPhone 需要同时采集模块 USB 下行和内置麦克风；
+- iPhone 需要同时向模块 USB 上行输出，并从内置听筒/扬声器播放下行；
+- 传统 `multiRoute` 只有 last-in input，不能并行取得两个输入；
+- iOS 26.2 `dualRoute` 的第二设备只支持有线耳麦、Bluetooth LE/HFP，不支持 USB。
+
+仓库因此新增 iOS 17+ SwiftUI 探针 `ios/DJOneHubUACProbe`，分别验证 USB 输入下行与
+内置麦克风到 USB 输出的上行，并记录 current route、available inputs、UID、声道、
+采样率、I/O buffer 和路由事件。探针已通过 iphoneos arm64 无签名编译，但尚未在真实
+iPhone + QDC507 上运行。即便两个方向分开成功，也不能越过系统只允许一套当前通话
+路由的限制。
+
+这项修正反而降低了模块事故风险：后续不会为了迁就 iOS UAC 去反复猜 ALSA 设备号或
+持久修改 gadget composition，而是把风险集中在可回滚的 ECM/NCM 试验和受版本控制的
+内核音频接口。驱动和 USB 配置仍必须遵守本报告的双版本安装、启动熔断与自动回滚要求。
 
 ## 15. 相关文档
 

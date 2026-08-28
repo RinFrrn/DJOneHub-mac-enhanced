@@ -5,6 +5,19 @@
 
 ## 已完成
 
+- 增加可编译的 iOS 17+ SwiftUI 真机探针 `ios/DJOneHubUACProbe`。它只使用
+  `AVAudioSession` / `AVAudioEngine` 公共 API，显示 current route、available inputs、
+  端口 UID、声道、采样率、I/O buffer 和路由事件；可分别验证 USB 下行输入、USB
+  测试音上行以及“内置麦克风 -> USB 输出”。测试音和麦克风转发均有实际路由门禁，
+  不会在 USB 输出不存在时启动。
+- 使用 Xcode 27 / iPhoneOS 27 SDK、deployment target iOS 17，对探针执行 arm64
+  `CODE_SIGNING_ALLOWED=NO` 构建，结果 `BUILD SUCCEEDED`。CoreSimulator 在当前沙箱
+  无法连接不影响 iphoneos 设备编译。
+- 复核 iOS Audio Session 路由能力后确认：现有模块 UAC 不能单独承载完整 iPhone
+  手持通话。普通/传统 multiroute 不能并行取得模块 USB 输入与内置麦克风；iOS 26.2
+  `dualRoute` 的第二设备类型也不包含 USB。探针因此用于拆向实测，不再作为生产媒体
+  架构本身。
+
 - 将 `run_voice_route_session()` 拆为可复用、幂等的
   `voice_route_start()` / `voice_route_stop()`。
 - 网络模式可复用 VoLTE D4 route，但不会写
@@ -138,9 +151,11 @@ USB ADB 路径，不要据此判断模块未连接。
 ## 尚未声称完成
 
 - D5/D6 的候选双向映射已被实通话否定；D6 非零样本不能归因为下行，D5 测试音也没有
-  到达通话对端；D0/MultiMedia1 在当前运行时也无法 prepare。下一步优先验证真实 iPhone
-  能否直接把模块的双向 UAC 作为 `AVAudioSession` 输入/输出，网络只承担控制；若不能，
-  必须修改内核驱动暴露方向正确的用户态 PCM，不能继续靠猜测设备号实现。
+  到达通话对端；D0/MultiMedia1 在当前运行时也无法 prepare。Apple API 约束又否定了
+  “UAC 全媒体、网络只控制”的完整 iPhone 通话方案。下一步必须修改内核驱动暴露方向
+  正确的用户态 PCM，并验证可回滚的 ECM/NCM；不能继续靠猜测 ALSA 设备号实现。
+- iOS 探针尚未在真实 iPhone + 模块上运行；当前只声称源码/API 审计和 iphoneos arm64
+  构建通过，不声称 QDC507 gadget 已被 iOS 枚举为 `.usbAudio`。
 - 当前媒体循环没有 40–60 ms 抖动缓冲，也没有控制面握手；session-id 需由后续 daemon 每通电话生成并传给双方。
 - 模块当前 USB functions 为 `diag,serial,rmnet,ffs,audio`；虽然内部已有
   `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空且 macOS 没有对应 `en*` 接口。

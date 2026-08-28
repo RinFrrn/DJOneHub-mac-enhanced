@@ -6,6 +6,29 @@
 
 当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机当前启用的是 Qualcomm 厂商 `rmnet`，不是已经可用的通用 USB Ethernet；ECM/NCM 组合验证是独立前置门槛。
 
+### 1.1 现有 UAC 不能单独组成 iPhone 通话
+
+2026-08-28 使用本机 Xcode 27 / iOS 27 SDK 复核 Apple 公共 API 后，否定了“保留
+模块 UAC 作为全部通话媒体、USB 网络只做控制”的中间方案：
+
+- 模块电话下行在 iPhone 上表现为 USB Audio **输入**，而说话人的声音来自 iPhone
+  内置麦克风；完整通话要求同时采集两个输入设备。
+- 模块电话上行在 iPhone 上表现为 USB Audio **输出**，而用户需要从 iPhone 听筒或
+  扬声器听到下行；完整通话也要求同时使用两个输出设备。
+- 普通 `playAndRecord` 可以从 `availableInputs` 选择一个偏好输入，但这不是并行采集。
+- 传统 `multiRoute` 明确将输入限制为 last-in input；内置扬声器也只允许在没有其他
+  eligible output 时使用。
+- iOS 26.2 的 `dualRoute` 虽能同时使用内置麦克风/扬声器与第二套双向设备，但 Apple
+  当前只列出有线耳麦、Bluetooth LE 和 Bluetooth HFP，明确没有 USB Audio。
+
+因此现有 UAC 只保留为 macOS 媒体路径和 iPhone 实机诊断手段，不能作为 iOS 生产架构
+的完成条件。生产方案仍需把电话上下行都暴露给模块用户态网关，经 ECM/NCM 传给 App；
+iPhone 的 Audio Session 只使用一套正常的内置/耳麦通话路由。
+
+仓库已增加 `ios/DJOneHubUACProbe`，可把两个方向拆开验证：选择 USB 输入观察电话下行，
+或选择内置麦克风并在 USB 输出仍存在时短暂验证上行。即使两项分别成功，也不等于它们
+能在同一个 iOS Audio Session 中同时工作。
+
 推荐架构：
 
 ```text
@@ -16,7 +39,7 @@
 │   ├── 提供经过鉴权的 TCP 控制协议
 │   └── 按每通电话启动/停止音频 helper
 │
-└── mavo-pcm-gateway             每通电话运行
+└── mavo-pcm-gateway             每通电话运行（需内核暴露正确双向 PCM）
     ├── 配置并回滚 VoLTE mixer
     ├── 打开模块 PCM 设备
     ├── UDP 接收 iPhone 上行 PCM
@@ -29,6 +52,11 @@ USB 网络（待验证 ECM/NCM；当前 rmnet 不可直接使用）
     ├── CallKit 通话界面
     └── Contacts/SwiftUI
 ```
+
+这里的媒体 PCM 不能继续使用已被实机否定的 D5 playback / D6 capture 映射，也不能用
+当前无法 prepare 的 D0/MultiMedia1 路径。下一实现门槛是修改/扩展 QDC507 内核音频
+驱动，向用户态提供 `PCM_RX` 蜂窝下行 capture 和 `PCM_TX` 蜂窝上行 playback，并与
+现有 `f_audio` UAC 会话互斥。
 
 控制 daemon 可以常驻，但音频 helper 必须维持“每通电话一个 session”的生命周期。不要让当前 `--voice-route-session` 永久运行，否则容易重新引入第二通电话无声、旧 PCM 句柄未清理和 mixer 状态残留。
 
