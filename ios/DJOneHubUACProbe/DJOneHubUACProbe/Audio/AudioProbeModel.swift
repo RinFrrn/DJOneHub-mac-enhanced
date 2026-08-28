@@ -1,5 +1,6 @@
 import AVFAudio
 import Foundation
+import Network
 
 struct AudioRouteItem: Identifiable, Equatable {
     let id: String
@@ -500,6 +501,109 @@ final class AudioProbeModel: ObservableObject {
         case .routeConfigurationChange: return "routeConfigurationChange"
         case .unknown: return "unknown"
         @unknown default: return "future:\(rawValue)"
+        }
+    }
+}
+
+@MainActor
+final class ModuleNetworkProbe: ObservableObject {
+    @Published private(set) var pathText = "检测中"
+    @Published private(set) var stateText = "未测试"
+    @Published private(set) var detailText = ""
+    @Published private(set) var latencyText = "—"
+    @Published private(set) var isTesting = false
+
+    let host = "192.168.225.1"
+    let port: UInt16 = 45_750
+
+    private let pathMonitor = NWPathMonitor()
+    private let pathQueue = DispatchQueue(label: "DJOneHubUACProbe.network-path")
+    private var connection: NWConnection?
+
+    init() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let interface = path.availableInterfaces.first(where: { $0.type == .wiredEthernet }).map { String(describing: $0.type) }
+                ?? path.availableInterfaces.first.map { String(describing: $0.type) }
+                ?? "无接口"
+            Task { @MainActor in
+                guard let self else { return }
+                self.pathText = path.status == .satisfied ? "可用 · \(interface)" : "不可用 · \(path.status.description)"
+            }
+        }
+        pathMonitor.start(queue: pathQueue)
+    }
+
+    deinit {
+        pathMonitor.cancel()
+        connection?.cancel()
+    }
+
+    func probeControlPort() {
+        connection?.cancel()
+        connection = nil
+        isTesting = true
+        stateText = "连接中"
+        detailText = "正在探测 \(host):\(port)"
+        latencyText = "—"
+
+        let started = Date()
+        let endpoint = NWEndpoint.Host(host)
+        let connection = NWConnection(host: endpoint, port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        self.connection = connection
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            Task { @MainActor in
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    self.isTesting = false
+                    self.stateText = "控制端口可达"
+                    self.latencyText = String(format: "%.0f ms", Date().timeIntervalSince(started) * 1_000)
+                    self.detailText = "TCP \(self.host):\(self.port) 已建立；模块 daemon 已监听"
+                    connection?.cancel()
+                case .failed(let error):
+                    self.isTesting = false
+                    self.latencyText = String(format: "%.0f ms", Date().timeIntervalSince(started) * 1_000)
+                    if case let .posix(code) = error, code == .ECONNREFUSED {
+                        self.stateText = "网络可达，端口未监听"
+                        self.detailText = "模块已响应 TCP 拒绝；下一步需要部署 djonehubd 控制 daemon"
+                    } else {
+                        self.stateText = "控制端口不可达"
+                        self.detailText = Self.errorText(error)
+                    }
+                case .cancelled:
+                    if self.isTesting {
+                        self.isTesting = false
+                        self.stateText = "探测已取消"
+                    }
+                default:
+                    break
+                }
+            }
+        }
+        connection.start(queue: DispatchQueue(label: "DJOneHubUACProbe.network-connection"))
+    }
+
+    private static func errorText(_ error: NWError) -> String {
+        switch error {
+        case .posix(let code):
+            return "POSIX \(code.rawValue)：\(code)"
+        case .dns(let code):
+            return "DNS \(code)"
+        case .tls(let code):
+            return "TLS \(code)"
+        default:
+            return error.localizedDescription
+        }
+    }
+}
+
+private extension NWPath.Status {
+    var description: String {
+        switch self {
+        case .satisfied: return "已连接"
+        case .unsatisfied: return "无网络"
+        case .requiresConnection: return "等待连接"
+        @unknown default: return "未知"
         }
     }
 }

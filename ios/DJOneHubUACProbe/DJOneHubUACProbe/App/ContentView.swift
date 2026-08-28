@@ -2,11 +2,13 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var probe: AudioProbeModel
+    @EnvironmentObject private var networkProbe: ModuleNetworkProbe
 
     var body: some View {
         NavigationStack {
             List {
                 statusSection
+                networkSection
                 routeSection
                 controlsSection
                 logSection
@@ -19,6 +21,30 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var networkSection: some View {
+        Section("ECM 网络探针") {
+            LabeledContent("有线网络路径", value: networkProbe.pathText)
+            LabeledContent("模块地址", value: "\(networkProbe.host):\(networkProbe.port)")
+            LabeledContent("控制端口", value: networkProbe.stateText)
+            LabeledContent("往返时间", value: networkProbe.latencyText)
+
+            Button(networkProbe.isTesting ? "探测中…" : "测试模块控制端口") {
+                networkProbe.probeControlPort()
+            }
+            .disabled(networkProbe.isTesting)
+
+            if !networkProbe.detailText.isEmpty {
+                Text(networkProbe.detailText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("只探测 TCP 控制面，不发送拨号、PCM 或其他通话命令。ECM 已能上网但端口拒绝时，表示网络链路正常，模块侧 djonehubd 尚未监听。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
