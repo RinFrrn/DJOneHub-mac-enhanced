@@ -20,7 +20,7 @@ jobs:
           cache: false
 
       - name: Test common sentinel validation
-        run: go test ./cmd/djonehub-macos
+        run: go test -mod=mod ./cmd/djonehub-macos
 
   package:
     needs: unit-tests
@@ -39,6 +39,8 @@ jobs:
         run: brew install pkg-config
 
       - name: Build universal test package
+        env:
+          GOFLAGS: -mod=mod
         run: ./scripts/package-macos-universal.sh v1.2.11-sentinel-deployer
 
       - name: Upload test package
