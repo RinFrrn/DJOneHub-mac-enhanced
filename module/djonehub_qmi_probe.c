@@ -12,6 +12,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,6 +30,20 @@
 
 typedef void *qmi_client_type;
 typedef void *qmi_idl_service_object_type;
+
+/*
+ * Linux QCCI ABI from qmi_cci_target_ext.h.  The module's own
+ * quectel_daemon passes this object to qmi_client_init(); a NULL pointer is
+ * not accepted by the vendor library and is dereferenced during setup.
+ */
+struct qmi_client_os_params {
+    uint32_t sig_set;
+    uint32_t timed_out;
+    uint32_t clock;
+    pthread_cond_t cond;
+    pthread_condattr_t attr;
+    pthread_mutex_t mutex;
+};
 
 typedef qmi_idl_service_object_type (*voice_get_service_object_fn)(
     int32_t major, int32_t minor, int32_t tool);
@@ -201,6 +216,7 @@ int main(void)
     struct qmi_api api;
     qmi_idl_service_object_type service_object;
     qmi_client_type client = NULL;
+    struct qmi_client_os_params os_params;
     uint8_t response[RESPONSE_CAPACITY];
     uint8_t empty_request = 0U;
     unsigned int response_length = 0U;
@@ -210,9 +226,11 @@ int main(void)
     int qmi_result;
     int exit_status = EXIT_FAILURE;
 
+    fprintf(stderr, "djonehub-qmi-probe: phase=load-libraries\n");
     if (load_qmi_api(&api) != 0) {
         return EXIT_FAILURE;
     }
+    fprintf(stderr, "djonehub-qmi-probe: phase=get-service-object\n");
     service_object = api.get_voice_service_object(
         (int32_t)VOICE_IDL_MAJOR, (int32_t)VOICE_IDL_MINOR,
         (int32_t)VOICE_IDL_TOOL);
@@ -222,8 +240,11 @@ int main(void)
         goto cleanup;
     }
 
+    memset(&os_params, 0, sizeof(os_params));
+    fprintf(stderr, "djonehub-qmi-probe: phase=init-client os_params=%u\n",
+            (unsigned int)sizeof(os_params));
     qmi_result = api.client_init_instance(
-        service_object, QMI_CLIENT_INSTANCE_ANY, NULL, NULL, NULL,
+        service_object, QMI_CLIENT_INSTANCE_ANY, NULL, NULL, &os_params,
         QMI_TIMEOUT_MS, &client);
     if (qmi_result != QMI_NO_ERR || client == NULL) {
         fprintf(stderr, "djonehub-qmi-probe: QMI Voice init failed: %d\n",
@@ -231,6 +252,7 @@ int main(void)
         goto cleanup;
     }
 
+    fprintf(stderr, "djonehub-qmi-probe: phase=get-all-call-info\n");
     memset(response, 0, sizeof(response));
     qmi_result = api.send_raw_sync(
         client, QMI_VOICE_GET_ALL_CALL_INFO, &empty_request, 0U, response,
@@ -266,6 +288,7 @@ int main(void)
     exit_status = EXIT_SUCCESS;
 
 cleanup:
+    fprintf(stderr, "djonehub-qmi-probe: phase=cleanup\n");
     if (client != NULL) {
         qmi_result = api.client_release(client);
         if (qmi_result != QMI_NO_ERR) {

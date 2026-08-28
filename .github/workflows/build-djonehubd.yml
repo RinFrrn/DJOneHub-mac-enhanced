@@ -55,7 +55,7 @@ jobs:
           test "$(readelf --arch-specific outputs/module/djonehubd.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
           ! readelf --arch-specific outputs/module/djonehubd.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
           ! readelf --program-headers outputs/module/djonehubd.armv7 | grep -q INTERP
-          sha256sum outputs/module/djonehubd.armv7 > outputs/module/djonehubd.armv7.sha256
+          (cd outputs/module && sha256sum djonehubd.armv7 > djonehubd.armv7.sha256)
           cat > outputs/module/BUILD-METADATA.txt <<'EOF'
           target=ARMv7 EABI5 soft-float
           link=static (CI portability sentinel; not the production daemon)
@@ -90,7 +90,7 @@ jobs:
           ! readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
           test "$(readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -c '/lib/ld-linux.so.3')" -eq 1
           ! readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'
-          sha256sum outputs/module/djonehub-qmi-probe.armv7 > outputs/module/djonehub-qmi-probe.armv7.sha256
+          (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
 
           qmi_probe=dynamically linked ARMv7 EABI5 soft-float, glibc <= 2.7
