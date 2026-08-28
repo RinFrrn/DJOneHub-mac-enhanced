@@ -1103,6 +1103,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/calls/audio/host/register", a.audioHostRegister)
 	mux.HandleFunc("GET /api/calls/audio/host/config", a.audioHostConfig)
 	mux.HandleFunc("GET /api/voice/status", a.voiceStatusAPI)
+	mux.HandleFunc("GET /api/module/adb-inventory", a.moduleADBInventoryAPI)
 	mux.HandleFunc("POST /api/voice/provision", a.voiceProvisionAPI)
 	mux.HandleFunc("GET /api/module/setup", a.moduleSetupStatusAPI)
 	mux.HandleFunc("POST /api/module/setup", a.moduleSetupStartAPI)

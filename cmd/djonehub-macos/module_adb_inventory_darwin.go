@@ -1,0 +1,56 @@
+//go:build darwin && cgo
+
+package main
+
+import (
+	"net/http"
+	"strings"
+	"time"
+)
+
+// moduleADBInventoryCommand is deliberately a fixed, read-only command.  Do
+// not expose arbitrary ADB shell input over the HTTP API: this endpoint exists
+// only to identify the module's internal modem/control surfaces before a
+// production iOS gateway is allowed to send call commands.
+const moduleADBInventoryCommand = `
+printf '%s\n' '--- id ---'
+id -u 2>&1
+printf '%s\n' '--- uname ---'
+uname -a 2>&1
+printf '%s\n' '--- device-nodes ---'
+for path in /dev/smd* /dev/ttyGS* /dev/qcqmi* /dev/ttyUSB* /dev/ttyHS* /dev/at*; do
+  test -e "$path" || continue
+  ls -l "$path" 2>&1
+done
+printf '%s\n' '--- processes ---'
+ps 2>&1 | grep -Ei 'ril|atfwd|qmux|qmi|quectel|modem|voice' | grep -v grep || true
+printf '%s\n' '--- tty-drivers ---'
+cat /proc/tty/drivers 2>&1
+printf '%s\n' '--- unix-sockets ---'
+cat /proc/net/unix 2>&1 | grep -Ei 'at|qmux|qmi|ril|voice|modem' || true
+`
+
+func (a *app) moduleADBInventoryAPI(w http.ResponseWriter, _ *http.Request) {
+	// ADB and the module voice helper share the same USB transport.  Serialize
+	// this diagnostic with voice operations so a probe cannot claim the device
+	// while a media route is being prepared or torn down.
+	a.moduleVoiceOpMu.Lock()
+	defer a.moduleVoiceOpMu.Unlock()
+
+	adb, err := openDJIUSBADB()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "无法打开模块 ADB: "+err.Error())
+		return
+	}
+	defer adb.Close()
+
+	output, status, err := adb.shellChecked(moduleADBInventoryCommand, 15*time.Second)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "模块 ADB 盘点失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    status,
+		"inventory": strings.TrimSpace(output),
+	})
+}

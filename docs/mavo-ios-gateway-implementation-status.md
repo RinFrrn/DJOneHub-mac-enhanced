@@ -186,4 +186,8 @@ USB ADB 路径，不要据此判断模块未连接。
   这只证明 Mac 侧 ECM 枚举和 DHCP 成功；NCM 及 iPhone 侧网络访问仍未验证，恢复目标
   是原始 `usbnet=0`。
 - 电话 AT/QMI 控制、iOS `Network.framework`/`VoiceProcessingIO` 客户端、持久化启动仍未实施。
+- 为继续实施前的安全盘点，macOS 后端新增 `GET /api/module/adb-inventory` 只读接口；它
+  通过现有 ADB 传输收集 `/dev` 节点、相关进程、TTY 驱动和 Unix socket，不接受任意
+  shell 输入，也不向模块设备节点写数据。只有据此确认内部 AT/QMI 通道后，才可实现
+  生产 `djonehubd` 的拨号控制。
 - 未写入模块持久分区，也未修改发布包。
