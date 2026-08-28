@@ -21,8 +21,22 @@ printf '%s\n' '--- device-nodes ---'
 ls -l /dev/smd* /dev/ttyGS* /dev/qcqmi* /dev/ttyUSB* /dev/ttyHS* /dev/at* 2>&1 || true
 printf '%s\n' '--- processes ---'
 ps 2>&1 || true
+printf '%s\n' '--- modem-process-fds ---'
+for proc in /proc/[0-9]*; do
+  cmd=$(tr '\000' ' ' < "$proc/cmdline" 2>/dev/null || true)
+  case "$cmd" in
+    *atfwd*|*qmux*|*quectel*|*ril*|*gsmd*|*modem*)
+      printf '%s %s\n' "$proc" "$cmd"
+      ls -l "$proc"/fd 2>/dev/null | grep -E 'smd|at_usb|ttyHS|ttyHSL|ttyGS|qcqmi' || true
+      ;;
+  esac
+done
 printf '%s\n' '--- tty-drivers ---'
 cat /proc/tty/drivers 2>&1
+printf '%s\n' '--- tty-state ---'
+cat /proc/tty/driver/smd 2>&1 || true
+cat /proc/tty/driver/msm_serial_hs 2>&1 || true
+cat /proc/tty/driver/msm_serial_hsl 2>&1 || true
 printf '%s\n' '--- unix-sockets ---'
 cat /proc/net/unix 2>&1 || true
 true
