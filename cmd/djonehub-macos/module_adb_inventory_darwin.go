@@ -42,7 +42,11 @@ func (a *app) moduleADBInventoryAPI(w http.ResponseWriter, _ *http.Request) {
 	}
 	defer adb.Close()
 
-	output, status, err := adb.shellChecked(moduleADBInventoryCommand, 15*time.Second)
+	// shellChecked appends its own command terminator.  Trim the raw string so
+	// BusyBox does not see a standalone `;` after a trailing newline.
+	output, status, err := adb.shellChecked(
+		strings.TrimSpace(moduleADBInventoryCommand), 15*time.Second,
+	)
 	if err != nil {
 		// Preserve any bytes received before the shell transport failed.  This
 		// is still read-only and makes BusyBox/firmware shell incompatibilities
