@@ -240,6 +240,19 @@ v0.1.x 预览版曾提供 ZIP/命令行安装方式：完整解压后执行 `./i
 
 旧发行目录也支持免安装运行：保留完整目录并执行 `./djonehub start`。不要只复制单个可执行文件，因为运行时还依赖包内的 `bin`、`lib` 和资源目录。
 
+### 开发测试包快速更新
+
+反复验证 GitHub Actions 生成的 macOS ZIP 时，可把每次下载得到的
+`DJOneHub-macOS-universal-v1-*` 文件夹保留在“下载”目录，然后始终执行同一条命令：
+
+```sh
+./scripts/install-latest-macos-backend.sh
+```
+
+脚本会按修改时间选择最新 ZIP、验证旁边的 SHA-256 清单，并只替换当前用户
+DJOneHub App 使用的后端；Notifier、配置和现有 libusb 不受影响。更新失败时会自动
+恢复上一份后端。该脚本用于本仓库开发机的连续测试，不替代正式 DMG 安装流程。
+
 ## 完整使用说明
 
 ### 电话与通话
