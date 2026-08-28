@@ -22,8 +22,8 @@ import (
 
 // adbClient speaks the ADB wire protocol to the module's USB ADB interface
 // (interface 6, bInterfaceSubClass 66 = adb). It is a direct port of MaVo's
-// ADBModuleController + ADBProtocol; only shell/push are needed for the
-// module-side voice route.
+// ADBModuleController + ADBProtocol; shell/push are used for the module-side
+// voice route and pull is restricted by its callers to fixed diagnostic files.
 type adbClient struct {
 	ctx              *C.libusb_context
 	handle           *C.libusb_device_handle
@@ -654,6 +654,108 @@ func (a *adbClient) pushContext(ctx context.Context, data []byte, remotePath str
 		return errors.New("ADB sync 返回无效状态")
 	}
 	return a.closeStreamLocked(stream)
+}
+
+// pull copies one regular file from the module through the ADB sync service.
+// Callers must apply their own path allowlist; maxBytes prevents an unexpected
+// symlink or corrupt sync response from consuming unbounded host memory.
+func (a *adbClient) pull(remotePath string, maxBytes int, timeout time.Duration) ([]byte, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.handle == nil {
+		return nil, errors.New("ADB 通道未打开")
+	}
+	if remotePath == "" || remotePath[0] != '/' || strings.ContainsRune(remotePath, '\x00') {
+		return nil, errors.New("ADB pull 源路径无效")
+	}
+	if maxBytes <= 0 {
+		return nil, errors.New("ADB pull 大小上限必须大于零")
+	}
+	if timeout <= 0 {
+		return nil, errors.New("ADB pull 超时必须大于零")
+	}
+	if err := a.connectLocked(); err != nil {
+		return nil, err
+	}
+	stream, err := a.openServiceLocked("sync:")
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(timeout)
+	if err := a.writeSyncLocked(stream, "RECV", []byte(remotePath), deadline); err != nil {
+		_ = a.closeStreamLocked(stream)
+		return nil, err
+	}
+
+	const maxSyncDataChunk = 1024 * 1024
+	var data []byte
+	var pending []byte
+	for time.Now().Before(deadline) {
+		msg, err := a.receiveLocked(deadline)
+		if err != nil {
+			a.connected = false
+			_ = a.closeStreamLocked(stream)
+			return nil, err
+		}
+		switch msg.command {
+		case 0x45545257: // WRTE
+			if msg.arg0 != stream.remoteID || msg.arg1 != stream.localID {
+				continue
+			}
+			pending = append(pending, msg.payload...)
+			if err := a.sendLocked(0x59414b4f, stream.localID, stream.remoteID, nil, 2*time.Second); err != nil { // OKAY
+				return nil, err
+			}
+			for len(pending) >= 8 {
+				id := string(pending[:4])
+				length := int(leUint32(pending[4:8]))
+				switch id {
+				case "DATA":
+					if length < 0 || length > maxSyncDataChunk {
+						_ = a.closeStreamLocked(stream)
+						return nil, fmt.Errorf("ADB sync DATA 长度无效: %d", length)
+					}
+					if len(pending) < 8+length {
+						break
+					}
+					if len(data) > maxBytes-length {
+						_ = a.closeStreamLocked(stream)
+						return nil, fmt.Errorf("模块文件超过允许上限 %d 字节", maxBytes)
+					}
+					data = append(data, pending[8:8+length]...)
+					pending = pending[8+length:]
+					continue
+				case "DONE":
+					pending = pending[8:]
+					if err := a.closeStreamLocked(stream); err != nil {
+						return nil, err
+					}
+					return data, nil
+				case "FAIL":
+					if length < 0 || length > maxSyncDataChunk {
+						_ = a.closeStreamLocked(stream)
+						return nil, fmt.Errorf("ADB sync FAIL 长度无效: %d", length)
+					}
+					if len(pending) < 8+length {
+						break
+					}
+					detail := string(pending[8 : 8+length])
+					_ = a.closeStreamLocked(stream)
+					return nil, fmt.Errorf("模块拒绝读取文件：%s", detail)
+				default:
+					_ = a.closeStreamLocked(stream)
+					return nil, fmt.Errorf("ADB sync 返回未知记录 %q", id)
+				}
+				break
+			}
+		case 0x45534c43: // CLSE
+			a.connected = false
+			return nil, errors.New("ADB sync 在文件读取完成前关闭")
+		}
+	}
+	a.connected = false
+	_ = a.closeStreamLocked(stream)
+	return nil, fmt.Errorf("等待模块 ADB 文件读取超时")
 }
 
 func (a *adbClient) writeSyncLocked(stream adbStream, id string, payload []byte, deadline time.Time) error {
