@@ -37,6 +37,12 @@ printf '%s\n' '--- tty-state ---'
 cat /proc/tty/driver/smd 2>&1 || true
 cat /proc/tty/driver/msm_serial_hs 2>&1 || true
 cat /proc/tty/driver/msm_serial_hsl 2>&1 || true
+printf '%s\n' '--- vendor-entrypoint-strings ---'
+for binary in /usr/bin/atfwd_daemon /usr/bin/quectel_daemon /usr/bin/quectel-uart-ddp /usr/bin/qmuxd; do
+  test -r "$binary" || continue
+  printf '%s\n' "[$binary]"
+  strings "$binary" 2>/dev/null | grep -Ei '/dev/|smd|at_usb|socket|at\\+|qmux|qmi' | sort -u | sed -n '1,120p' || true
+done
 printf '%s\n' '--- unix-sockets ---'
 cat /proc/net/unix 2>&1 || true
 true
