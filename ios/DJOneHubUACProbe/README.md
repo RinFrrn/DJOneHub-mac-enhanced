@@ -78,6 +78,10 @@ MAVO_CROSS_DEV_ROOT=/path/to/usr/arm-linux-gnueabi \
 模块 shell 中确认进程和监听地址，再检查 `192.168.225.1` 是否仍属于 USB 网卡；不
 要通过修改 USB composition 或刷写分区来“修复”端口问题。
 
+仓库的 `.github/workflows/build-djonehubd.yml` 可通过 GitHub Actions 手动运行，生成
+`djonehubd-armv7-sentinel` artifact。Action 使用静态 ARMv7 构建，适合本次临时
+连通性验证；它不等价于链接 QDC507 sysroot 的生产二进制，也不会自动上传或写入模块。
+
 若只有输入或只有输出，应先导出日志，不要修改模块持久 USB composition。若完全没有
 USB Audio，下一步是核对模块 gadget descriptor 与 iPhone 枚举，不是猜测其他 ALSA
 设备号。

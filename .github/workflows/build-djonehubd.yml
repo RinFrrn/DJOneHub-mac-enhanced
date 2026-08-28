@@ -1,0 +1,64 @@
+name: Build module control sentinel
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "module/djonehubd.c"
+      - "scripts/build_djonehubd_armel.sh"
+      - ".github/workflows/build-djonehubd.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install ARMv7 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+
+      - name: Build static ARMv7 sentinel
+        run: |
+          set -euxo pipefail
+          mkdir -p outputs/module
+          arm-linux-gnueabi-gcc \
+            -std=c11 -O2 -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon \
+            -static -fno-pie -no-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+            -U_TIME_BITS -U_FILE_OFFSET_BITS \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehubd.c -o outputs/module/djonehubd.armv7.static
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehubd.armv7 \
+            outputs/module/djonehubd.armv7.static
+          file outputs/module/djonehubd.armv7
+          readelf --file-header outputs/module/djonehubd.armv7
+          readelf --arch-specific outputs/module/djonehubd.armv7
+          readelf --program-headers outputs/module/djonehubd.armv7
+          test "$(readelf --file-header outputs/module/djonehubd.armv7 | grep -c 'Class:.*ELF32')" -eq 1
+          test "$(readelf --file-header outputs/module/djonehubd.armv7 | grep -c 'Machine:.*ARM')" -eq 1
+          test "$(readelf --arch-specific outputs/module/djonehubd.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
+          ! readelf --arch-specific outputs/module/djonehubd.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
+          ! readelf --program-headers outputs/module/djonehubd.armv7 | grep -q INTERP
+          sha256sum outputs/module/djonehubd.armv7 > outputs/module/djonehubd.armv7.sha256
+          cat > outputs/module/BUILD-METADATA.txt <<'EOF'
+          target=ARMv7 EABI5 soft-float
+          link=static (CI portability sentinel; not the production daemon)
+          listen=192.168.225.1:45750
+          scope=TCP health response only; no AT, PCM, shell, or persistence
+          EOF
+
+      - name: Upload sentinel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: djonehubd-armv7-sentinel
+          path: outputs/module/
+          if-no-files-found: error
