@@ -845,6 +845,39 @@ diag,serial,rmnet,ffs,audio
 4. 失败后自动恢复 `diag,serial,rmnet,ffs,audio`，不得靠 iPhone 执行救援；
 5. 未通过前不写持久 `USBCFG`，不把“USB Ethernet 已可用”写进发布承诺。
 
+### 14.13 活动电话中的 D5/D6 验证与占用陷阱
+
+阶段 A 后续实测否定了最初的 D5/D6 网络媒体映射，并暴露了 USB Audio 与网络 PCM
+不能并行打开的细节：
+
+- D5 playback 和 D6 capture 的 period 都是 256 字节，即 8 kHz、S16LE、单声道下
+  的 128 samples / 16 ms；
+- 活动电话中读取 D6 3 秒得到 `peak=11788` 和 `nonzero_samples=23515`，但实时 DAPM
+  后续证明 D6 位于 `PCM_TX`/VoLTE 上行输入侧；结合其空闲读取不按时钟推进，这些值
+  可能是 gadget 关闭前的残留环形缓冲，不能确认蜂窝下行；
+- 向 D5 先后写入约 -24 dBFS 和 -9 dBFS 的限幅 WAV，设备均报告完整播放和状态 0，
+  但通话对端均未听到；DAPM 显示 D5 位于 `PCM_RX`，不能进入
+  `PCM_TX -> VoLTE_UL`，因此该上行候选被否定；
+- 每次测试结束都把 `audio_enable` 恢复为 1，原 D4 route 进程保持存活，通话没有挂断。
+
+最容易误判的是进程文件描述符：route helper 的 `/proc/<pid>/fd` 只显示 D4 capture 和
+playback，但 USB gadget 启用后，ALSA status 会把 D5/D6 也登记为同一 owner，第二个
+open 返回 `EBUSY`。因此不能把“进程没有 D5/D6 fd”理解为代理 PCM 空闲，也不能在现有
+UAC 通话旁边直接启动第二个网络 helper。
+
+本轮只使用 `/tmp` 文件和带 `EXIT/HUP/INT/TERM` trap 的临时脚本，没有写 rootfs、UBI、
+MTD 或持久 USB 配置。模块自带 `aplay` 也有两个非标准行为：长输入路径会被截断，并且
+指定 PCM 参数后仍要求 RIFF/WAV 文件。这些失败均在写入 D5 前返回，且自动恢复了
+`audio_enable`。生产实现不应复用这套诊断切换；应由单一 session owner 在 UAC 与网络
+模式之间原子切换，并在退出路径统一回滚 mixer、PCM 与 gadget 状态。进一步分别使用
+网络候选 helper 和固定哈希的上游 MaVo helper 测试 MultiMedia1：即使 D4 完全退出、
+`audio_enable=0`、Auxpcm ACDB 已校准，D0 playback/capture 仍在 prepare 阶段返回
+`EINVAL`。当前 runtime manifest 也不要求 D0，不能把保留的默认代码误当作已支持路径。
+
+下一步应优先让真实 iPhone 验证现有双向 UAC，把 ECM/NCM 限制为控制面；若 iOS 无法按
+应用需求访问 UAC，才修改内核驱动暴露方向正确的用户态 PCM。两条路径都不需要写 MTD，
+仍应先在 `/tmp` 与临时 USB 配置下验证。
+
 ## 15. 相关文档
 
 - [iOS 模块侧电话网关设计](ios-module-gateway-design.md)

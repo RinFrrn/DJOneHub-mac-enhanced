@@ -212,11 +212,15 @@ TTY 模式保留原行为；UDP 模式使用 `recvfrom()`/`sendto()`，只接受
   字节 period，再读取 D6 约 3 秒并报告峰值与非零采样；不会启用 USB Audio 或写持久区。
 - `--network-session` 要求显式提供 `--peer-address`、`--peer-port`、`--token-file`、`--interface` 和非零 `--session-id`。
 - 媒体包使用 20 字节头、256 字节 PCM S16LE 载荷和 16 字节 HMAC-SHA256 标签；校验 peer、session、方向、长度、8 kHz 时间戳及递增序号。
-- 网络模式复用 D4 VoLTE route，但跳过 `/sys/class/android_usb/f_audio/audio_enable`；D5 用作上行播放、D6 用作下行采集。
+- 网络模式当前复用 D4 VoLTE route 并跳过 `/sys/class/android_usb/f_audio/audio_enable`；
+  原 D5 上行、D6 下行映射已被实通话否定，需改为经过真实方向验证的 PCM 路径。
 
-实机已确认 D5/D6 的 period 都是 256 字节，但尚未在活动电话中确认 D6 非零下行与
-D5 上行方向。空闲态 D6 会快速返回零帧，模块侧发送循环因此必须用单调时钟限制为
-16 ms 一帧，不能依赖 PCM read 自身节拍。这仍不是生产完成态：当前没有抖动缓冲、
+实机已确认 D5/D6 的 period 都是 256 字节，但没有确认它们可作为网络双向媒体端点。
+活动电话中的 D6 非零采样可能来自 gadget 关闭前的残留缓冲；D5 写入 -9 dBFS 测试音
+后对端仍未听到。实时 DAPM 显示 `VoLTE_DL -> PCM_RX` 和
+`PCM_TX -> VoLTE_UL`，与原先按 ALSA playback/capture 名称推断的方向不符。空闲态 D6
+还会快速返回旧数据或零帧，任何发送循环都不能依赖 PCM read 自身节拍。这仍不是生产
+完成态：当前必须先更换 PCM/mixer 映射，并且尚无抖动缓冲、
 控制面握手或 iOS 客户端，session-id 需由后续控制 daemon 按通话生成。
 
 ## 5. 音频协议
@@ -277,11 +281,11 @@ struct __attribute__((packed)) audio_packet {
 00-08 AFE Capture      capture
 ```
 
-首选验证组合：
+已否定的候选组合：
 
 - D4 保持 VoLTE route session。
-- D5 playback 接收 iPhone 上行 PCM。
-- D6 capture 输出运营商下行 PCM。
+- D5 playback 接收 iPhone 上行 PCM（实测写入成功但对端无声）。
+- D6 capture 输出运营商下行 PCM（非零数据无法排除残留上行缓冲）。
 - 网络模式不启用 USB Audio。
 
 候选调用：
@@ -293,7 +297,18 @@ uplink_pcm = pcm_open("hw:0,5", PCM_PLAYBACK_FLAGS, ...);
 downlink_pcm = pcm_open("hw:0,6", PCM_CAPTURE_FLAGS, ...);
 ```
 
-这组映射仍需真实通话验证。应先增加 `--probe-network-pcm`：只采集 3 秒并报告 frames、peak 和 nonzero samples，不写入持久存储。确认 D6 有对端信号后，再开放 D5 上行。
+这组映射已经被真实通话否定。随后分别使用网络候选 helper 和固定哈希的上游 MaVo
+helper 测试 MultiMedia1：无论 D4 AFE route 是否运行，`hw:0,0` playback/capture 都在
+prepare 阶段返回 `EINVAL`；D4 完全退出时 Auxpcm ACDB 已校准且 legacy mixer 已恢复，
+仍不改变结果。当前运行时 manifest 也没有把 D0 列为必需设备，因此 MultiMedia1 只是
+保留兼容代码，不能作为本模块当前驱动的可用网络媒体入口。
+
+新的首选方案是保留已经在 Mac 上工作的 D4 + `f_audio` UAC 媒体路径，让真实 iPhone
+直接枚举模块为双向 USB Audio 设备；ECM/NCM 只承载电话控制协议。必须用真实 iPhone
+确认系统枚举、`AVAudioSession` 输入/输出选择、前后台限制和连续通话。如果 iOS 不能
+以应用所需方式访问该 UAC，才进入内核改造：为 `PCM_RX` 下行增加用户态 capture，为
+`PCM_TX` 上行增加用户态 playback，并保持与 UAC route 互斥。不能继续通过交换 D5/D6
+或猜测 ALSA 编号解决方向问题。
 
 ## 7. 控制协议
 

@@ -10,9 +10,11 @@
 - 网络模式可复用 VoLTE D4 route，但不会写
   `/sys/class/android_usb/f_audio/audio_enable`，避免抢占 USB Audio。
 - 增加 `--probe-network-pcm`：打开 `hw:0,5` / `hw:0,6`，核对实机 256 字节
-  period，采集 D6 约 3 秒并输出 `frames`、`peak`、`nonzero_samples`。
+  period，采集 D6 约 3 秒并输出 `frames`、`peak`、`nonzero_samples`；该探针只能描述
+  AFE proxy 数据，不能单独证明电话上下行方向。
 - 增加带 HMAC-SHA256（32 字节 pairing key，包内截取 16 字节 tag）的 IPv4 UDP
-  媒体模式：D5 接收上行、D6 发送下行，固定 peer、session、端口和 USB 网卡绑定。
+  媒体模式，固定 peer、session、端口和 USB 网卡绑定。协议与节拍实现已通过回归，
+  但其中 D5 上行、D6 下行的 PCM 映射已被实通话否定，当前不能用于双向通话。
 - 严格拒绝未提供 peer、token、interface 或 session-id 的网络启动。
 - 包校验包含 magic、版本、方向、长度、session-id、peer 地址/端口、认证标签和递增序号。
 - 256 字节帧使用 8 kHz sample-clock 时间戳；下行即使 PCM read 在空闲态快速返回，
@@ -38,6 +40,15 @@
   `audio_enable` 保持 0。无活动通话时 D6 为全零，不能据此确认实际语音方向。
 - loopback 网络会话在没有合法上行 HMAC 包时按预期 3 秒超时；期间收发各 188 个
   256 字节媒体包，与 16 ms 节拍吻合。退出后 D4/D5/D6 全部关闭，USB Audio 仍为 0。
+- 已在活动电话中让对端持续说话，并对 D6 做 3 秒只读采样。USB gadget 音频释放后，
+  D5/D6 均由 `RUNNING` 变为 `closed`；探测得到 `peak=11788`、
+  `nonzero_samples=23515`。后续 DAPM 拓扑证明 D6 位于 `PCM_TX`/VoLTE 上行输入侧，
+  且该 PCM 空闲读取不会按时钟推进，因此这些非零值可能是 gadget 关闭前的残留环形
+  缓冲，不能作为运营商下行证据。原先的下行确认结论已撤回。
+- 已在同一活动电话中通过模块自带 `aplay` 向 D5 写入 0.4 秒、600 Hz、峰值约
+  -24 dBFS 的限幅测试音，并再次写入 1 秒、700 Hz、约 -9 dBFS 的测试音；D5 两次均
+  完整播放，但通话对端均未听到。实时 DAPM 显示 D5 位于 `PCM_RX` 一侧，而 VoLTE
+  上行是 `PCM_TX -> VoLTE_UL`，因此 D5 不是可直接写入的蜂窝上行端点。
 
 ## ARM 构建记录
 
@@ -95,6 +106,25 @@ ELF 类别、ARMv7、soft-float、解释器、RELRO、NOW、非可执行栈、�
   必须服从硬件 period，iOS 音频侧另做重分帧，不能反过来强迫驱动使用 20 ms。
 - 空闲态 D6 的 3 秒直接探测曾返回 9759 个全零帧，证明 `quec_read_pcm()` 不能充当
   网络时钟。加入单调时钟 pacer 后，同样 3 秒 loopback 会话稳定为 188 包，没有静音洪泛。
+- 活动 USB Audio 会通过 gadget 占用 D5/D6；即使 helper 的 `/proc/<pid>/fd` 只有 D4，
+  ALSA status 仍会把 D5/D6 的 owner 关联到该 route，第二个 PCM open 返回 `EBUSY`。
+  因此不能在现有 UAC 会话旁边并行探测网络 PCM。实测采用带退出 trap 的临时脚本，
+  只把 `audio_enable` 从 1 短暂切到 0，保留既有 AFE mixer，完成只读采样后立即写回 1。
+  这是诊断手段，不是生产切换协议。
+- 模块自带 `aplay` 不是桌面版 ALSA CLI：选项名不同，而且即使传入采样格式仍要求
+  RIFF/WAV。它还会截断较长输入路径；`/tmp/mavo-live-probe/uplink-600hz.pcm` 被截为
+  不存在的路径。最终使用短路径 `/tmp/u.wav` 和标准 44 字节 WAV 头才成功播放。
+- 不能用 ALSA 设备编号推断逻辑方向。实机 DAPM 明确显示
+  `VoLTE_DL -> AFE_PCM_RX_Voice Mixer -> PCM_RX` 与
+  `PCM_TX -> VoLTE_Tx Mixer -> VoLTE_UL`。D5 playback 写入 `PCM_RX` 不会进入上行；
+  D6 capture 读取 `PCM_TX` 也不能直接当作蜂窝下行。
+- 已通过 BusyBox `script` 创建伪终端，让现有 helper 使用真实 `quec_pcm_open()` 尝试
+  `hw:0,0`。在 D4 AFE route 仍运行时，D0 playback 和 capture 都在 prepare 阶段返回
+  `EINVAL`；退出后 D0 关闭、两个 MultiMedia1 mixer 恢复 off，原 D4 route 正常。
+  此后又在 D4 完全退出、`audio_enable=0`、Auxpcm ACDB 已校准的状态下，分别用候选
+  helper 与固定哈希的上游 MaVo helper 重试；D0 双向仍全部 `EINVAL`。当前运行时
+  manifest 本来也只要求 D4/D5/D6，不要求 D0，因此保留的 MultiMedia1 默认模式不能
+  作为当前 QDC507 UAC 驱动上的可用网络媒体入口。
 - 旧 ADB sync 即使发送 mode `0100600`，落盘权限仍可能带组/其他位。pairing key 部署后
   必须显式 `chmod 600` 并 `stat` 回读；helper 会 fail closed 拒绝权限过宽的密钥。
 
@@ -107,7 +137,10 @@ USB ADB 路径，不要据此判断模块未连接。
 
 ## 尚未声称完成
 
-- 尚未在活动电话中获得 D6 非零语音，也未验证 D5 确为上行；需要带对端语音的实通话。
+- D5/D6 的候选双向映射已被实通话否定；D6 非零样本不能归因为下行，D5 测试音也没有
+  到达通话对端；D0/MultiMedia1 在当前运行时也无法 prepare。下一步优先验证真实 iPhone
+  能否直接把模块的双向 UAC 作为 `AVAudioSession` 输入/输出，网络只承担控制；若不能，
+  必须修改内核驱动暴露方向正确的用户态 PCM，不能继续靠猜测设备号实现。
 - 当前媒体循环没有 40–60 ms 抖动缓冲，也没有控制面握手；session-id 需由后续 daemon 每通电话生成并传给双方。
 - 模块当前 USB functions 为 `diag,serial,rmnet,ffs,audio`；虽然内部已有
   `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空且 macOS 没有对应 `en*` 接口。
