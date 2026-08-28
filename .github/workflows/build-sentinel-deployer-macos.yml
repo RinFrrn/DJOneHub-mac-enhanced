@@ -25,7 +25,9 @@ jobs:
             cmd/djonehub-macos/adb_timeout.go \
             cmd/djonehub-macos/adb_timeout_test.go \
             cmd/djonehub-macos/module_sentinel_common.go \
-            cmd/djonehub-macos/module_sentinel_common_test.go
+            cmd/djonehub-macos/module_sentinel_common_test.go \
+            cmd/djonehub-macos/module_qmi_probe_common.go \
+            cmd/djonehub-macos/module_qmi_probe_common_test.go
 
   package:
     needs: unit-tests
