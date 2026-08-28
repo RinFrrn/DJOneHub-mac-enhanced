@@ -519,6 +519,8 @@ final class ModuleNetworkProbe: ObservableObject {
     private let pathMonitor = NWPathMonitor()
     private let pathQueue = DispatchQueue(label: "DJOneHubUACProbe.network-path")
     private var connection: NWConnection?
+    private var probeTimeoutTask: Task<Void, Never>?
+    private var probeGeneration = 0
 
     init() {
         pathMonitor.pathUpdateHandler = { [weak self] path in
@@ -535,12 +537,16 @@ final class ModuleNetworkProbe: ObservableObject {
 
     deinit {
         pathMonitor.cancel()
+        probeTimeoutTask?.cancel()
         connection?.cancel()
     }
 
     func probeControlPort() {
+        probeTimeoutTask?.cancel()
         connection?.cancel()
         connection = nil
+        probeGeneration &+= 1
+        let generation = probeGeneration
         isTesting = true
         stateText = "连接中"
         detailText = "正在探测 \(host):\(port)"
@@ -550,17 +556,31 @@ final class ModuleNetworkProbe: ObservableObject {
         let endpoint = NWEndpoint.Host(host)
         let connection = NWConnection(host: endpoint, port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         self.connection = connection
+        probeTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.probeGeneration == generation, self.isTesting else { return }
+            self.connection?.cancel()
+            self.connection = nil
+            self.isTesting = false
+            self.stateText = "探测超时"
+            self.latencyText = "> 8 s"
+            self.detailText = "TCP 连接未在 8 秒内完成；请检查 iPhone 的 ECM 地址和模块供电"
+        }
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             Task { @MainActor in
                 guard let self else { return }
                 switch state {
                 case .ready:
+                    self.probeTimeoutTask?.cancel()
                     self.isTesting = false
                     self.stateText = "控制端口可达"
                     self.latencyText = String(format: "%.0f ms", Date().timeIntervalSince(started) * 1_000)
                     self.detailText = "TCP \(self.host):\(self.port) 已建立；模块 daemon 已监听"
                     connection?.cancel()
+                    self.connection = nil
                 case .failed(let error):
+                    self.probeTimeoutTask?.cancel()
                     self.isTesting = false
                     self.latencyText = String(format: "%.0f ms", Date().timeIntervalSince(started) * 1_000)
                     if case let .posix(code) = error, code == .ECONNREFUSED {
@@ -570,7 +590,12 @@ final class ModuleNetworkProbe: ObservableObject {
                         self.stateText = "控制端口不可达"
                         self.detailText = Self.errorText(error)
                     }
+                    self.connection = nil
+                case .waiting(let error):
+                    self.stateText = "等待网络"
+                    self.detailText = Self.errorText(error)
                 case .cancelled:
+                    self.probeTimeoutTask?.cancel()
                     if self.isTesting {
                         self.isTesting = false
                         self.stateText = "探测已取消"
