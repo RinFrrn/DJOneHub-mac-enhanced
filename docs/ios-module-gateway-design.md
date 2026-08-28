@@ -165,6 +165,18 @@ USB 数据接口：bInterfaceClass=10
 - active 与 idle 状态间隔 1 s。
 - 能可靠接收 URC 时优先用事件，轮询作为校验和恢复手段。
 
+#### 3.1.1 ECM 闭环 sentinel
+
+在真正接入内部 AT 通道前，可以先部署仓库中的 `module/djonehubd.c` 做网络闭环
+验证。该程序只绑定 `192.168.225.1:45750`、接受 TCP 连接并返回固定健康响应，不
+执行 AT、拨号、PCM、shell 或持久化配置。它的目的仅是把 iOS 探针从 `ECONNREFUSED`
+推进到“控制端口可达”，证明 ECM 地址、路由和模块侧监听路径正确。
+
+模块上的 `POSIX error 61` 等价于 `ECONNREFUSED`，表示链路已到达目标地址但没有
+监听进程；这不是 iOS 本地网络权限失败。sentinel 必须使用 QDC507 匹配的 glibc
+sysroot 构建并以前台临时方式运行，验证完成后退出。生产版 `djonehubd` 仍需另行
+实现配对认证、AT 通道串行化和有界状态机，不能直接把 sentinel 注册进持久启动脚本。
+
 ### 3.2 `mavo-pcm-gateway`
 
 `mavo-pcm-gateway` 只负责实时媒体和严格回滚：

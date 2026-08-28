@@ -62,6 +62,22 @@ xcodebuild \
 当前 `djonehubd` 尚未实现，因而出现“端口未监听”是预期结果。不要把互联网可访问
 误认为控制 daemon 已就绪；生产通话仍需先完成模块侧控制面和方向正确的 PCM 驱动。
 
+如果界面显示 `POSIX 错误 61`，它是 `ECONNREFUSED` 的系统表示，含义相同：ECM
+链路已经到达模块，但 `45750` 没有监听进程。仓库现在提供一个仅用于闭环验证的
+最小 sentinel：`module/djonehubd.c`。它只绑定 `192.168.225.1:45750` 并返回健康
+响应，不会执行 AT、拨号或 PCM。必须使用匹配 QDC507 glibc 的模块 sysroot 构建，
+并以前台临时方式部署；不要把它当成生产通话服务或写入持久启动分区。
+
+```sh
+MAVO_MODULE_ROOTFS=/path/to/qdc507/rootfs \
+MAVO_CROSS_DEV_ROOT=/path/to/usr/arm-linux-gnueabi \
+./scripts/build_djonehubd_armel.sh --module-sysroot
+```
+
+部署后重新点击探针，预期从“端口未监听”变为“控制端口可达”。如果仍为 61，先在
+模块 shell 中确认进程和监听地址，再检查 `192.168.225.1` 是否仍属于 USB 网卡；不
+要通过修改 USB composition 或刷写分区来“修复”端口问题。
+
 若只有输入或只有输出，应先导出日志，不要修改模块持久 USB composition。若完全没有
 USB Audio，下一步是核对模块 gadget descriptor 与 iPhone 枚举，不是猜测其他 ALSA
 设备号。

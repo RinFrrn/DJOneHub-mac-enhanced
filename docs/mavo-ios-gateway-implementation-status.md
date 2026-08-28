@@ -165,6 +165,11 @@ USB ADB 路径，不要据此判断模块未连接。
   正确的用户态 PCM，并验证可回滚的 ECM/NCM；不能继续靠猜测 ALSA 设备号实现。
 - iOS 探针已在真实 iPhone + QDC507 模块上完成 UAC 枚举和拆向验证；尚未声称它能在
   一个 Audio Session 中完成全双工蜂窝通话。
+- iOS ECM 探针已确认 `POSIX error 61` 为 `ECONNREFUSED`：iPhone 到
+  `192.168.225.1` 的网络链路可达，但模块侧 `45750` 没有监听进程。已新增
+  `module/djonehubd.c` 及构建脚本作为仅返回健康响应的临时 sentinel；它不执行 AT、
+  不驱动 PCM，也不应注册为持久启动服务。sentinel 验证通过后，才能继续实现生产
+  `djonehubd` 的配对认证、AT 串行化和通话状态机。
 - 当前媒体循环没有 40–60 ms 抖动缓冲，也没有控制面握手；session-id 需由后续 daemon 每通电话生成并传给双方。
 - 模块基线 USB functions 为 `diag,serial,rmnet,ffs,audio`；2026-08-28 通过临时
   `usbnet=1` 已在 Mac 上验证 ECM，新增 `en10` 并获得 `192.168.225.28/24`，
