@@ -1,0 +1,51 @@
+name: Build sentinel deployer for macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Test common sentinel validation
+        run: go test ./cmd/djonehub-macos
+
+  package:
+    needs: unit-tests
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install build prerequisites
+        run: brew install pkg-config
+
+      - name: Build universal test package
+        run: ./scripts/package-macos-universal.sh v1.2.11-sentinel-deployer
+
+      - name: Upload test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DJOneHub-macOS-universal-v1.2.11-sentinel-deployer
+          path: |
+            dist/release/DJOneHub-macOS-universal-v1.2.11-sentinel-deployer.zip
+            dist/release/DJOneHub-macOS-universal-v1.2.11-sentinel-deployer.zip.sha256
+          if-no-files-found: error

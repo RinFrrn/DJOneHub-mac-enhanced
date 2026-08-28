@@ -82,6 +82,38 @@ MAVO_CROSS_DEV_ROOT=/path/to/usr/arm-linux-gnueabi \
 `djonehubd-armv7-sentinel` artifact。Action 使用静态 ARMv7 构建，适合本次临时
 连通性验证；它不等价于链接 QDC507 sysroot 的生产二进制，也不会自动上传或写入模块。
 
+### 一次性重启启动
+
+模块从 Mac 换接 iPhone 时会断电，单纯在 `/tmp` 运行的进程会消失。经用户明确确认后，
+测试版 DJOneHub 可以把固定 SHA-256 的 sentinel 写到 `/usrdata/djonehub/sentinel/`，
+并建立 `/etc/rc5.d/S98djonehub-sentinel` 启动链接。启动标记会在执行前删除，所以无论
+启动成功还是失败，下一次重启都不会自动重试。
+
+先通过 `.github/workflows/build-sentinel-deployer-macos.yml` 生成并安装测试版 macOS
+包，再保持模块连接 Mac，执行：
+
+```sh
+curl -sS -X POST http://127.0.0.1:7575/api/ios/sentinel/install-once \
+  -H 'Content-Type: application/json' \
+  -d '{"confirm":true,"artifact_path":"/Users/rin/Downloads/djonehubd-armv7-sentinel/djonehubd.armv7"}'
+```
+
+接口会依次验证本地 ELF 与固定哈希、模块端哈希、当前启动可执行性及 TCP 监听状态；
+全部通过后才短暂把根文件系统挂为可写、建立唯一启动链接并立即恢复为只读，最后创建
+一次性标记。随后把模块换接 iPhone，等待最多 60 秒，再测试 `192.168.225.1:45750`。
+
+测试结束后把模块接回 Mac并卸载：
+
+```sh
+curl -sS -X POST http://127.0.0.1:7575/api/ios/sentinel/uninstall \
+  -H 'Content-Type: application/json' \
+  -d '{"confirm":true}'
+```
+
+卸载仅在启动链接仍精确指向 DJOneHub 脚本时执行；同名路径属于其他文件时会拒绝删除。
+该流程不修改 MTD、SBL、内核或 USB composition，但会在验证期间写入 `/usrdata` 和一个
+根文件系统符号链接，因此仍必须保留模块备份和 Mac ADB 恢复路径。
+
 若只有输入或只有输出，应先导出日志，不要修改模块持久 USB composition。若完全没有
 USB Audio，下一步是核对模块 gadget descriptor 与 iPhone 枚举，不是猜测其他 ALSA
 设备号。
