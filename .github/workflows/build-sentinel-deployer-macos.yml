@@ -2,6 +2,13 @@ name: Build sentinel deployer for macOS
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "cmd/djonehub-macos/**"
+      - "scripts/package-macos-universal.sh"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/build-sentinel-deployer-macos.yml"
 
 permissions:
   contents: read
