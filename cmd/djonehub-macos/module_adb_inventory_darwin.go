@@ -46,7 +46,13 @@ func (a *app) moduleADBInventoryAPI(w http.ResponseWriter, _ *http.Request) {
 
 	output, status, err := adb.shellChecked(moduleADBInventoryCommand, 15*time.Second)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "模块 ADB 盘点失败: "+err.Error())
+		// Preserve any bytes received before the shell transport failed.  This
+		// is still read-only and makes BusyBox/firmware shell incompatibilities
+		// diagnosable without adding an arbitrary command endpoint.
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":     "模块 ADB 盘点失败: " + err.Error(),
+			"inventory": strings.TrimSpace(output),
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
