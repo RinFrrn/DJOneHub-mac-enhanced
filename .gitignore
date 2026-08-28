@@ -21,6 +21,8 @@ backups/
 .idea/
 .vscode/
 *.swp
+**/xcuserdata/
+*.xcuserstate
 
 # Frontend dependencies are not used by the native DJOneHub page
 node_modules/
