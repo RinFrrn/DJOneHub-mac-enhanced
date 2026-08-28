@@ -25,6 +25,24 @@
 的完成条件。生产方案仍需把电话上下行都暴露给模块用户态网关，经 ECM/NCM 传给 App；
 iPhone 的 Audio Session 只使用一套正常的内置/耳麦通话路由。
 
+### 1.2 iPhone 27 真机拆向验证
+
+在 iPhone 18,4、iOS 27.0 和 QDC507 `BAIWANG` UAC 实机上，探针得到以下结果：
+
+- 模块空闲时可枚举为 `AC Interface` 输入和 `AS Interface` 输出，均为单声道
+  USB Audio，8 kHz、23 ms buffer。
+- 选择内置麦克风后，路由为“内置麦克风输入 + 模块 USB 输出”，采样率 48 kHz；
+  `AVAudioEngine` 可稳定把麦克风 PCM 渲染到 USB 输出，输入电平随说话变化。
+- 选择“USB 输入 + iPhone 扬声器”时，iOS 的 `overrideOutputAudioPort(.speaker)` 会
+  同时把输入强制切回内置麦克风。模块 USB 输入仍列在 `availableInputs`，但为 0 ch，
+  不能被当前音频图读取。
+- 首次在路由切换后立即建图曾触发 `com.apple.coreaudio.avfaudio -10868` 并导致 App
+  退出；等待最后一个 route-change 事件稳定 500 ms 并重建 `AVAudioEngine` 后可避免。
+
+这组实测把“两个方向分别可用”和“同一会话全双工可用”明确区分开：前者成立，后者
+仍被 iOS 单一当前输入与扬声器路由规则阻断。探针中的扬声器模式只用于记录该限制，
+不是生产通话实现。
+
 仓库已增加 `ios/DJOneHubUACProbe`，可把两个方向拆开验证：选择 USB 输入观察电话下行，
 或选择内置麦克风并在 USB 输出仍存在时短暂验证上行。即使两项分别成功，也不等于它们
 能在同一个 iOS Audio Session 中同时工作。

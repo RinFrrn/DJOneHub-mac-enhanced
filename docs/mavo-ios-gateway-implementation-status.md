@@ -8,15 +8,24 @@
 - 增加可编译的 iOS 17+ SwiftUI 真机探针 `ios/DJOneHubUACProbe`。它只使用
   `AVAudioSession` / `AVAudioEngine` 公共 API，显示 current route、available inputs、
   端口 UID、声道、采样率、I/O buffer 和路由事件；可分别验证 USB 下行输入、USB
-  测试音上行以及“内置麦克风 -> USB 输出”。测试音和麦克风转发均有实际路由门禁，
-  不会在 USB 输出不存在时启动。
+  测试音上行、“内置麦克风 -> USB 输出”以及“USB 输入 -> iPhone 扬声器”。测试音、
+  麦克风转发和扬声器转发均有实际路由门禁，不会在目标输出不存在时启动。
+- 已在真实 iPhone 18,4 / iOS 27.0 + QDC507 `BAIWANG` UAC 上验证模块可枚举为双向
+  USB Audio：AC Interface 输入、AS Interface 输出，单声道，空闲双 USB 路由为 8 kHz
+  / 23 ms。内置麦克风 + USB 输出组合也可建立，输入 PCM 为 48 kHz、单声道、非交错
+  Linear PCM，`AVAudioEngine` 转发时 dBFS 随说话变化。
+- 已实测扬声器覆盖行为：请求“USB 输入 + iPhone 扬声器”后，iOS 把当前输入同时切为
+  内置麦克风；模块 USB 输入仅留在 availableInputs 且报告 0 ch。因此 UAC 两个方向
+  不能在一个 iOS Audio Session 中组成全双工电话。
+- 已修复探针路由竞态：route/available-inputs 通知后等待 500 ms 稳定窗口，转发前重建
+  `AVAudioEngine`，避免 8 kHz/48 kHz 节点残留触发 `-10868` 崩溃。
 - 使用 Xcode 27 / iPhoneOS 27 SDK、deployment target iOS 17，对探针执行 arm64
   `CODE_SIGNING_ALLOWED=NO` 构建，结果 `BUILD SUCCEEDED`。CoreSimulator 在当前沙箱
   无法连接不影响 iphoneos 设备编译。
-- 复核 iOS Audio Session 路由能力后确认：现有模块 UAC 不能单独承载完整 iPhone
-  手持通话。普通/传统 multiroute 不能并行取得模块 USB 输入与内置麦克风；iOS 26.2
-  `dualRoute` 的第二设备类型也不包含 USB。探针因此用于拆向实测，不再作为生产媒体
-  架构本身。
+- 复核并实测 iOS Audio Session 路由能力后确认：现有模块 UAC 不能单独承载完整 iPhone
+  手持通话。普通/传统 multiroute 不能并行取得模块 USB 输入与内置麦克风；扬声器覆盖又会
+  把 USB 输入替换为内置麦克风。iOS 26+ `dualRoute` 的第二设备类型也不包含 USB。
+  探针因此用于拆向实测，不再作为生产媒体架构本身。
 
 - 将 `run_voice_route_session()` 拆为可复用、幂等的
   `voice_route_start()` / `voice_route_stop()`。
@@ -154,8 +163,8 @@ USB ADB 路径，不要据此判断模块未连接。
   到达通话对端；D0/MultiMedia1 在当前运行时也无法 prepare。Apple API 约束又否定了
   “UAC 全媒体、网络只控制”的完整 iPhone 通话方案。下一步必须修改内核驱动暴露方向
   正确的用户态 PCM，并验证可回滚的 ECM/NCM；不能继续靠猜测 ALSA 设备号实现。
-- iOS 探针尚未在真实 iPhone + 模块上运行；当前只声称源码/API 审计和 iphoneos arm64
-  构建通过，不声称 QDC507 gadget 已被 iOS 枚举为 `.usbAudio`。
+- iOS 探针已在真实 iPhone + QDC507 模块上完成 UAC 枚举和拆向验证；尚未声称它能在
+  一个 Audio Session 中完成全双工蜂窝通话。
 - 当前媒体循环没有 40–60 ms 抖动缓冲，也没有控制面握手；session-id 需由后续 daemon 每通电话生成并传给双方。
 - 模块当前 USB functions 为 `diag,serial,rmnet,ffs,audio`；虽然内部已有
   `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空且 macOS 没有对应 `en*` 接口。

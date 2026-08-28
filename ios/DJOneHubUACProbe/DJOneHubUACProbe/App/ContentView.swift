@@ -24,10 +24,11 @@ struct ContentView: View {
 
     private var statusSection: some View {
         Section("判定") {
-            Label(probe.verdict, systemImage: probe.isBidirectionalUSB ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(probe.isBidirectionalUSB ? .green : .orange)
+            Label(probe.verdict, systemImage: probe.isUsefulProbeRoute ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(probe.isUsefulProbeRoute ? .green : .orange)
 
             LabeledContent("Audio Session", value: probe.isSessionActive ? "已激活" : "未激活")
+            LabeledContent("路由状态", value: probe.isRouteStable ? "稳定" : "切换中")
             LabeledContent("输入电平", value: probe.meterText)
 
             ProgressView(value: probe.inputLevel)
@@ -88,22 +89,31 @@ struct ContentView: View {
                 probe.activateAndPreferBuiltInMic()
             }
 
+            Button("下行扬声器模式：USB 输入 + iPhone 扬声器") {
+                probe.activateUSBInputAndSpeaker()
+            }
+
             Button(probe.isMetering ? "停止输入电平" : "启动输入电平") {
                 probe.toggleMeter()
             }
-            .disabled(!probe.isSessionActive)
+            .disabled(!probe.isSessionActive || !probe.isRouteStable)
 
             Button("播放 0.5 秒安全测试音") {
                 probe.playTestTone()
             }
-            .disabled(!probe.isSessionActive || !probe.isUSBOutput)
+            .disabled(!probe.isSessionActive || !probe.isRouteStable || !probe.isUSBOutput)
 
             Button(probe.isForwardingUplink ? "停止麦克风上行" : "内置麦克风送往 USB 输出") {
                 probe.toggleUplinkForwarding()
             }
-            .disabled(!probe.isSessionActive || !probe.isBuiltInMicInput || !probe.isUSBOutput)
+            .disabled(!probe.isSessionActive || !probe.isRouteStable || !probe.isBuiltInMicInput || !probe.isUSBOutput)
 
-            Text("测试音为 700 Hz、峰值约 -24 dBFS，并且只有当前输出为 USB Audio 时才能播放。“麦克风上行”只有系统实际采用内置麦克风 + USB 输出时才能启动，声音会直接送给通话对端。切换模式会先停止音频引擎，避免误把模块下行回送给对端。")
+            Button(probe.isForwardingDownlink ? "停止扬声器下行" : "模块 USB 输入送往 iPhone 扬声器") {
+                probe.toggleDownlinkForwarding()
+            }
+            .disabled(!probe.isSessionActive || !probe.isRouteStable || !probe.isUSBInput || !probe.isBuiltInSpeakerOutput)
+
+            Text("测试音为 700 Hz、峰值约 -24 dBFS，并且只有当前输出为 USB Audio 时才能播放。“麦克风上行”只有系统实际采用内置麦克风 + USB 输出时才能启动；“扬声器下行”用于验证 iOS 是否允许 USB 输入与内置扬声器并行。切换模式会等待路由稳定并重建音频引擎，避免误把模块下行回送给对端。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
