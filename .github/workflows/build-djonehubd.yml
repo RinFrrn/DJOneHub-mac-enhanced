@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "module/djonehubd.c"
+      - "module/djonehub_qmi_probe.c"
       - "scripts/build_djonehubd_armel.sh"
       - ".github/workflows/build-djonehubd.yml"
 
@@ -24,6 +25,11 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
             libc6-dev-armel-cross linux-libc-dev-armel-cross
+
+      - name: Install Zig cross linker
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
 
       - name: Build static ARMv7 sentinel
         run: |
@@ -55,6 +61,41 @@ jobs:
           link=static (CI portability sentinel; not the production daemon)
           listen=192.168.225.1:45750
           scope=TCP health response only; no AT, PCM, shell, or persistence
+          EOF
+
+      - name: Build read-only QMI Voice compatibility probe
+        run: |
+          set -euxo pipefail
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -march=armv7-a -mfloat-abi=soft \
+            -std=c11 -O2 -fPIE -pie -fstack-protector-strong \
+            -D_FORTIFY_SOURCE=2 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror -Wl,-z,relro,-z,now \
+            module/djonehub_qmi_probe.c -ldl \
+            -o outputs/module/djonehub-qmi-probe.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-qmi-probe.armv7 \
+            outputs/module/djonehub-qmi-probe.armv7.unstripped
+          file outputs/module/djonehub-qmi-probe.armv7
+          readelf --file-header outputs/module/djonehub-qmi-probe.armv7
+          readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7
+          readelf --program-headers outputs/module/djonehub-qmi-probe.armv7
+          readelf --dynamic outputs/module/djonehub-qmi-probe.armv7
+          readelf --version-info outputs/module/djonehub-qmi-probe.armv7
+          test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Class:.*ELF32')" -eq 1
+          test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Machine:.*ARM')" -eq 1
+          test "$(readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
+          ! readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
+          test "$(readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -c '/lib/ld-linux.so.3')" -eq 1
+          ! readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'
+          sha256sum outputs/module/djonehub-qmi-probe.armv7 > outputs/module/djonehub-qmi-probe.armv7.sha256
+          cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
+
+          qmi_probe=dynamically linked ARMv7 EABI5 soft-float, glibc <= 2.7
+          qmi_probe_scope=read-only QMI Voice 2/0x4D/6 initialization + Get All Call Info
+          qmi_probe_writes=no call control, no modem configuration, no persistence
           EOF
 
       - name: Upload sentinel artifact
