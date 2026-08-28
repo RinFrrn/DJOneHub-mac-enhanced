@@ -18,6 +18,8 @@ const (
 	sentinelRemoteBinary   = sentinelRemoteDir + "/djonehubd.armv7"
 	sentinelRemoteScript   = sentinelRemoteDir + "/start-once.sh"
 	sentinelRemoteMarker   = sentinelRemoteDir + "/run-once"
+	sentinelBootStateFile  = sentinelRemoteDir + "/last-start.state"
+	sentinelBootLogFile    = sentinelRemoteDir + "/last-start.log"
 	sentinelInitLink       = "/etc/rc5.d/S98djonehub-sentinel"
 	sentinelPIDFile        = "/run/djonehub-sentinel.pid"
 	sentinelLogFile        = "/tmp/djonehub-sentinel.log"
@@ -108,23 +110,39 @@ const sentinelStartOnceScript = `#!/bin/sh
 base=/usrdata/djonehub/sentinel
 binary="$base/djonehubd.armv7"
 marker="$base/run-once"
-log=/tmp/djonehub-sentinel.log
+state="$base/last-start.state"
+log="$base/last-start.log"
 pidfile=/run/djonehub-sentinel.pid
 
 test -f "$marker" || exit 0
 rm -f "$marker"
+printf 'marker-consumed\n' >"$state"
+{
+    echo 'djonehub sentinel: one-shot marker consumed'
+    printf 'uptime='; cat /proc/uptime 2>/dev/null || true
+} >"$log"
 sync
 
 (
     attempt=0
     while test "$attempt" -lt 60; do
-        if ip addr show bridge0 2>/dev/null | grep -q '192\.168\.225\.1'; then
+        if ip addr show 2>/dev/null | grep -q 'inet 192\.168\.225\.1/'; then
+            printf 'listener-starting\n' >"$state"
+            echo 'djonehub sentinel: 192.168.225.1 ready; starting listener'
+            ip addr show 2>/dev/null || true
             exec "$binary" --listen-address 192.168.225.1 --port 45750
+            result=$?
+            printf 'exec-failed:%s\n' "$result" >"$state"
+            echo "djonehub sentinel: listener exec failed: $result"
+            exit "$result"
         fi
         attempt=$((attempt + 1))
         sleep 1
     done
-    echo 'djonehub sentinel: bridge0 address did not become ready'
+    printf 'address-timeout\n' >"$state"
+    echo 'djonehub sentinel: 192.168.225.1 did not appear on any interface'
+    ip addr show 2>/dev/null || true
+    cat /proc/net/dev 2>/dev/null || true
 ) >>"$log" 2>&1 &
 echo "$!" >"$pidfile"
 exit 0

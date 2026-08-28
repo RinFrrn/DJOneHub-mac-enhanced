@@ -165,7 +165,10 @@ func (a *app) sentinelStatusAPI(w http.ResponseWriter, _ *http.Request) {
 	out, status, err := adb.shellChecked(
 		"printf 'binary=%s\\n' \"$(test -x '"+sentinelRemoteBinary+"' && echo yes || echo no)\"; "+
 			"printf 'marker=%s\\n' \"$(test -f '"+sentinelRemoteMarker+"' && echo armed || echo absent)\"; "+
-			"printf 'link=%s\\n' \"$(test -L '"+sentinelInitLink+"' && readlink '"+sentinelInitLink+"' || echo absent)\"",
+			"printf 'link=%s\\n' \"$(test -L '"+sentinelInitLink+"' && readlink '"+sentinelInitLink+"' || echo absent)\"; "+
+			"printf 'last_start_state=%s\\n' \"$(test -f '"+sentinelBootStateFile+"' && cat '"+sentinelBootStateFile+"' || echo absent)\"; "+
+			"echo 'last_start_log_begin'; test ! -f '"+sentinelBootLogFile+"' || tail -n 80 '"+sentinelBootLogFile+"'; "+
+			"echo 'last_start_log_end'",
 		8*time.Second,
 	)
 	if err != nil || status != 0 {
@@ -247,7 +250,8 @@ func (a *app) sentinelInstallOnceAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("sentinel install: init link installed")
 	if err := sentinelShell(adb,
-		": > '"+sentinelRemoteMarker+"' && chmod 600 '"+sentinelRemoteMarker+"' && sync",
+		"rm -f '"+sentinelBootStateFile+"' '"+sentinelBootLogFile+"' && "+
+			": > '"+sentinelRemoteMarker+"' && chmod 600 '"+sentinelRemoteMarker+"' && sync",
 		8*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "设置一次性启动标记失败: "+err.Error())
 		return
@@ -294,8 +298,8 @@ func (a *app) sentinelUninstallAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	cleanup := "rm -f '" + sentinelRemoteMarker + "' '" + sentinelRemoteScript + "' '" +
-		sentinelRemoteBinary + "' '" + sentinelPIDFile + "'; " +
+	cleanup := "rm -f '" + sentinelRemoteMarker + "' '" + sentinelBootStateFile + "' '" +
+		sentinelBootLogFile + "' '" + sentinelRemoteScript + "' '" + sentinelRemoteBinary + "' '" + sentinelPIDFile + "'; " +
 		"rmdir '" + sentinelRemoteDir + "' 2>/dev/null || true; sync"
 	if err := sentinelShell(adb, cleanup, 10*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "清理 sentinel 文件失败: "+err.Error())

@@ -87,7 +87,10 @@ MAVO_CROSS_DEV_ROOT=/path/to/usr/arm-linux-gnueabi \
 模块从 Mac 换接 iPhone 时会断电，单纯在 `/tmp` 运行的进程会消失。经用户明确确认后，
 测试版 DJOneHub 可以把固定 SHA-256 的 sentinel 写到 `/usrdata/djonehub/sentinel/`，
 并建立 `/etc/rc5.d/S98djonehub-sentinel` 启动链接。启动标记会在执行前删除，所以无论
-启动成功还是失败，下一次重启都不会自动重试。
+启动成功还是失败，下一次重启都不会自动重试。启动脚本不假设 USB 网卡名称；它等待
+任意接口出现 `192.168.225.1`。标记消费状态和最后一次接口快照会保存在
+`/usrdata/djonehub/sentinel/last-start.state` 与 `last-start.log`，接回 Mac 后可通过
+`GET /api/ios/sentinel` 读取，不依赖重启即丢失的 `/tmp`。
 
 先通过 `.github/workflows/build-sentinel-deployer-macos.yml` 生成并安装测试版 macOS
 包，再保持模块连接 Mac，执行：
@@ -101,6 +104,8 @@ curl -sS -X POST http://127.0.0.1:7575/api/ios/sentinel/install-once \
 接口会依次验证本地 ELF 与固定哈希、模块端哈希、当前启动可执行性及 TCP 监听状态；
 全部通过后才短暂把根文件系统挂为可写、建立唯一启动链接并立即恢复为只读，最后创建
 一次性标记。随后把模块换接 iPhone，等待最多 60 秒，再测试 `192.168.225.1:45750`。
+如果仍然超时，不要直接重复武装；先接回 Mac 调用状态接口，检查 `last_start_state` 和
+`last_start_log`，确认是地址未出现、可执行文件启动失败还是监听已开始。
 
 测试结束后把模块接回 Mac并卸载：
 

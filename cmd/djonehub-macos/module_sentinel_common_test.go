@@ -40,11 +40,23 @@ func TestSentinelStartScriptIsOneShot(t *testing.T) {
 	for _, required := range []string{
 		`test -f "$marker" || exit 0`,
 		`rm -f "$marker"`,
+		`state="$base/last-start.state"`,
+		`log="$base/last-start.log"`,
+		`ip addr show 2>/dev/null | grep -q 'inet 192\.168\.225\.1/'`,
+		`printf 'address-timeout\n' >"$state"`,
 		`--listen-address 192.168.225.1 --port 45750`,
 	} {
 		if !strings.Contains(sentinelStartOnceScript, required) {
 			t.Fatalf("start script missing %q", required)
 		}
+	}
+	if strings.Contains(sentinelStartOnceScript, "ip addr show bridge0") {
+		t.Fatal("start script still assumes the USB network interface is bridge0")
+	}
+	markerRemoval := strings.Index(sentinelStartOnceScript, `rm -f "$marker"`)
+	waitLoop := strings.Index(sentinelStartOnceScript, `while test "$attempt" -lt 60`)
+	if markerRemoval == -1 || waitLoop == -1 || markerRemoval > waitLoop {
+		t.Fatal("one-shot marker must be removed before the address wait loop")
 	}
 }
 
