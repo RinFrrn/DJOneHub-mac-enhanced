@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * Minimal module-side control-plane sentinel for the iPhone ECM path.
  *
