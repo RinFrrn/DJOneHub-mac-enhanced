@@ -166,9 +166,10 @@ USB ADB 路径，不要据此判断模块未连接。
 - iOS 探针已在真实 iPhone + QDC507 模块上完成 UAC 枚举和拆向验证；尚未声称它能在
   一个 Audio Session 中完成全双工蜂窝通话。
 - 当前媒体循环没有 40–60 ms 抖动缓冲，也没有控制面握手；session-id 需由后续 daemon 每通电话生成并传给双方。
-- 模块当前 USB functions 为 `diag,serial,rmnet,ffs,audio`；虽然内部已有
-  `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空且 macOS 没有对应 `en*` 接口。
-  当前 `rmnet` 不是普通 iPhone App 可使用的 USB Ethernet，必须另行验证可回滚的
-  ECM/NCM composition，IP 链路仍是阶段 A 的阻塞项。
+- 模块基线 USB functions 为 `diag,serial,rmnet,ffs,audio`；2026-08-28 通过临时
+  `usbnet=1` 已在 Mac 上验证 ECM，新增 `en10` 并获得 `192.168.225.28/24`，
+  IORegistry 显示 AppleUserECM 控制/数据接口，同时保留 USB AT、ADB 与 UAC。
+  这只证明 Mac 侧 ECM 枚举和 DHCP 成功；NCM 及 iPhone 侧网络访问仍未验证，恢复目标
+  是原始 `usbnet=0`。
 - 电话 AT/QMI 控制、iOS `Network.framework`/`VoiceProcessingIO` 客户端、持久化启动仍未实施。
 - 未写入模块持久分区，也未修改发布包。

@@ -4,7 +4,7 @@
 
 目标是在不依赖 Mac 或另一台常驻设备的情况下，让 iPhone 通过 USB 直连大疆第一代 4G 模块，在前台完成拨号、接听、挂断和双向通话。
 
-当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机当前启用的是 Qualcomm 厂商 `rmnet`，不是已经可用的通用 USB Ethernet；ECM/NCM 组合验证是独立前置门槛。
+当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机基线是 Qualcomm 厂商 `rmnet`，不是通用 USB Ethernet；ECM/NCM 组合验证是独立前置门槛。2026-08-28 已在 Mac 上临时验证 ECM，NCM 仍未验证。
 
 ### 1.1 现有 UAC 不能单独组成 iPhone 通话
 
@@ -125,6 +125,24 @@ claim 这个厂商 USB function。
 自动回滚窗口，确认 Mac 和真实 iPhone 的枚举、DHCP/静态地址、ADB/AT 救援入口及冷启动
 恢复。未通过这项测试前，不得把“USB Ethernet 可用”作为既成事实，也不得永久改写
 `USBCFG`。
+
+### 2.2 ECM 临时实测（2026-08-28）
+
+在未修改 `USBCFG`、MTD 或启动脚本的前提下，通过 `AT+QCFG="usbnet",1` 并重启模块，
+Mac 成功枚举出 ECM：
+
+```text
+接口：en10
+IPv4：192.168.225.28/24
+模块网关：192.168.225.1（模块 bridge0）
+USB 控制接口：bInterfaceClass=2, bInterfaceSubClass=6
+USB 数据接口：bInterfaceClass=10
+驱动：AppleUserECM / AppleUserECMData
+```
+
+同一枚举中仍保留 USB AT（接口 2）、ADB（接口 6）和 UAC（接口 7–9），说明 QDC507
+当前组合可以在保留救援/音频接口的同时提供 ECM。该次切换的恢复目标仍是原始
+`usbnet=0`；NCM（以及 iPhone 对 ECM 的真实网络访问）尚未通过实机测试。
 
 ## 3. 进程职责
 
