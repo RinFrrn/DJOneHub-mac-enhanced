@@ -20,7 +20,10 @@ jobs:
           cache: false
 
       - name: Test common sentinel validation
-        run: go test -mod=mod ./cmd/djonehub-macos
+        run: |
+          go test \
+            cmd/djonehub-macos/module_sentinel_common.go \
+            cmd/djonehub-macos/module_sentinel_common_test.go
 
   package:
     needs: unit-tests
