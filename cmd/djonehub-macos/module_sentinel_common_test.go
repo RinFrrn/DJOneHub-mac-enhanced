@@ -54,3 +54,21 @@ func TestSentinelCleanShellOutput(t *testing.T) {
 		t.Fatalf("clean shell output = %q", got)
 	}
 }
+
+func TestSentinelLinkCommandsFailClosed(t *testing.T) {
+	verification := "test \"$(readlink '" + sentinelInitLink + "')\" = '" + sentinelRemoteScript + "'"
+	for name, command := range map[string]string{
+		"install": sentinelInstallLinkCommand(),
+		"remove":  sentinelRemoveLinkCommand(),
+	} {
+		if !strings.Contains(command, verification+" && ") {
+			t.Errorf("%s command does not chain link verification with &&", name)
+		}
+		if strings.Contains(command, verification+"; ") {
+			t.Errorf("%s command can mask a failed link verification", name)
+		}
+		if !strings.Contains(command, "mount -o remount,ro / && root_rw=0") {
+			t.Errorf("%s command does not verify the read-only remount", name)
+		}
+	}
+}

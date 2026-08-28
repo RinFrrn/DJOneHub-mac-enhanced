@@ -39,6 +39,29 @@ func sentinelCleanShellOutput(output string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
+func sentinelInstallLinkCommand() string {
+	return "root_rw=0; " +
+		"restore_ro() { if test \"$root_rw\" = 1; then sync; mount -o remount,ro /; fi; }; " +
+		"trap restore_ro EXIT HUP INT TERM; " +
+		"mount -o remount,rw / && root_rw=1 && " +
+		"test ! -e '" + sentinelInitLink + "' && test ! -L '" + sentinelInitLink + "' && " +
+		"ln -s '" + sentinelRemoteScript + "' '" + sentinelInitLink + "' && " +
+		"sync && mount -o remount,ro / && root_rw=0 && " +
+		"test \"$(readlink '" + sentinelInitLink + "')\" = '" + sentinelRemoteScript + "' && " +
+		"awk '$2 == \"/\" && $4 ~ /(^|,)ro(,|$)/ { found=1 } END { exit found ? 0 : 1 }' /proc/mounts"
+}
+
+func sentinelRemoveLinkCommand() string {
+	return "root_rw=0; " +
+		"restore_ro() { if test \"$root_rw\" = 1; then sync; mount -o remount,ro /; fi; }; " +
+		"trap restore_ro EXIT HUP INT TERM; " +
+		"mount -o remount,rw / && root_rw=1 && " +
+		"test \"$(readlink '" + sentinelInitLink + "')\" = '" + sentinelRemoteScript + "' && " +
+		"rm -f '" + sentinelInitLink + "' && sync && " +
+		"mount -o remount,ro / && root_rw=0 && test ! -e '" + sentinelInitLink + "' && " +
+		"awk '$2 == \"/\" && $4 ~ /(^|,)ro(,|$)/ { found=1 } END { exit found ? 0 : 1 }' /proc/mounts"
+}
+
 func defaultSentinelArtifactPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
