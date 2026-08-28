@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -193,52 +194,65 @@ func (a *app) sentinelInstallOnceAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("sentinel install: waiting for module operation lock")
 	a.moduleVoiceOpMu.Lock()
 	defer a.moduleVoiceOpMu.Unlock()
+	log.Printf("sentinel install: module operation lock acquired")
 	adb, err := openDJIUSBADB()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer adb.Close()
+	log.Printf("sentinel install: USB ADB opened")
 	if err := sentinelRequireRoot(adb); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	log.Printf("sentinel install: module root confirmed")
 	if err := sentinelShell(adb,
 		"test -d /usrdata && mkdir -p '"+sentinelRemoteDir+"' && chmod 700 '"+sentinelRemoteDir+"'",
 		8*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "准备 /usrdata 目录失败: "+err.Error())
 		return
 	}
-	if err := adb.push(data, sentinelRemoteBinary, 0o100755, 30*time.Second); err != nil {
+	log.Printf("sentinel install: pushing binary (%d bytes)", len(data))
+	if err := adb.pushContext(r.Context(), data, sentinelRemoteBinary, 0o100755, 30*time.Second); err != nil {
+		log.Printf("sentinel install: binary push failed: %v", err)
 		writeError(w, http.StatusBadGateway, "推送 sentinel 失败: "+err.Error())
 		return
 	}
-	if err := adb.push([]byte(sentinelStartOnceScript), sentinelRemoteScript, 0o100755, 15*time.Second); err != nil {
+	log.Printf("sentinel install: binary pushed")
+	if err := adb.pushContext(r.Context(), []byte(sentinelStartOnceScript), sentinelRemoteScript, 0o100755, 15*time.Second); err != nil {
+		log.Printf("sentinel install: start script push failed: %v", err)
 		writeError(w, http.StatusBadGateway, "推送启动脚本失败: "+err.Error())
 		return
 	}
+	log.Printf("sentinel install: start script pushed")
 	verify := "chmod 755 '" + sentinelRemoteBinary + "' '" + sentinelRemoteScript + "' && " +
 		"test \"$(sha256sum '" + sentinelRemoteBinary + "' | awk '{print $1}')\" = '" + sentinelExpectedSHA256 + "'"
 	if err := sentinelShell(adb, verify, 12*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "模块端 sentinel 校验失败: "+err.Error())
 		return
 	}
+	log.Printf("sentinel install: module hashes verified")
 	if err := sentinelValidateTemporary(adb); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	log.Printf("sentinel install: temporary listener verified")
 	if err := sentinelInstallInitLink(adb); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	log.Printf("sentinel install: init link installed")
 	if err := sentinelShell(adb,
 		": > '"+sentinelRemoteMarker+"' && chmod 600 '"+sentinelRemoteMarker+"' && sync",
 		8*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "设置一次性启动标记失败: "+err.Error())
 		return
 	}
+	log.Printf("sentinel install: armed for one boot")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"installed":       true,
 		"armed_once":      true,

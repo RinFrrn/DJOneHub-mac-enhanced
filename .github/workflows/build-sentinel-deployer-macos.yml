@@ -22,6 +22,8 @@ jobs:
       - name: Test common sentinel validation
         run: |
           go test \
+            cmd/djonehub-macos/adb_timeout.go \
+            cmd/djonehub-macos/adb_timeout_test.go \
             cmd/djonehub-macos/module_sentinel_common.go \
             cmd/djonehub-macos/module_sentinel_common_test.go
 

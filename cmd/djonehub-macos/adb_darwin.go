@@ -10,6 +10,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -163,7 +164,7 @@ func (a *adbClient) bulkWrite(payload []byte, timeout time.Duration) error {
 		(*C.uchar)(unsafe.Pointer(&payload[0])),
 		C.int(len(payload)),
 		&transferred,
-		C.uint(timeout.Milliseconds()),
+		C.uint(adbUSBTimeoutMilliseconds(timeout)),
 	)
 	if rc != 0 {
 		return fmt.Errorf("USB ADB bulk write: %s", usbErrorName(rc))
@@ -182,7 +183,7 @@ func (a *adbClient) bulkRead(buf []byte, timeout time.Duration) (int, error) {
 		(*C.uchar)(unsafe.Pointer(&buf[0])),
 		C.int(len(buf)),
 		&transferred,
-		C.uint(timeout.Milliseconds()),
+		C.uint(adbUSBTimeoutMilliseconds(timeout)),
 	)
 	if rc != 0 {
 		if rc == C.LIBUSB_ERROR_TIMEOUT {
@@ -423,7 +424,7 @@ func (a *adbClient) openServiceLocked(service string) (adbStream, error) {
 	return adbStream{}, fmt.Errorf("等待模块打开 ADB 服务超时")
 }
 
-func (a *adbClient) writeStreamLocked(stream adbStream, data []byte, timeout time.Duration) error {
+func (a *adbClient) writeStreamLocked(stream adbStream, data []byte, deadline time.Time) error {
 	const (
 		cmdWRTE = 0x45545257
 		cmdOKAY = 0x59414b4f
@@ -431,11 +432,18 @@ func (a *adbClient) writeStreamLocked(stream adbStream, data []byte, timeout tim
 	if len(data) > a.remoteMaxPayload {
 		return errors.New("ADB sync 数据块过大")
 	}
-	if err := a.sendLocked(cmdWRTE, stream.localID, stream.remoteID, data, timeout); err != nil {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return errADBTimeout
+	}
+	if err := a.sendLocked(cmdWRTE, stream.localID, stream.remoteID, data, remaining); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	msg, err := a.receiveLocked(deadline)
+	ackDeadline := time.Now().Add(10 * time.Second)
+	if deadline.Before(ackDeadline) {
+		ackDeadline = deadline
+	}
+	msg, err := a.receiveLocked(ackDeadline)
 	if err != nil {
 		return err
 	}
@@ -555,6 +563,10 @@ func parseADBStatus(raw, token string) (int, bool) {
 
 // push copies data to a remote path over the ADB sync service.
 func (a *adbClient) push(data []byte, remotePath string, mode uint32, timeout time.Duration) error {
+	return a.pushContext(context.Background(), data, remotePath, mode, timeout)
+}
+
+func (a *adbClient) pushContext(ctx context.Context, data []byte, remotePath string, mode uint32, timeout time.Duration) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.handle == nil {
@@ -563,6 +575,12 @@ func (a *adbClient) push(data []byte, remotePath string, mode uint32, timeout ti
 	if strings.ContainsAny(remotePath, ",\x00") {
 		return errors.New("ADB push 目标路径无效")
 	}
+	if timeout <= 0 {
+		return errors.New("ADB push 超时必须大于零")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("ADB push 已取消: %w", err)
+	}
 	if err := a.connectLocked(); err != nil {
 		return err
 	}
@@ -570,30 +588,38 @@ func (a *adbClient) push(data []byte, remotePath string, mode uint32, timeout ti
 	if err != nil {
 		return err
 	}
+	deadline := time.Now().Add(timeout)
 	sendName := []byte(fmt.Sprintf("%s,%d", remotePath, mode))
-	if err := a.writeSyncLocked(stream, "SEND", sendName, timeout); err != nil {
+	if err := a.writeSyncLocked(stream, "SEND", sendName, deadline); err != nil {
 		_ = a.closeStreamLocked(stream)
 		return err
 	}
 	chunkCapacity := adbMaxPayload - 8
 	for offset := 0; offset < len(data); offset += chunkCapacity {
+		if err := ctx.Err(); err != nil {
+			_ = a.closeStreamLocked(stream)
+			return fmt.Errorf("ADB push 已取消: %w", err)
+		}
 		end := offset + chunkCapacity
 		if end > len(data) {
 			end = len(data)
 		}
-		if err := a.writeSyncLocked(stream, "DATA", data[offset:end], timeout); err != nil {
+		if err := a.writeSyncLocked(stream, "DATA", data[offset:end], deadline); err != nil {
 			_ = a.closeStreamLocked(stream)
 			return err
 		}
 	}
 	done := make([]byte, 4)
 	lePutUint32(done, uint32(time.Now().Unix()))
-	if err := a.writeSyncLocked(stream, "DONE", done, timeout); err != nil {
+	if err := ctx.Err(); err != nil {
+		_ = a.closeStreamLocked(stream)
+		return fmt.Errorf("ADB push 已取消: %w", err)
+	}
+	if err := a.writeSyncLocked(stream, "DONE", done, deadline); err != nil {
 		_ = a.closeStreamLocked(stream)
 		return err
 	}
 	var response []byte
-	deadline := time.Now().Add(20 * time.Second)
 	for len(response) < 8 && time.Now().Before(deadline) {
 		msg, err := a.receiveLocked(deadline)
 		if err != nil {
@@ -630,10 +656,10 @@ func (a *adbClient) push(data []byte, remotePath string, mode uint32, timeout ti
 	return a.closeStreamLocked(stream)
 }
 
-func (a *adbClient) writeSyncLocked(stream adbStream, id string, payload []byte, timeout time.Duration) error {
+func (a *adbClient) writeSyncLocked(stream adbStream, id string, payload []byte, deadline time.Time) error {
 	packet := make([]byte, 8+len(payload))
 	copy(packet[:4], id)
 	lePutUint32(packet[4:8], uint32(len(payload)))
 	copy(packet[8:], payload)
-	return a.writeStreamLocked(stream, packet, timeout)
+	return a.writeStreamLocked(stream, packet, deadline)
 }
