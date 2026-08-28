@@ -18,16 +18,14 @@ id -u 2>&1
 printf '%s\n' '--- uname ---'
 uname -a 2>&1
 printf '%s\n' '--- device-nodes ---'
-for path in /dev/smd* /dev/ttyGS* /dev/qcqmi* /dev/ttyUSB* /dev/ttyHS* /dev/at*; do
-  test -e "$path" || continue
-  ls -l "$path" 2>&1
-done
+ls -l /dev/smd* /dev/ttyGS* /dev/qcqmi* /dev/ttyUSB* /dev/ttyHS* /dev/at* 2>&1 || true
 printf '%s\n' '--- processes ---'
-ps 2>&1 | grep -Ei 'ril|atfwd|qmux|qmi|quectel|modem|voice' | grep -v grep || true
+ps 2>&1 || true
 printf '%s\n' '--- tty-drivers ---'
 cat /proc/tty/drivers 2>&1
 printf '%s\n' '--- unix-sockets ---'
-cat /proc/net/unix 2>&1 | grep -Ei 'at|qmux|qmi|ril|voice|modem' || true
+cat /proc/net/unix 2>&1 || true
+true
 `
 
 func (a *app) moduleADBInventoryAPI(w http.ResponseWriter, _ *http.Request) {
