@@ -14,27 +14,37 @@ import (
 const (
 	qmiVoiceProbeExpectedSHA256 = "440463eed6ccd0185e5d9eb16b2dce466b2c079a2f7d4a4fc03fb106461f95a6"
 	qmiVoiceProbeRemotePath     = "/tmp/djonehub-qmi-probe.armv7"
+	qmiVoiceControlExpectedSHA256 = "5707c78dff6d1b695bf4527c781105d1b37bb9d2b06c9bfc90a5fe12175d9636"
+	qmiVoiceControlRemotePath     = "/tmp/djonehub-qmi-voice-control.armv7"
 	qmiVoiceProbeMaximumSize    = 2 * 1024 * 1024
 )
 
-func defaultQMIVoiceProbeArtifactPath() string {
+func defaultPinnedQMIArtifactPath(filename string, validate func([]byte) error) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	downloads := filepath.Join(home, "Downloads")
-	fallback := filepath.Join(downloads, "djonehubd-armv7-sentinel", "djonehub-qmi-probe.armv7")
-	matches, err := filepath.Glob(filepath.Join(downloads, "djonehubd-armv7-sentinel*", "djonehub-qmi-probe.armv7"))
+	fallback := filepath.Join(downloads, "djonehubd-armv7-sentinel", filename)
+	matches, err := filepath.Glob(filepath.Join(downloads, "djonehubd-armv7-sentinel*", filename))
 	if err != nil {
 		return fallback
 	}
 	for _, path := range matches {
 		data, readErr := os.ReadFile(path)
-		if readErr == nil && validateQMIVoiceProbeArtifact(data) == nil {
+		if readErr == nil && validate(data) == nil {
 			return path
 		}
 	}
 	return fallback
+}
+
+func defaultQMIVoiceProbeArtifactPath() string {
+	return defaultPinnedQMIArtifactPath("djonehub-qmi-probe.armv7", validateQMIVoiceProbeArtifact)
+}
+
+func defaultQMIVoiceControlArtifactPath() string {
+	return defaultPinnedQMIArtifactPath("djonehub-qmi-voice-control.armv7", validateQMIVoiceControlArtifact)
 }
 
 func validateQMIVoiceProbeELF(data []byte) error {
@@ -69,6 +79,21 @@ func validateQMIVoiceProbeArtifact(data []byte) error {
 	actual := hex.EncodeToString(sum[:])
 	if actual != qmiVoiceProbeExpectedSHA256 {
 		return fmt.Errorf("QMI Voice 探针 SHA-256 不匹配：需要 %s，实际 %s", qmiVoiceProbeExpectedSHA256, actual)
+	}
+	return nil
+}
+
+func validateQMIVoiceControlArtifact(data []byte) error {
+	if len(data) == 0 || len(data) > qmiVoiceProbeMaximumSize {
+		return fmt.Errorf("QMI Voice 控制候选文件大小无效：%d bytes", len(data))
+	}
+	if err := validateQMIVoiceProbeELF(data); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != qmiVoiceControlExpectedSHA256 {
+		return fmt.Errorf("QMI Voice 控制候选 SHA-256 不匹配：需要 %s，实际 %s", qmiVoiceControlExpectedSHA256, actual)
 	}
 	return nil
 }

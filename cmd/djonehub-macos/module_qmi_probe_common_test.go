@@ -45,3 +45,10 @@ func TestValidateQMIVoiceProbeArtifactRejectsUnpinnedBinary(t *testing.T) {
 		t.Fatalf("got %v, want pinned hash rejection", err)
 	}
 }
+
+func TestValidateQMIVoiceControlArtifactRejectsUnpinnedBinary(t *testing.T) {
+	err := validateQMIVoiceControlArtifact(qmiVoiceProbeTestELF(2, 40))
+	if err == nil || !strings.Contains(err.Error(), "SHA-256 不匹配") {
+		t.Fatalf("got %v, want pinned hash rejection", err)
+	}
+}

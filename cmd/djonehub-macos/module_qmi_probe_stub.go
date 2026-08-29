@@ -7,3 +7,7 @@ import "net/http"
 func (a *app) qmiVoiceProbeAPI(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotImplemented, "QMI Voice 探针部署仅在 macOS 版本可用")
 }
+
+func (a *app) qmiVoiceControlStatusAPI(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotImplemented, "QMI Voice 控制候选部署仅在 macOS 版本可用")
+}
