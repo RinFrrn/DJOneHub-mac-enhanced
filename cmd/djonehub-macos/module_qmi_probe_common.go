@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	qmiVoiceProbeExpectedSHA256 = "2e77e9a08bb139f522235c04e25f38551b543054fb029735e1f017918f86ec27"
+	qmiVoiceProbeExpectedSHA256 = "8effbea6d69a3b8e2980929b3316b0525895eaf38095cace4bca8afa992e5965"
 	qmiVoiceProbeRemotePath     = "/tmp/djonehub-qmi-probe.armv7"
 	qmiVoiceProbeMaximumSize    = 2 * 1024 * 1024
 )
@@ -22,7 +22,7 @@ func defaultQMIVoiceProbeArtifactPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, "Downloads", "djonehubd-armv7-sentinel-4", "djonehub-qmi-probe.armv7")
+	return filepath.Join(home, "Downloads", "djonehubd-armv7-sentinel-5", "djonehub-qmi-probe.armv7")
 }
 
 func validateQMIVoiceProbeELF(data []byte) error {
