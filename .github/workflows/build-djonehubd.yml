@@ -6,9 +6,12 @@ on:
     paths:
       - "module/djonehubd.c"
       - "module/djonehub_qmi_probe.c"
+      - "module/djonehub_qmi_voice_control.c"
       - "module/djonehub_voice_codec.c"
       - "module/djonehub_voice_codec.h"
       - "module/djonehub_voice_codec_test.c"
+      - "module/djonehub_voice_policy.c"
+      - "module/djonehub_voice_policy.h"
       - "scripts/build_djonehubd_armel.sh"
       - ".github/workflows/build-djonehubd.yml"
 
@@ -56,8 +59,14 @@ jobs:
           test "$(readelf --file-header outputs/module/djonehubd.armv7 | grep -c 'Class:.*ELF32')" -eq 1
           test "$(readelf --file-header outputs/module/djonehubd.armv7 | grep -c 'Machine:.*ARM')" -eq 1
           test "$(readelf --arch-specific outputs/module/djonehubd.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
-          ! readelf --arch-specific outputs/module/djonehubd.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
-          ! readelf --program-headers outputs/module/djonehubd.armv7 | grep -q INTERP
+          if readelf --arch-specific outputs/module/djonehubd.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'; then
+            echo 'error: sentinel unexpectedly uses the hard-float ABI' >&2
+            exit 1
+          fi
+          if readelf --program-headers outputs/module/djonehubd.armv7 | grep -q INTERP; then
+            echo 'error: sentinel is not static' >&2
+            exit 1
+          fi
           (cd outputs/module && sha256sum djonehubd.armv7 > djonehubd.armv7.sha256)
           cat > outputs/module/BUILD-METADATA.txt <<'EOF'
           target=ARMv7 EABI5 soft-float
@@ -74,6 +83,7 @@ jobs:
             -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
             -Wmissing-prototypes -Wundef -Werror \
             module/djonehub_voice_codec.c \
+            module/djonehub_voice_policy.c \
             module/djonehub_voice_codec_test.c \
             -o outputs/module/djonehub-voice-codec-test
           outputs/module/djonehub-voice-codec-test
@@ -87,46 +97,68 @@ jobs:
             -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
             module/djonehub_qmi_probe.c module/djonehub_voice_codec.c -ldl \
             -o outputs/module/djonehub-qmi-probe.armv7.unstripped
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_qmi_voice_control.c \
+            module/djonehub_voice_codec.c module/djonehub_voice_policy.c -ldl \
+            -o outputs/module/djonehub-qmi-voice-control.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
             -o outputs/module/djonehub-qmi-probe.armv7 \
             outputs/module/djonehub-qmi-probe.armv7.unstripped
-          file outputs/module/djonehub-qmi-probe.armv7
-          readelf --file-header outputs/module/djonehub-qmi-probe.armv7
-          readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7
-          readelf --program-headers outputs/module/djonehub-qmi-probe.armv7
-          readelf --dynamic outputs/module/djonehub-qmi-probe.armv7
-          readelf --version-info outputs/module/djonehub-qmi-probe.armv7
-          test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Class:.*ELF32')" -eq 1
-          test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Machine:.*ARM')" -eq 1
-          test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Type:.*EXEC')" -eq 1
-          test "$(readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
-          if readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'; then
-            echo 'error: hard-float ABI is incompatible with the module' >&2
-            exit 1
-          fi
-          test "$(readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -c '/lib/ld-linux.so.3')" -eq 1
-          if readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -Eq '0x10000[[:space:]]*$'; then
-            echo 'error: 64 KiB segment alignment is incompatible with the module loader' >&2
-            exit 1
-          fi
-          if readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'; then
-            echo 'error: binary requires a newer glibc than the module provides' >&2
-            exit 1
-          fi
-          if readelf --dynamic outputs/module/djonehub-qmi-probe.armv7 | grep -q GNU_HASH; then
-            echo 'error: module loader requires a SysV hash table' >&2
-            exit 1
-          fi
-          if readelf --dyn-syms --wide outputs/module/djonehub-qmi-probe.armv7 | grep -q '[[:space:]]stderr\(@\|$\)'; then
-            echo 'error: stderr data relocation is incompatible with the module runtime' >&2
-            exit 1
-          fi
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-qmi-voice-control.armv7 \
+            outputs/module/djonehub-qmi-voice-control.armv7.unstripped
+          audit_qmi_binary() {
+            binary=$1
+            file "$binary"
+            readelf --file-header "$binary"
+            readelf --arch-specific "$binary"
+            readelf --program-headers "$binary"
+            readelf --dynamic "$binary"
+            readelf --version-info "$binary"
+            test "$(readelf --file-header "$binary" | grep -c 'Class:.*ELF32')" -eq 1
+            test "$(readelf --file-header "$binary" | grep -c 'Machine:.*ARM')" -eq 1
+            test "$(readelf --file-header "$binary" | grep -c 'Type:.*EXEC')" -eq 1
+            test "$(readelf --arch-specific "$binary" | grep -c 'Tag_CPU_arch: v7')" -eq 1
+            if readelf --arch-specific "$binary" | grep -q 'Tag_ABI_VFP_args:.*VFP registers'; then
+              echo 'error: hard-float ABI is incompatible with the module' >&2
+              exit 1
+            fi
+            test "$(readelf --program-headers "$binary" | grep -c '/lib/ld-linux.so.3')" -eq 1
+            if readelf --program-headers "$binary" | grep -Eq '0x10000[[:space:]]*$'; then
+              echo 'error: 64 KiB segment alignment is incompatible with the module loader' >&2
+              exit 1
+            fi
+            if readelf --version-info "$binary" | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'; then
+              echo 'error: binary requires a newer glibc than the module provides' >&2
+              exit 1
+            fi
+            if readelf --dynamic "$binary" | grep -q GNU_HASH; then
+              echo 'error: module loader requires a SysV hash table' >&2
+              exit 1
+            fi
+            if readelf --dyn-syms --wide "$binary" | grep -q '[[:space:]]stderr\(@\|$\)'; then
+              echo 'error: stderr data relocation is incompatible with the module runtime' >&2
+              exit 1
+            fi
+          }
+          audit_qmi_binary outputs/module/djonehub-qmi-probe.armv7
+          audit_qmi_binary outputs/module/djonehub-qmi-voice-control.armv7
           (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
+          (cd outputs/module && sha256sum djonehub-qmi-voice-control.armv7 > djonehub-qmi-voice-control.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
 
           qmi_probe=dynamically linked ARMv7 EABI5 soft-float, glibc <= 2.7
           qmi_probe_scope=read-only QMI Voice 2/0x4D/6 initialization + Get All Call Info
           qmi_probe_writes=no call control, no modem configuration, no persistence
+          qmi_control=candidate one-shot status/dial/answer/end with precondition and read-back confirmation
+          qmi_control_deployment=not pinned by the macOS API; do not persist
           EOF
 
       - name: Upload sentinel artifact

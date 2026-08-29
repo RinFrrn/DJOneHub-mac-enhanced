@@ -1,4 +1,5 @@
 #include "djonehub_voice_codec.h"
+#include "djonehub_voice_policy.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -177,6 +178,47 @@ static int test_rejected_action_response(void)
     return 0;
 }
 
+static int test_action_policy(void)
+{
+    struct djonehub_voice_snapshot snapshot;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    CHECK(djonehub_voice_action_allowed(DJONEHUB_VOICE_DIAL, &snapshot,
+                                        0U));
+    CHECK(!djonehub_voice_action_allowed(DJONEHUB_VOICE_ANSWER, &snapshot,
+                                         1U));
+    CHECK(djonehub_voice_action_confirmed(DJONEHUB_VOICE_END, &snapshot,
+                                          1U));
+
+    snapshot.count = 1U;
+    snapshot.calls[0].id = 7U;
+    snapshot.calls[0].state = 0x02U;
+    CHECK(!djonehub_voice_action_allowed(DJONEHUB_VOICE_DIAL, &snapshot,
+                                         0U));
+    CHECK(djonehub_voice_action_allowed(DJONEHUB_VOICE_ANSWER, &snapshot,
+                                        7U));
+    CHECK(djonehub_voice_action_allowed(DJONEHUB_VOICE_END, &snapshot, 7U));
+    CHECK(!djonehub_voice_action_confirmed(DJONEHUB_VOICE_ANSWER, &snapshot,
+                                           7U));
+
+    snapshot.calls[0].state = 0x03U;
+    CHECK(!djonehub_voice_action_allowed(DJONEHUB_VOICE_ANSWER, &snapshot,
+                                         7U));
+    CHECK(djonehub_voice_action_confirmed(DJONEHUB_VOICE_ANSWER, &snapshot,
+                                          7U));
+    CHECK(djonehub_voice_action_confirmed(DJONEHUB_VOICE_DIAL, &snapshot,
+                                          7U));
+
+    snapshot.calls[0].state = 0x09U;
+    CHECK(djonehub_voice_action_allowed(DJONEHUB_VOICE_DIAL, &snapshot, 0U));
+    CHECK(!djonehub_voice_action_allowed(DJONEHUB_VOICE_END, &snapshot, 7U));
+    CHECK(djonehub_voice_action_confirmed(DJONEHUB_VOICE_END, &snapshot,
+                                          7U));
+    CHECK(!djonehub_voice_action_allowed(DJONEHUB_VOICE_STATUS, &snapshot,
+                                         7U));
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_empty_snapshot() == 0);
@@ -187,6 +229,7 @@ int main(void)
     CHECK(test_request_builders() == 0);
     CHECK(test_action_response() == 0);
     CHECK(test_rejected_action_response() == 0);
+    CHECK(test_action_policy() == 0);
     puts("djonehub_voice_codec_test: ok");
     return 0;
 }

@@ -186,6 +186,11 @@ information 时仍会得到“零通话”，所以这类成功只证明 QMI tra
 END 的顺序逐项开放写操作。所有写操作必须串行、限定超时、回读 `0x2f` 确认最终状态，
 且不得提供任意 QMI message 透传。
 
+真实响铃只读验收现已完成：Get All Call Info 返回 `id=1`、`state=incoming`、
+`direction=MT`，说明修正后的活动 call record 解析有效。仓库已加入不由 macOS API 部署
+的 one-shot control 候选及独立策略单测，下一步先在模块上只运行其 `status` 子命令，
+核对它与只读探针完全一致，再逐项人工确认开放写命令。
+
 #### 3.1.2 ECM 闭环 sentinel
 
 在真正接入内部 AT 通道前，可以先部署仓库中的 `module/djonehubd.c` 做网络闭环

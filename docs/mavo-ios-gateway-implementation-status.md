@@ -63,8 +63,14 @@
   service error、畸形 TLV、重复 call ID、非法状态、号码白名单和容量边界。
 - 固定哈希 ARMv7 只读探针已在模块运行：QMI client 初始化、`0x2f` 同步请求与 release
   均成功，空闲结果为零通话。旧版曾误把 call information 当成 TLV `0x01`；空闲响应
-  因缺少该 TLV 而看似成功，现已依据 libqmi Voice 定义修正为 `0x10`，仍需用一次真实
-  来电验证活动 call record。
+  因缺少该 TLV 而看似成功，现已依据 libqmi Voice 定义修正为 `0x10`。修正版随后在
+  真实响铃中读到一条记录：`id=1`、
+  `state=2 (incoming)`、`type=2`、`direction=2 (MT)`、`mode=4`，验证通过。
+- 新增尚未部署的 one-shot QMI control 候选：只接受 `status`、`dial NUMBER`、
+  `answer CALL_ID`、`end CALL_ID`。策略层单测要求拨号前空闲、接听仅限
+  incoming/waiting、挂断 call ID 必须存在，并在 action response 后轮询 `0x2f` 回读确认。
+  当前 macOS API 仍只固定哈希并执行 read-only probe，因此这项代码提交不会自行拨号、
+  接听或挂断。
 - 已在 WSL Ubuntu 26.04 使用 `arm-linux-gnueabi-gcc 15.2.0`，通过真实模块
   glibc 2.22 sysroot 构建 ARMv7 soft-float 产物；连续两次构建逐字节一致。
 - release ELF 仅直接依赖 `libpthread.so.0`、`libdl.so.2`、`libc.so.6` 和
