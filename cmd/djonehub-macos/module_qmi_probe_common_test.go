@@ -17,7 +17,7 @@ func qmiVoiceProbeTestELF(kind uint16, machine uint16) []byte {
 }
 
 func TestValidateQMIVoiceProbeELF(t *testing.T) {
-	if err := validateQMIVoiceProbeELF(qmiVoiceProbeTestELF(3, 40)); err != nil {
+	if err := validateQMIVoiceProbeELF(qmiVoiceProbeTestELF(2, 40)); err != nil {
 		t.Fatalf("valid ELF rejected: %v", err)
 	}
 	cases := []struct {
@@ -26,8 +26,8 @@ func TestValidateQMIVoiceProbeELF(t *testing.T) {
 		want string
 	}{
 		{"not ELF", []byte("no"), "不是 ELF"},
-		{"not PIE", qmiVoiceProbeTestELF(2, 40), "ET_DYN"},
-		{"not ARM", qmiVoiceProbeTestELF(3, 62), "不是 ARM"},
+		{"not executable", qmiVoiceProbeTestELF(3, 40), "ET_EXEC"},
+		{"not ARM", qmiVoiceProbeTestELF(2, 62), "不是 ARM"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestValidateQMIVoiceProbeELF(t *testing.T) {
 }
 
 func TestValidateQMIVoiceProbeArtifactRejectsUnpinnedBinary(t *testing.T) {
-	err := validateQMIVoiceProbeArtifact(qmiVoiceProbeTestELF(3, 40))
+	err := validateQMIVoiceProbeArtifact(qmiVoiceProbeTestELF(2, 40))
 	if err == nil || !strings.Contains(err.Error(), "SHA-256 不匹配") {
 		t.Fatalf("got %v, want pinned hash rejection", err)
 	}

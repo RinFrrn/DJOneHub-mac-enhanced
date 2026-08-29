@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	qmiVoiceProbeExpectedSHA256 = "89eafb52a94272b21e5679257e6ff8c3e168111ec6d55f2db52b59a8554be8d5"
+	qmiVoiceProbeExpectedSHA256 = "2e77e9a08bb139f522235c04e25f38551b543054fb029735e1f017918f86ec27"
 	qmiVoiceProbeRemotePath     = "/tmp/djonehub-qmi-probe.armv7"
 	qmiVoiceProbeMaximumSize    = 2 * 1024 * 1024
 )
@@ -22,7 +22,7 @@ func defaultQMIVoiceProbeArtifactPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, "Downloads", "djonehubd-armv7-sentinel-3", "djonehub-qmi-probe.armv7")
+	return filepath.Join(home, "Downloads", "djonehubd-armv7-sentinel-4", "djonehub-qmi-probe.armv7")
 }
 
 func validateQMIVoiceProbeELF(data []byte) error {
@@ -35,9 +35,10 @@ func validateQMIVoiceProbeELF(data []byte) error {
 	if data[5] != 1 {
 		return errors.New("QMI Voice 探针不是小端序 ELF")
 	}
-	// The probe is a position-independent dynamic executable (ET_DYN).
-	if binary.LittleEndian.Uint16(data[16:18]) != 3 {
-		return errors.New("QMI Voice 探针不是 ET_DYN PIE 可执行文件")
+	// The QDC507 loader predates modern PIE layouts. The probe intentionally
+	// uses a dynamically linked ET_EXEC layout with 4 KiB page alignment.
+	if binary.LittleEndian.Uint16(data[16:18]) != 2 {
+		return errors.New("QMI Voice 探针不是 ET_EXEC 动态可执行文件")
 	}
 	if binary.LittleEndian.Uint16(data[18:20]) != 40 {
 		return errors.New("QMI Voice 探针不是 ARM 可执行文件")
