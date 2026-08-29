@@ -63,6 +63,20 @@ fi
 new_binary="${RUNTIME_BIN}.new"
 previous_binary="${RUNTIME_BIN}.previous"
 install -m 755 "${package_binary}" "${new_binary}"
+
+# Safari/GitHub downloads carry com.apple.quarantine into extracted files.
+# Remove it only from the exact backend that passed the archive checksum,
+# architecture checks, and code-signature integrity verification above.  Do
+# not disable Gatekeeper or recursively clear attributes from Downloads.
+if /usr/bin/xattr -p com.apple.quarantine "${new_binary}" >/dev/null 2>&1; then
+  /usr/bin/xattr -d com.apple.quarantine "${new_binary}"
+fi
+if /usr/bin/xattr -p com.apple.quarantine "${new_binary}" >/dev/null 2>&1; then
+  echo "无法移除新后端的 quarantine 标记，停止安装。" >&2
+  rm -f "${new_binary}"
+  exit 1
+fi
+
 cp -p "${RUNTIME_BIN}" "${previous_binary}"
 mv -f "${new_binary}" "${RUNTIME_BIN}"
 launchctl kickstart -k "${LAUNCH_LABEL}"
