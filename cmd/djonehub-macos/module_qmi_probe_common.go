@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	qmiVoiceProbeExpectedSHA256 = "8effbea6d69a3b8e2980929b3316b0525895eaf38095cace4bca8afa992e5965"
+	qmiVoiceProbeExpectedSHA256 = "440463eed6ccd0185e5d9eb16b2dce466b2c079a2f7d4a4fc03fb106461f95a6"
 	qmiVoiceProbeRemotePath     = "/tmp/djonehub-qmi-probe.armv7"
 	qmiVoiceProbeMaximumSize    = 2 * 1024 * 1024
 )
@@ -22,7 +22,19 @@ func defaultQMIVoiceProbeArtifactPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, "Downloads", "djonehubd-armv7-sentinel-5", "djonehub-qmi-probe.armv7")
+	downloads := filepath.Join(home, "Downloads")
+	fallback := filepath.Join(downloads, "djonehubd-armv7-sentinel", "djonehub-qmi-probe.armv7")
+	matches, err := filepath.Glob(filepath.Join(downloads, "djonehubd-armv7-sentinel*", "djonehub-qmi-probe.armv7"))
+	if err != nil {
+		return fallback
+	}
+	for _, path := range matches {
+		data, readErr := os.ReadFile(path)
+		if readErr == nil && validateQMIVoiceProbeArtifact(data) == nil {
+			return path
+		}
+	}
+	return fallback
 }
 
 func validateQMIVoiceProbeELF(data []byte) error {
