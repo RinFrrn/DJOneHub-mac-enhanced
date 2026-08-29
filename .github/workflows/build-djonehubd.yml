@@ -68,13 +68,12 @@ jobs:
           set -euxo pipefail
           zig cc \
             -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
-            -std=c11 -O2 -fno-pie -no-pie -fstack-protector-strong \
-            -D_FORTIFY_SOURCE=2 \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
             -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
             -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
             -Wundef -Werror \
-            -Wl,-z,relro,-z,now,-z,max-page-size=4096 \
-            -Wl,-z,stack-size=0 \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
             module/djonehub_qmi_probe.c -ldl \
             -o outputs/module/djonehub-qmi-probe.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
@@ -94,6 +93,9 @@ jobs:
           test "$(readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -c '/lib/ld-linux.so.3')" -eq 1
           ! readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -Eq '0x10000[[:space:]]*$'
           ! readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'
+          ! readelf --dynamic outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GNU_HASH|BIND_NOW|FLAGS_1'
+          ! readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -q GNU_RELRO
+          ! readelf --symbols outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'stderr|__stack_chk'
           (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
 

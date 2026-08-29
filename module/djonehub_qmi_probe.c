@@ -13,6 +13,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -75,6 +76,60 @@ struct qmi_api {
     qmi_client_release_fn client_release;
 };
 
+/*
+ * Do not use stderr for diagnostics on this old userspace.  A Zig-linked
+ * probe must pass through the module's loader, and its first stdio access may
+ * fault while resolving the stderr data symbol.  A direct ARM EABI
+ * write syscall gives us a phase marker without any libc data relocation.
+ */
+static void probe_write(const char *data, size_t length)
+{
+#if defined(__arm__)
+    register long result __asm__("r0") = 2L;
+    register const char *buffer __asm__("r1") = data;
+    register size_t count __asm__("r2") = length;
+    register long syscall_number __asm__("r7") = 4L;
+
+    __asm__ volatile("svc 0"
+                     : "+r"(result)
+                     : "r"(buffer), "r"(count), "r"(syscall_number)
+                     : "memory", "cc");
+    (void)result;
+#else
+#error "djonehub_qmi_probe requires the ARM EABI write syscall"
+#endif
+}
+
+static void probe_log(const char *text)
+{
+    size_t length = 0U;
+
+    while (text[length] != '\0') {
+        ++length;
+    }
+    probe_write(text, length);
+}
+
+static void probe_logf(const char *format, ...)
+{
+    char buffer[512];
+    va_list arguments;
+    int length;
+    size_t output_length;
+
+    va_start(arguments, format);
+    length = vsnprintf(buffer, sizeof(buffer), format, arguments);
+    va_end(arguments);
+    if (length <= 0) {
+        return;
+    }
+    output_length = (size_t)length;
+    if (output_length >= sizeof(buffer)) {
+        output_length = sizeof(buffer) - 1U;
+    }
+    probe_write(buffer, output_length);
+}
+
 static uint16_t read_le16(const uint8_t *data)
 {
     return (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8U));
@@ -90,12 +145,12 @@ static int load_symbol(void *library, const char *name, void *target,
     symbol = dlsym(library, name);
     error_text = dlerror();
     if (error_text != NULL || symbol == NULL) {
-        fprintf(stderr, "djonehub-qmi-probe: dlsym %s: %s\n", name,
-                error_text != NULL ? error_text : "symbol not found");
+        probe_logf("djonehub-qmi-probe: dlsym %s: %s\n", name,
+                   error_text != NULL ? error_text : "symbol not found");
         return -1;
     }
     if (target_size != sizeof(symbol)) {
-        fprintf(stderr, "djonehub-qmi-probe: incompatible function pointer size\n");
+        probe_log("djonehub-qmi-probe: incompatible function pointer size\n");
         return -1;
     }
     memcpy(target, &symbol, sizeof(symbol));
@@ -118,14 +173,14 @@ static int load_qmi_api(struct qmi_api *api)
     memset(api, 0, sizeof(*api));
     api->services_library = dlopen("libqmiservices.so.1", RTLD_NOW | RTLD_LOCAL);
     if (api->services_library == NULL) {
-        fprintf(stderr, "djonehub-qmi-probe: dlopen libqmiservices: %s\n",
-                dlerror());
+        probe_logf("djonehub-qmi-probe: dlopen libqmiservices: %s\n",
+                   dlerror());
         return -1;
     }
     api->client_library = dlopen("libqmi_cci.so.1", RTLD_NOW | RTLD_LOCAL);
     if (api->client_library == NULL) {
-        fprintf(stderr, "djonehub-qmi-probe: dlopen libqmi_cci: %s\n",
-                dlerror());
+        probe_logf("djonehub-qmi-probe: dlopen libqmi_cci: %s\n",
+                   dlerror());
         unload_qmi_api(api);
         return -1;
     }
@@ -226,75 +281,75 @@ int main(void)
     int qmi_result;
     int exit_status = EXIT_FAILURE;
 
-    fprintf(stderr, "djonehub-qmi-probe: phase=load-libraries\n");
+    probe_log("djonehub-qmi-probe: phase=entered-main\n");
+    probe_log("djonehub-qmi-probe: phase=load-libraries\n");
     if (load_qmi_api(&api) != 0) {
         return EXIT_FAILURE;
     }
-    fprintf(stderr, "djonehub-qmi-probe: phase=get-service-object\n");
+    probe_log("djonehub-qmi-probe: phase=get-service-object\n");
     service_object = api.get_voice_service_object(
         (int32_t)VOICE_IDL_MAJOR, (int32_t)VOICE_IDL_MINOR,
         (int32_t)VOICE_IDL_TOOL);
     if (service_object == NULL) {
-        fprintf(stderr,
-                "djonehub-qmi-probe: Voice service object 2/0x4D/6 rejected\n");
+        probe_log(
+            "djonehub-qmi-probe: Voice service object 2/0x4D/6 rejected\n");
         goto cleanup;
     }
 
     memset(&os_params, 0, sizeof(os_params));
-    fprintf(stderr, "djonehub-qmi-probe: phase=init-client os_params=%u\n",
-            (unsigned int)sizeof(os_params));
+    probe_logf("djonehub-qmi-probe: phase=init-client os_params=%u\n",
+               (unsigned int)sizeof(os_params));
     qmi_result = api.client_init_instance(
         service_object, QMI_CLIENT_INSTANCE_ANY, NULL, NULL, &os_params,
         QMI_TIMEOUT_MS, &client);
     if (qmi_result != QMI_NO_ERR || client == NULL) {
-        fprintf(stderr, "djonehub-qmi-probe: QMI Voice init failed: %d\n",
-                qmi_result);
+        probe_logf("djonehub-qmi-probe: QMI Voice init failed: %d\n",
+                   qmi_result);
         goto cleanup;
     }
 
-    fprintf(stderr, "djonehub-qmi-probe: phase=get-all-call-info\n");
+    probe_log("djonehub-qmi-probe: phase=get-all-call-info\n");
     memset(response, 0, sizeof(response));
     qmi_result = api.send_raw_sync(
         client, QMI_VOICE_GET_ALL_CALL_INFO, &empty_request, 0U, response,
         (unsigned int)sizeof(response), &response_length, QMI_TIMEOUT_MS);
     if (qmi_result != QMI_NO_ERR) {
-        fprintf(stderr,
-                "djonehub-qmi-probe: get-all-call-info transport failed: %d\n",
-                qmi_result);
+        probe_logf(
+            "djonehub-qmi-probe: get-all-call-info transport failed: %d\n",
+            qmi_result);
         goto cleanup;
     }
     if (response_length > (unsigned int)sizeof(response)) {
-        fprintf(stderr, "djonehub-qmi-probe: invalid response length: %u\n",
-                response_length);
+        probe_logf("djonehub-qmi-probe: invalid response length: %u\n",
+                   response_length);
         goto cleanup;
     }
 
     inspect_result = inspect_get_all_calls_response(
         response, (size_t)response_length, &call_count, &service_error);
     if (inspect_result < 0) {
-        fprintf(stderr, "djonehub-qmi-probe: malformed QMI Voice response\n");
+        probe_log("djonehub-qmi-probe: malformed QMI Voice response\n");
         goto cleanup;
     }
     if (inspect_result > 0) {
-        fprintf(stderr,
-                "djonehub-qmi-probe: QMI Voice service error: %u\n",
-                service_error);
+        probe_logf("djonehub-qmi-probe: QMI Voice service error: %u\n",
+                   service_error);
         goto cleanup;
     }
 
-    printf("{\"ok\":true,\"probe\":\"qmi-voice-read-only\","
-           "\"idl\":\"2.0x4D.6\",\"call_count\":%u}\n",
-           call_count);
+    probe_logf("{\"ok\":true,\"probe\":\"qmi-voice-read-only\","
+               "\"idl\":\"2.0x4D.6\",\"call_count\":%u}\n",
+               call_count);
     exit_status = EXIT_SUCCESS;
 
 cleanup:
-    fprintf(stderr, "djonehub-qmi-probe: phase=cleanup\n");
+    probe_log("djonehub-qmi-probe: phase=cleanup\n");
     if (client != NULL) {
         qmi_result = api.client_release(client);
         if (qmi_result != QMI_NO_ERR) {
-            fprintf(stderr,
-                    "djonehub-qmi-probe: QMI client release failed: %d\n",
-                    qmi_result);
+            probe_logf(
+                "djonehub-qmi-probe: QMI client release failed: %d\n",
+                qmi_result);
             exit_status = EXIT_FAILURE;
         }
     }
