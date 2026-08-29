@@ -26,6 +26,15 @@
   手持通话。普通/传统 multiroute 不能并行取得模块 USB 输入与内置麦克风；扬声器覆盖又会
   把 USB 输入替换为内置麦克风。iOS 26+ `dualRoute` 的第二设备类型也不包含 USB。
   探针因此用于拆向实测，不再作为生产媒体架构本身。
+- 已在真实 iPhone 上验证 ECM 枚举、有线网络上网以及到模块
+  `192.168.225.1:45750` 的 TCP 闭环；一次性 sentinel 能在模块换接 iPhone 后启动并
+  监听。USB 网络不再是当前控制面的阻塞项，NCM 仍未验证。
+- 已在真实 QDC507 上加载模块自带 `libqmiservices.so` / `libqmi_cci.so`，成功取得
+  QMI Voice `2/0x4d/6` service object、初始化 client，并只读执行 Get All Call Info
+  (`0x2f`)。这确认内部电话控制应使用 QMI Voice，而不是继续猜测 `/dev/smdX` AT 端口。
+- 新增独立的 QMI Voice wire codec：按标准 TLV `0x10` 解析 call information，支持
+  Dial/Answer/End 请求编码和 action response 解码；本阶段只把它接入只读探针，尚未
+  从任何 API 发出会改变通话状态的 QMI 命令。
 
 - 将 `run_voice_route_session()` 拆为可复用、幂等的
   `voice_route_start()` / `voice_route_stop()`。
@@ -50,6 +59,12 @@
 - HMAC-SHA256 已知向量通过。
 - 音频包认证/篡改检测单测通过。
 - fake vendor 库下 D6 探测 3 秒回归通过。
+- QMI Voice codec 严格 C11 单测及 Address/Undefined Sanitizer 通过，覆盖空闲/多通话、
+  service error、畸形 TLV、重复 call ID、非法状态、号码白名单和容量边界。
+- 固定哈希 ARMv7 只读探针已在模块运行：QMI client 初始化、`0x2f` 同步请求与 release
+  均成功，空闲结果为零通话。旧版曾误把 call information 当成 TLV `0x01`；空闲响应
+  因缺少该 TLV 而看似成功，现已依据 libqmi Voice 定义修正为 `0x10`，仍需用一次真实
+  来电验证活动 call record。
 - 已在 WSL Ubuntu 26.04 使用 `arm-linux-gnueabi-gcc 15.2.0`，通过真实模块
   glibc 2.22 sysroot 构建 ARMv7 soft-float 产物；连续两次构建逐字节一致。
 - release ELF 仅直接依赖 `libpthread.so.0`、`libdl.so.2`、`libc.so.6` 和
@@ -165,11 +180,9 @@ USB ADB 路径，不要据此判断模块未连接。
   正确的用户态 PCM，并验证可回滚的 ECM/NCM；不能继续靠猜测 ALSA 设备号实现。
 - iOS 探针已在真实 iPhone + QDC507 模块上完成 UAC 枚举和拆向验证；尚未声称它能在
   一个 Audio Session 中完成全双工蜂窝通话。
-- iOS ECM 探针已确认 `POSIX error 61` 为 `ECONNREFUSED`：iPhone 到
-  `192.168.225.1` 的网络链路可达，但模块侧 `45750` 没有监听进程。已新增
-  `module/djonehubd.c` 及构建脚本作为仅返回健康响应的临时 sentinel；它不执行 AT、
-  不驱动 PCM，也不应注册为持久启动服务。sentinel 验证通过后，才能继续实现生产
-  `djonehubd` 的配对认证、AT 串行化和通话状态机。
+- iOS ECM 探针最初的 `POSIX error 61` 已确认是模块侧未监听；部署一次性 sentinel 后
+  已完成真实 iPhone TCP 闭环。当前 sentinel 仍只返回健康响应，不执行 QMI、拨号或
+  PCM，不能作为生产 `djonehubd` 使用。
 - 为解决 Mac 换接 iPhone 时模块断电的问题，新增确认门控的一次性启动部署 API。
   部署顺序为固定哈希校验、`/usrdata` 推送、当前启动与 45750 监听验证、精确启动链接、
   最后创建一次性标记；标记在启动脚本执行前删除，失败不会跨重启循环。根文件系统只
@@ -183,9 +196,11 @@ USB ADB 路径，不要据此判断模块未连接。
 - 模块基线 USB functions 为 `diag,serial,rmnet,ffs,audio`；2026-08-28 通过临时
   `usbnet=1` 已在 Mac 上验证 ECM，新增 `en10` 并获得 `192.168.225.28/24`，
   IORegistry 显示 AppleUserECM 控制/数据接口，同时保留 USB AT、ADB 与 UAC。
-  这只证明 Mac 侧 ECM 枚举和 DHCP 成功；NCM 及 iPhone 侧网络访问仍未验证，恢复目标
-  是原始 `usbnet=0`。
-- 电话 AT/QMI 控制、iOS `Network.framework`/`VoiceProcessingIO` 客户端、持久化启动仍未实施。
+  随后真实 iPhone 也已完成 ECM 上网与模块 TCP 闭环；NCM 仍未验证，恢复目标是原始
+  `usbnet=0`。
+- QMI Voice 的只读状态路径和离线编解码已实现；生产 daemon 的鉴权、请求串行化、
+  indication/轮询状态机，以及受控 Dial/Answer/End 执行仍未实施。iOS
+  `Network.framework`/`VoiceProcessingIO` 生产客户端和安全持久化启动也仍未实施。
 - 为继续实施前的安全盘点，macOS 后端新增 `GET /api/module/adb-inventory` 只读接口；它
   通过现有 ADB 传输收集 `/dev` 节点、相关进程、TTY 驱动和 Unix socket，不接受任意
   shell 输入，也不向模块设备节点写数据。只有据此确认内部 AT/QMI 通道后，才可实现

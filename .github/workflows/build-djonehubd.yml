@@ -6,6 +6,9 @@ on:
     paths:
       - "module/djonehubd.c"
       - "module/djonehub_qmi_probe.c"
+      - "module/djonehub_voice_codec.c"
+      - "module/djonehub_voice_codec.h"
+      - "module/djonehub_voice_codec_test.c"
       - "scripts/build_djonehubd_armel.sh"
       - ".github/workflows/build-djonehubd.yml"
 
@@ -66,6 +69,14 @@ jobs:
       - name: Build read-only QMI Voice compatibility probe
         run: |
           set -euxo pipefail
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_voice_codec.c \
+            module/djonehub_voice_codec_test.c \
+            -o outputs/module/djonehub-voice-codec-test
+          outputs/module/djonehub-voice-codec-test
           zig cc \
             -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
             -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
@@ -74,7 +85,7 @@ jobs:
             -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
             -Wundef -Werror \
             -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
-            module/djonehub_qmi_probe.c -ldl \
+            module/djonehub_qmi_probe.c module/djonehub_voice_codec.c -ldl \
             -o outputs/module/djonehub-qmi-probe.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
             -o outputs/module/djonehub-qmi-probe.armv7 \
@@ -89,13 +100,27 @@ jobs:
           test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Machine:.*ARM')" -eq 1
           test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Type:.*EXEC')" -eq 1
           test "$(readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
-          ! readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
+          if readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'; then
+            echo 'error: hard-float ABI is incompatible with the module' >&2
+            exit 1
+          fi
           test "$(readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -c '/lib/ld-linux.so.3')" -eq 1
-          ! readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -Eq '0x10000[[:space:]]*$'
-          ! readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'
-          ! readelf --dynamic outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GNU_HASH|BIND_NOW|FLAGS_1'
-          ! readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -q GNU_RELRO
-          ! readelf --symbols outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'stderr|__stack_chk'
+          if readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -Eq '0x10000[[:space:]]*$'; then
+            echo 'error: 64 KiB segment alignment is incompatible with the module loader' >&2
+            exit 1
+          fi
+          if readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'; then
+            echo 'error: binary requires a newer glibc than the module provides' >&2
+            exit 1
+          fi
+          if readelf --dynamic outputs/module/djonehub-qmi-probe.armv7 | grep -q GNU_HASH; then
+            echo 'error: module loader requires a SysV hash table' >&2
+            exit 1
+          fi
+          if readelf --dyn-syms --wide outputs/module/djonehub-qmi-probe.armv7 | grep -q '[[:space:]]stderr\(@\|$\)'; then
+            echo 'error: stderr data relocation is incompatible with the module runtime' >&2
+            exit 1
+          fi
           (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
 

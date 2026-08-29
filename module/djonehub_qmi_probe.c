@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "djonehub_voice_codec.h"
+
 #define VOICE_IDL_MAJOR 0x02U
 #define VOICE_IDL_MINOR 0x4DU
 #define VOICE_IDL_TOOL 0x06U
@@ -145,11 +147,6 @@ static void probe_logf(const char *format, ...)
     probe_write(buffer, output_length);
 }
 
-static uint16_t read_le16(const uint8_t *data)
-{
-    return (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8U));
-}
-
 static int load_symbol(void *library, const char *name, void *target,
                        size_t target_size)
 {
@@ -216,71 +213,6 @@ static int load_qmi_api(struct qmi_api *api)
     return 0;
 }
 
-/* Returns 0 when found, 1 when absent, and -1 for malformed TLV data. */
-static int find_tlv(const uint8_t *message, size_t message_length,
-                    uint8_t wanted_type, const uint8_t **value,
-                    size_t *value_length)
-{
-    size_t offset = 0U;
-
-    while (offset < message_length) {
-        size_t length;
-        uint8_t type;
-
-        if (message_length - offset < 3U) {
-            return -1;
-        }
-        type = message[offset];
-        length = (size_t)read_le16(message + offset + 1U);
-        offset += 3U;
-        if (length > message_length - offset) {
-            return -1;
-        }
-        if (type == wanted_type) {
-            *value = message + offset;
-            *value_length = length;
-            return 0;
-        }
-        offset += length;
-    }
-    return 1;
-}
-
-static int inspect_get_all_calls_response(const uint8_t *response,
-                                          size_t response_length,
-                                          unsigned int *call_count,
-                                          unsigned int *service_error)
-{
-    const uint8_t *value = NULL;
-    size_t value_length = 0U;
-    int result;
-
-    result = find_tlv(response, response_length, 0x02U, &value,
-                      &value_length);
-    if (result != 0 || value_length < 4U) {
-        return -1;
-    }
-    if (read_le16(value) != 0U) {
-        *service_error = (unsigned int)read_le16(value + 2U);
-        return 1;
-    }
-
-    result = find_tlv(response, response_length, 0x01U, &value,
-                      &value_length);
-    if (result == 0) {
-        if (value_length < 1U) {
-            return -1;
-        }
-        *call_count = (unsigned int)value[0];
-    } else if (result < 0) {
-        return -1;
-    } else {
-        *call_count = 0U;
-    }
-    *service_error = 0U;
-    return 0;
-}
-
 int main(void)
 {
     struct qmi_api api;
@@ -290,8 +222,9 @@ int main(void)
     uint8_t response[RESPONSE_CAPACITY];
     uint8_t empty_request = 0U;
     unsigned int response_length = 0U;
-    unsigned int call_count = 0U;
+    struct djonehub_voice_snapshot snapshot;
     unsigned int service_error = 0U;
+    size_t call_index;
     int inspect_result;
     int qmi_result;
     int exit_status = EXIT_FAILURE;
@@ -340,8 +273,8 @@ int main(void)
         goto cleanup;
     }
 
-    inspect_result = inspect_get_all_calls_response(
-        response, (size_t)response_length, &call_count, &service_error);
+    inspect_result = djonehub_voice_parse_snapshot(
+        response, (size_t)response_length, &snapshot, &service_error);
     if (inspect_result < 0) {
         probe_log("djonehub-qmi-probe: malformed QMI Voice response\n");
         goto cleanup;
@@ -353,8 +286,21 @@ int main(void)
     }
 
     probe_logf("{\"ok\":true,\"probe\":\"qmi-voice-read-only\","
-               "\"idl\":\"2.0x4D.6\",\"call_count\":%u}\n",
-               call_count);
+               "\"idl\":\"2.0x4D.6\",\"call_count\":%u,\"calls\":[",
+               (unsigned int)snapshot.count);
+    for (call_index = 0U; call_index < snapshot.count; ++call_index) {
+        const struct djonehub_voice_call *call = &snapshot.calls[call_index];
+
+        probe_logf("%s{\"id\":%u,\"state\":%u,\"state_name\":\"%s\","
+                   "\"type\":%u,\"direction\":%u,\"mode\":%u}",
+                   call_index == 0U ? "" : ",", (unsigned int)call->id,
+                   (unsigned int)call->state,
+                   djonehub_voice_call_state_name(call->state),
+                   (unsigned int)call->type,
+                   (unsigned int)call->direction,
+                   (unsigned int)call->mode);
+    }
+    probe_log("]}\n");
     exit_status = EXIT_SUCCESS;
 
 cleanup:

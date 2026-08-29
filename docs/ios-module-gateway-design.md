@@ -4,7 +4,7 @@
 
 目标是在不依赖 Mac 或另一台常驻设备的情况下，让 iPhone 通过 USB 直连大疆第一代 4G 模块，在前台完成拨号、接听、挂断和双向通话。
 
-当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机基线是 Qualcomm 厂商 `rmnet`，不是通用 USB Ethernet；ECM/NCM 组合验证是独立前置门槛。2026-08-28 已在 Mac 上临时验证 ECM，NCM 仍未验证。
+当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机基线是 Qualcomm 厂商 `rmnet`，不是通用 USB Ethernet。ECM 已分别在 Mac 和真实 iPhone 上完成枚举、上网及模块 TCP 闭环验证；NCM 仍未验证。
 
 ### 1.1 现有 UAC 不能单独组成 iPhone 通话
 
@@ -142,7 +142,8 @@ USB 数据接口：bInterfaceClass=10
 
 同一枚举中仍保留 USB AT（接口 2）、ADB（接口 6）和 UAC（接口 7–9），说明 QDC507
 当前组合可以在保留救援/音频接口的同时提供 ECM。该次切换的恢复目标仍是原始
-`usbnet=0`；NCM（以及 iPhone 对 ECM 的真实网络访问）尚未通过实机测试。
+`usbnet=0`。后续真实 iPhone 已能通过该 ECM 有线网络上网，并能连接模块
+`192.168.225.1:45750` 的一次性 sentinel；NCM 尚未通过实机测试。
 
 ## 3. 进程职责
 
@@ -165,7 +166,27 @@ USB 数据接口：bInterfaceClass=10
 - active 与 idle 状态间隔 1 s。
 - 能可靠接收 URC 时优先用事件，轮询作为校验和恢复手段。
 
-#### 3.1.1 ECM 闭环 sentinel
+#### 3.1.1 QMI Voice 控制基线
+
+真实 QDC507 已验证模块自带 `libqmiservices.so` / `libqmi_cci.so` 可提供 QMI Voice
+service object `2/0x4d/6`。固定哈希 ARMv7 soft-float 探针成功初始化 QMI client，
+只读执行 Get All Call Info (`0x2f`) 并释放 client，因此控制面不再依赖未确认用途的
+内部 TTY。
+
+仓库中的 `djonehub_voice_codec` 依据 libqmi Voice wire definition 固化以下最小集合：
+
+- Dial Call `0x20`：号码使用 mandatory TLV `0x01`；
+- End Call `0x21`、Answer Call `0x22`：call ID 使用 mandatory TLV `0x01`；
+- Get All Call Info `0x2f`：call information 使用 TLV `0x10`，每条记录 7 字节；
+- 通用 QMI result 使用 TLV `0x02`，action response 的 call ID 使用 TLV `0x10`。
+
+必须注意：旧只读探针曾错误查找 call information TLV `0x01`。空闲响应没有 call
+information 时仍会得到“零通话”，所以这类成功只证明 QMI transport 可用，不能证明
+活动通话解析正确。修正版需先用真实来电完成只读验收，再按 STATUS、DIAL、ANSWER、
+END 的顺序逐项开放写操作。所有写操作必须串行、限定超时、回读 `0x2f` 确认最终状态，
+且不得提供任意 QMI message 透传。
+
+#### 3.1.2 ECM 闭环 sentinel
 
 在真正接入内部 AT 通道前，可以先部署仓库中的 `module/djonehubd.c` 做网络闭环
 验证。该程序只绑定 `192.168.225.1:45750`、接受 TCP 连接并返回固定健康响应，不
