@@ -74,7 +74,7 @@ jobs:
             -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
             -Wundef -Werror \
             -Wl,-z,relro,-z,now,-z,max-page-size=4096 \
-            -Wl,-z,noseparate-code,-z,stack-size=0 \
+            -Wl,-z,stack-size=0 \
             module/djonehub_qmi_probe.c -ldl \
             -o outputs/module/djonehub-qmi-probe.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
