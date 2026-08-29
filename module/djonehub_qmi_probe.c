@@ -111,6 +111,9 @@ static void probe_log(const char *text)
 }
 
 static void probe_logf(const char *format, ...)
+    __attribute__((format(printf, 1, 2)));
+
+static void probe_logf(const char *format, ...)
 {
     char buffer[512];
     va_list arguments;
@@ -118,7 +121,19 @@ static void probe_logf(const char *format, ...)
     size_t output_length;
 
     va_start(arguments, format);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
     length = vsnprintf(buffer, sizeof(buffer), format, arguments);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     va_end(arguments);
     if (length <= 0) {
         return;
