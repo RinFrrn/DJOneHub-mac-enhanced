@@ -89,7 +89,7 @@ func (a *app) qmiVoiceProbeAPI(w http.ResponseWriter, r *http.Request) {
 
 	verifyAndRun := "chmod 700 '" + qmiVoiceProbeRemotePath + "' && " +
 		"test \"$(sha256sum '" + qmiVoiceProbeRemotePath + "' | awk '{print $1}')\" = '" + qmiVoiceProbeExpectedSHA256 + "' && " +
-		"LD_LIBRARY_PATH=/usr/lib '" + qmiVoiceProbeRemotePath + "'"
+		"LD_LIBRARY_PATH=/usr/lib '" + qmiVoiceProbeRemotePath + "' 2>&1"
 	output, status, runErr := adb.shellChecked(verifyAndRun, 20*time.Second)
 	cleanOutput := sentinelCleanShellOutput(output)
 	if runErr != nil {
