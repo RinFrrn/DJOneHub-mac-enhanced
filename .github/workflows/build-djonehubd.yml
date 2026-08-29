@@ -68,11 +68,13 @@ jobs:
           set -euxo pipefail
           zig cc \
             -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
-            -std=c11 -O2 -fPIE -pie -fstack-protector-strong \
+            -std=c11 -O2 -fno-pie -no-pie -fstack-protector-strong \
             -D_FORTIFY_SOURCE=2 \
             -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
             -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
-            -Wundef -Werror -Wl,-z,relro,-z,now \
+            -Wundef -Werror \
+            -Wl,-z,relro,-z,now,-z,max-page-size=4096 \
+            -Wl,-z,noseparate-code,-z,stack-size=0 \
             module/djonehub_qmi_probe.c -ldl \
             -o outputs/module/djonehub-qmi-probe.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
@@ -86,9 +88,11 @@ jobs:
           readelf --version-info outputs/module/djonehub-qmi-probe.armv7
           test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Class:.*ELF32')" -eq 1
           test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Machine:.*ARM')" -eq 1
+          test "$(readelf --file-header outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Type:.*EXEC')" -eq 1
           test "$(readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
           ! readelf --arch-specific outputs/module/djonehub-qmi-probe.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'
           test "$(readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -c '/lib/ld-linux.so.3')" -eq 1
+          ! readelf --program-headers outputs/module/djonehub-qmi-probe.armv7 | grep -Eq '0x10000[[:space:]]*$'
           ! readelf --version-info outputs/module/djonehub-qmi-probe.armv7 | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'
           (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
