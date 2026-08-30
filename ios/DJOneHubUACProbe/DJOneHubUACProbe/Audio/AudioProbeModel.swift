@@ -34,6 +34,7 @@ final class AudioProbeModel: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var logLines: [String] = []
     private var routeSettleTask: Task<Void, Never>?
+    private var routeNegotiationTask: Task<Void, Never>?
     private var routeRevision = 0
 
     var isUSBInput: Bool {
@@ -60,12 +61,41 @@ final class AudioProbeModel: ObservableObject {
         isBidirectionalUSB || (isBuiltInMicInput && isUSBOutput) || (isUSBInput && isBuiltInSpeakerOutput)
     }
 
+    var isDownlinkRouteAvailable: Bool {
+        isSessionActive && isRouteStable && isUSBInput && isBuiltInSpeakerOutput
+    }
+
+    var downlinkAvailabilityText: String {
+        if !isSessionActive {
+            return "请先激活 Audio Session。"
+        }
+        if !isRouteStable {
+            return "路由仍在切换，等待稳定后再试。"
+        }
+        if isUSBInput && isBuiltInSpeakerOutput {
+            return "下行路由已成立：模块 USB 输入 → iPhone 扬声器。"
+        }
+        if isBuiltInMicInput && isBuiltInSpeakerOutput {
+            return "iOS 已回退为内置麦克风 + 扬声器，未接受模块 USB 输入。"
+        }
+        if !isUSBInput {
+            return "当前输入不是模块 USB Audio，无法读取模块下行 PCM。"
+        }
+        if !isBuiltInSpeakerOutput {
+            return "当前输出不是 iPhone 扬声器，请先选择扬声器模式。"
+        }
+        return "当前路由尚未满足 USB 输入 + iPhone 扬声器。"
+    }
+
     var verdict: String {
         if isUSBInput && isBuiltInSpeakerOutput {
             return "下行组合成立：模块 USB 输入 + iPhone 扬声器"
         }
         if isBuiltInMicInput && isUSBOutput {
             return "上行组合成立：iPhone 麦克风 + 模块 USB 输出"
+        }
+        if isBuiltInMicInput && isBuiltInSpeakerOutput {
+            return "iOS 当前使用内置麦克风 + 扬声器，USB 下行未建立"
         }
         if isBidirectionalUSB {
             return "模块已枚举为双向 USB Audio（仍需拆向验证）"
@@ -86,6 +116,8 @@ final class AudioProbeModel: ObservableObject {
     }
 
     isolated deinit {
+        routeSettleTask?.cancel()
+        routeNegotiationTask?.cancel()
         observers.forEach(NotificationCenter.default.removeObserver)
     }
 
@@ -128,6 +160,7 @@ final class AudioProbeModel: ObservableObject {
         sampleRateText = String(format: "%.0f Hz", session.sampleRate)
         ioBufferText = String(format: "%.2f ms", session.ioBufferDuration * 1_000)
         appendLog("\(reason): \(routeSummary(route))")
+        appendLog("route verdict: \(verdict)")
     }
 
     func toggleMeter() {
@@ -261,6 +294,8 @@ final class AudioProbeModel: ObservableObject {
     ) {
         do {
             markRouteUnstable()
+            routeNegotiationTask?.cancel()
+            routeNegotiationTask = nil
             stopEngineForReconfiguration()
             try session.setCategory(.playAndRecord, mode: .default, options: [])
             try session.setActive(true)
@@ -269,25 +304,75 @@ final class AudioProbeModel: ObservableObject {
             appendLog("audio session activated: playAndRecord/default")
 
             let preferredInput = session.availableInputs?.first { $0.portType == preferredPort }
-            if let preferredInput {
+            if forceSpeaker {
+                try session.overrideOutputAudioPort(.speaker)
+                appendLog("requested built-in speaker output override")
+                if preferredInput != nil {
+                    appendLog("will retry preferred \(label) after speaker route settles")
+                } else {
+                    appendLog("no \(label) in availableInputs")
+                }
+            } else if let preferredInput {
                 try session.setPreferredInput(preferredInput)
                 appendLog("preferred \(label): \(preferredInput.portName) [\(preferredInput.uid)]")
             } else {
                 appendLog("no \(label) in availableInputs")
             }
 
-            if forceSpeaker {
-                try session.overrideOutputAudioPort(.speaker)
-                appendLog("requested built-in speaker output override")
-            }
-
             refresh(reason: "session activated")
             scheduleRouteStabilityCheck()
+            if forceSpeaker, preferredInput != nil {
+                negotiateInputAfterSpeaker(preferredPort: preferredPort, label: label)
+            }
         } catch {
             isSessionActive = false
             isRouteStable = false
             appendLog("session activation failed: \(error.localizedDescription)")
             refresh(reason: "activation error")
+        }
+    }
+
+    private func negotiateInputAfterSpeaker(
+        preferredPort: AVAudioSession.Port,
+        label: String
+    ) {
+        routeNegotiationTask?.cancel()
+        routeNegotiationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            for attempt in 1 ... 4 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, self.isSessionActive else { return }
+
+                guard let preferredInput = self.session.availableInputs?.first(where: {
+                    $0.portType == preferredPort
+                }) else {
+                    self.appendLog("speaker route attempt \(attempt): \(label) unavailable")
+                    continue
+                }
+
+                do {
+                    try self.session.setPreferredInput(preferredInput)
+                    self.appendLog("speaker route attempt \(attempt): requested \(preferredInput.portName)")
+                } catch {
+                    self.appendLog("speaker route attempt \(attempt) failed: \(error.localizedDescription)")
+                }
+
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, self.isSessionActive else { return }
+                self.refresh(reason: "speaker route attempt \(attempt) result")
+
+                if self.isUSBInput && self.isBuiltInSpeakerOutput {
+                    self.appendLog("USB input + built-in speaker route accepted")
+                    self.scheduleRouteStabilityCheck()
+                    return
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            self.refresh(reason: "speaker route negotiation finished")
+            self.appendLog("iOS rejected USB input + built-in speaker route")
+            self.scheduleRouteStabilityCheck()
         }
     }
 
@@ -453,6 +538,7 @@ final class AudioProbeModel: ObservableObject {
             guard !Task.isCancelled, let self, self.routeRevision == revision else { return }
             self.isRouteStable = true
             self.appendLog("audio route stable for 500 ms")
+            self.appendLog("settled route verdict: \(self.verdict)")
         }
     }
 

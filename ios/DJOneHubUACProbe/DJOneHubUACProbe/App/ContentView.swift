@@ -282,7 +282,13 @@ struct ContentView: View {
             Button(probe.isForwardingDownlink ? "停止扬声器下行" : "模块 USB 输入送往 iPhone 扬声器") {
                 probe.toggleDownlinkForwarding()
             }
-            .disabled(!probe.isSessionActive || !probe.isRouteStable || !probe.isUSBInput || !probe.isBuiltInSpeakerOutput)
+            .disabled(!probe.isDownlinkRouteAvailable)
+
+            if !probe.isForwardingDownlink {
+                Text(probe.downlinkAvailabilityText)
+                    .font(.footnote)
+                    .foregroundStyle(probe.isDownlinkRouteAvailable ? .green : .secondary)
+            }
 
             Text("测试音为 700 Hz、峰值约 -24 dBFS，并且只有当前输出为 USB Audio 时才能播放。“麦克风上行”只有系统实际采用内置麦克风 + USB 输出时才能启动；“扬声器下行”用于验证 iOS 是否允许 USB 输入与内置扬声器并行。切换模式会等待路由稳定并重建音频引擎，避免误把模块下行回送给对端。")
                 .font(.footnote)
