@@ -38,6 +38,9 @@ enum djonehub_qmi_voice_error djonehub_qmi_voice_execute(
     enum djonehub_voice_operation operation, const char *number,
     uint8_t call_id, struct djonehub_qmi_voice_result *result);
 
+/* Releases the persistent QMI client during orderly daemon shutdown. */
+void djonehub_qmi_voice_shutdown(void);
+
 const char *djonehub_qmi_voice_error_name(
     enum djonehub_qmi_voice_error error);
 

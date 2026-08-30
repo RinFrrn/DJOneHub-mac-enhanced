@@ -1,7 +1,8 @@
 // !$*UTF8*$!
 {
 	archiveVersion = 1;
-	classes = {};
+	classes = {
+	};
 	objectVersion = 60;
 	objects = {
 
@@ -30,7 +31,8 @@
 		A30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -73,6 +75,14 @@
 			path = Audio;
 			sourceTree = "<group>";
 		};
+		A40000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000005 /* DJOneHubUACProbe.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		A40000000000000000000006 /* Control */ = {
 			isa = PBXGroup;
 			children = (
@@ -81,14 +91,6 @@
 				A20000000000000000000009 /* PairingKeyStore.swift */,
 			);
 			path = Control;
-			sourceTree = "<group>";
-		};
-		A40000000000000000000005 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000005 /* DJOneHubUACProbe.app */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -102,8 +104,10 @@
 				A30000000000000000000001 /* Frameworks */,
 				A70000000000000000000002 /* Resources */,
 			);
-			buildRules = ();
-			dependencies = ();
+			buildRules = (
+			);
+			dependencies = (
+			);
 			name = DJOneHubUACProbe;
 			productName = DJOneHubUACProbe;
 			productReference = A20000000000000000000005 /* DJOneHubUACProbe.app */;
@@ -119,19 +123,26 @@
 				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
-					A50000000000000000000001 = {CreatedOnToolsVersion = 27.0;};
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = A60000000000000000000001 /* Build configuration list for PBXProject "DJOneHubUACProbe" */;
 			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (en, Base);
+			knownRegions = (
+				en,
+				Base,
+			);
 			mainGroup = A40000000000000000000001;
 			productRefGroup = A40000000000000000000005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A50000000000000000000001 /* DJOneHubUACProbe */);
+			targets = (
+				A50000000000000000000001 /* DJOneHubUACProbe */,
+			);
 		};
 /* End PBXProject section */
 
@@ -139,7 +150,8 @@
 		A70000000000000000000002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -180,7 +192,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-		};
+			};
 			name = Debug;
 		};
 		A90000000000000000000002 /* Release */ = {
@@ -199,7 +211,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
-		};
+			};
 			name = Release;
 		};
 		A90000000000000000000003 /* Debug */ = {
@@ -207,7 +219,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DJOneHubUACProbe/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -227,7 +239,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DJOneHubUACProbe/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -247,13 +259,19 @@
 /* Begin XCConfigurationList section */
 		A60000000000000000000001 /* Build configuration list for PBXProject "DJOneHubUACProbe" */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (A90000000000000000000001 /* Debug */, A90000000000000000000002 /* Release */);
+			buildConfigurations = (
+				A90000000000000000000001 /* Debug */,
+				A90000000000000000000002 /* Release */,
+			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		A60000000000000000000002 /* Build configuration list for PBXNativeTarget "DJOneHubUACProbe" */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (A90000000000000000000003 /* Debug */, A90000000000000000000004 /* Release */);
+			buildConfigurations = (
+				A90000000000000000000003 /* Debug */,
+				A90000000000000000000004 /* Release */,
+			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};

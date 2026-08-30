@@ -3,10 +3,12 @@
 #include "djonehub_qmi_voice_engine.h"
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <string.h>
 #include <time.h>
 
@@ -57,6 +59,39 @@ struct qmi_api {
     qmi_client_send_raw_msg_sync_fn send_raw_sync;
     qmi_client_release_fn client_release;
 };
+
+/*
+ * Keep the QMI client and its shared libraries alive for the lifetime of the
+ * daemon.  The modem can deliver voice indications while a synchronous
+ * request is completing; tearing down the client and immediately dlclose'ing
+ * QCCI after every request can leave an indication worker executing unmapped
+ * code.  The old module userspace is especially sensitive to that race.
+ */
+struct qmi_voice_context {
+    pthread_mutex_t mutex;
+    struct qmi_api api;
+    qmi_idl_service_object_type service_object;
+    qmi_client_type client;
+    struct qmi_client_os_params os_params;
+    int api_loaded;
+};
+
+static struct qmi_voice_context qmi_context = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER
+};
+
+static void qmi_phase(const char *text)
+{
+    size_t length = 0U;
+    ssize_t ignored;
+
+    while (text[length] != '\0') {
+        ++length;
+    }
+    do {
+        ignored = write(STDERR_FILENO, text, length);
+    } while (ignored < 0 && errno == EINTR);
+}
 
 static int load_symbol(void *library, const char *name, void *target,
                        size_t target_size)
@@ -115,6 +150,50 @@ static int load_qmi_api(struct qmi_api *api)
     return 0;
 }
 
+static int ensure_qmi_client_locked(int *transport_error)
+{
+    int init_result;
+
+    if (transport_error == NULL) {
+        return -1;
+    }
+    *transport_error = 0;
+    if (!qmi_context.api_loaded) {
+        qmi_phase("qmi phase=load-libraries\n");
+        if (load_qmi_api(&qmi_context.api) != 0) {
+            *transport_error = -1;
+            return -1;
+        }
+        qmi_context.api_loaded = 1;
+    }
+    if (qmi_context.service_object == NULL) {
+        qmi_phase("qmi phase=get-service-object\n");
+        qmi_context.service_object = qmi_context.api.get_voice_service_object(
+            (int32_t)VOICE_IDL_MAJOR, (int32_t)VOICE_IDL_MINOR,
+            (int32_t)VOICE_IDL_TOOL);
+        if (qmi_context.service_object == NULL) {
+            *transport_error = -1;
+            return -1;
+        }
+    }
+    if (qmi_context.client != NULL) {
+        return 0;
+    }
+    /* The vendor CCI initializes this object when it needs a notifier.  Keep
+     * it in static storage so its lifetime is never shorter than the client. */
+    memset(&qmi_context.os_params, 0, sizeof(qmi_context.os_params));
+    qmi_phase("qmi phase=init-client\n");
+    init_result = qmi_context.api.client_init_instance(
+        qmi_context.service_object, QMI_CLIENT_INSTANCE_ANY, NULL, NULL,
+        &qmi_context.os_params, QMI_TIMEOUT_MS, &qmi_context.client);
+    *transport_error = init_result;
+    if (init_result != QMI_NO_ERR || qmi_context.client == NULL) {
+        qmi_context.client = NULL;
+        return -1;
+    }
+    return 0;
+}
+
 static int query_snapshot(const struct qmi_api *api, qmi_client_type client,
                           struct djonehub_voice_snapshot *snapshot,
                           int *transport_error,
@@ -126,9 +205,11 @@ static int query_snapshot(const struct qmi_api *api, qmi_client_type client,
     int result;
 
     memset(response, 0, sizeof(response));
+    qmi_phase("qmi phase=status-query\n");
     result = api->send_raw_sync(
         client, QMI_VOICE_GET_ALL_CALL_INFO, &empty_request, 0U, response,
         (unsigned int)sizeof(response), &response_length, QMI_TIMEOUT_MS);
+    qmi_phase("qmi phase=status-query-returned\n");
     *transport_error = result;
     if (result != QMI_NO_ERR ||
         response_length > (unsigned int)sizeof(response)) {
@@ -152,9 +233,11 @@ static int send_action(const struct qmi_api *api, qmi_client_type client,
         return -1;
     }
     memset(response, 0, sizeof(response));
+    qmi_phase("qmi phase=action-send\n");
     result = api->send_raw_sync(
         client, message_id, request, (unsigned int)request_length, response,
         (unsigned int)sizeof(response), &response_length, QMI_TIMEOUT_MS);
+    qmi_phase("qmi phase=action-returned\n");
     *transport_error = result;
     if (result != QMI_NO_ERR ||
         response_length > (unsigned int)sizeof(response)) {
@@ -265,47 +348,51 @@ enum djonehub_qmi_voice_error djonehub_qmi_voice_execute(
     enum djonehub_voice_operation operation, const char *number,
     uint8_t call_id, struct djonehub_qmi_voice_result *result)
 {
-    struct qmi_api api;
-    qmi_idl_service_object_type service_object;
-    qmi_client_type client = NULL;
-    struct qmi_client_os_params os_params;
     enum djonehub_qmi_voice_error error;
-    int init_result;
-    int release_result;
+    int init_result = 0;
 
     if (result == NULL) {
         return DJONEHUB_QMI_VOICE_INVALID_INPUT;
     }
     memset(result, 0, sizeof(*result));
-    if (load_qmi_api(&api) != 0) {
-        return DJONEHUB_QMI_VOICE_LIBRARY_LOAD;
-    }
-    service_object = api.get_voice_service_object(
-        (int32_t)VOICE_IDL_MAJOR, (int32_t)VOICE_IDL_MINOR,
-        (int32_t)VOICE_IDL_TOOL);
-    if (service_object == NULL) {
-        unload_qmi_api(&api);
-        return DJONEHUB_QMI_VOICE_SERVICE_OBJECT;
-    }
-    memset(&os_params, 0, sizeof(os_params));
-    init_result = api.client_init_instance(
-        service_object, QMI_CLIENT_INSTANCE_ANY, NULL, NULL, &os_params,
-        QMI_TIMEOUT_MS, &client);
-    result->transport_error = init_result;
-    if (init_result != QMI_NO_ERR || client == NULL) {
-        unload_qmi_api(&api);
+    if (pthread_mutex_lock(&qmi_context.mutex) != 0) {
         return DJONEHUB_QMI_VOICE_CLIENT_INIT;
     }
-    error = run_operation(&api, client, operation, number, call_id, result);
-    release_result = api.client_release(client);
-    if (release_result != QMI_NO_ERR &&
-        error == DJONEHUB_QMI_VOICE_SUCCESS &&
-        operation == DJONEHUB_VOICE_STATUS) {
-        result->transport_error = release_result;
-        error = DJONEHUB_QMI_VOICE_RELEASE;
+    if (ensure_qmi_client_locked(&init_result) != 0) {
+        result->transport_error = init_result;
+        (void)pthread_mutex_unlock(&qmi_context.mutex);
+        if (!qmi_context.api_loaded) {
+            return DJONEHUB_QMI_VOICE_LIBRARY_LOAD;
+        }
+        if (qmi_context.service_object == NULL) {
+            return DJONEHUB_QMI_VOICE_SERVICE_OBJECT;
+        }
+        return DJONEHUB_QMI_VOICE_CLIENT_INIT;
     }
-    unload_qmi_api(&api);
+    qmi_phase("qmi phase=operation\n");
+    error = run_operation(&qmi_context.api, qmi_context.client, operation,
+                          number, call_id, result);
+    qmi_phase("qmi phase=operation-complete\n");
+    (void)pthread_mutex_unlock(&qmi_context.mutex);
+    if (error == DJONEHUB_QMI_VOICE_SUCCESS) {
+        return error;
+    }
     return error;
+}
+
+void djonehub_qmi_voice_shutdown(void)
+{
+    if (pthread_mutex_lock(&qmi_context.mutex) != 0) {
+        return;
+    }
+    if (qmi_context.client != NULL && qmi_context.api.client_release != NULL) {
+        qmi_phase("qmi phase=shutdown-release\n");
+        (void)qmi_context.api.client_release(qmi_context.client);
+        qmi_context.client = NULL;
+    }
+    /* Do not dlclose the vendor libraries.  The process is exiting and the
+     * module's userspace may still have transport callbacks in flight. */
+    (void)pthread_mutex_unlock(&qmi_context.mutex);
 }
 
 const char *djonehub_qmi_voice_error_name(

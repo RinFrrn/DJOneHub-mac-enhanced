@@ -10,6 +10,7 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var availableModuleIdentifiers: [String] = []
     @Published private(set) var access: VoiceControlAccess?
     @Published private(set) var calls: [VoiceCallSnapshot] = []
+    @Published private(set) var shouldPollStatus = false
     @Published var dialNumber = ""
     @Published var isImportingPairing = false
     @Published var isConfirmingUnpair = false
@@ -17,6 +18,8 @@ final class VoiceControlModel: ObservableObject {
     private var client: VoiceControlClient?
     private var keyStore: PairingKeyStore?
     private var requestTask: Task<Void, Never>?
+    private var requestWatchdogTask: Task<Void, Never>?
+    private var requestGeneration = 0
 
     var isConfigured: Bool { client != nil }
     var canControlCalls: Bool { client != nil && access == .controlSession }
@@ -31,6 +34,7 @@ final class VoiceControlModel: ObservableObject {
 
     deinit {
         requestTask?.cancel()
+        requestWatchdogTask?.cancel()
     }
 
     /// Injects a key only for the lifetime of this model; it is never persisted.
@@ -154,12 +158,15 @@ final class VoiceControlModel: ObservableObject {
 
     private func clearConfiguration(preservingModuleList: Bool) {
         requestTask?.cancel()
+        requestWatchdogTask?.cancel()
         requestTask = nil
+        requestWatchdogTask = nil
         client = nil
         keyStore = nil
         moduleIdentifier = nil
         access = nil
         calls = []
+        shouldPollStatus = false
         if !preservingModuleList {
             availableModuleIdentifiers = []
         }
@@ -190,16 +197,30 @@ final class VoiceControlModel: ObservableObject {
             detailText = "控制请求被阻止：先完成生产配对流程"
             return
         }
-        perform(state: "读取中…", success: "模块已响应 STATUS") {
-            try await client.status()
-        }
+        shouldPollStatus = false
+        perform(
+            state: "读取中…",
+            success: "模块已响应 STATUS",
+            operation: {
+                try await client.status()
+            },
+            enablePollingOnSuccess: true,
+            disablePollingOnFailure: true
+        )
     }
 
     func pollStatus() {
-        guard let client, canControlCalls else { return }
-        perform(state: nil, success: nil, reportFailure: false) {
-            try await client.status()
-        }
+        guard let client, canControlCalls, shouldPollStatus else { return }
+        perform(
+            state: nil,
+            success: nil,
+            reportFailure: false,
+            operation: {
+                try await client.status()
+            },
+            enablePollingOnSuccess: false,
+            disablePollingOnFailure: true
+        )
     }
 
     func dial() {
@@ -237,36 +258,65 @@ final class VoiceControlModel: ObservableObject {
         state: String?,
         success: String?,
         reportFailure: Bool = true,
-        operation: @escaping @Sendable () async throws -> VoiceControlResult
+        operation: @escaping @Sendable () async throws -> VoiceControlResult,
+        enablePollingOnSuccess: Bool = false,
+        disablePollingOnFailure: Bool = false
     ) {
         guard !isBusy else { return }
+        requestGeneration &+= 1
+        let generation = requestGeneration
         isBusy = true
         if let state {
             stateText = state
             detailText = ""
         }
+        requestWatchdogTask?.cancel()
+        requestWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self,
+                      self.requestGeneration == generation,
+                      self.isBusy else { return }
+                self.requestTask?.cancel()
+                self.requestTask = nil
+                self.isBusy = false
+                self.stateText = "控制请求超时"
+                self.detailText = "模块控制端口未在 12 秒内响应；请检查 iPhone USB 网卡和模块供电"
+            }
+        }
         requestTask = Task { [weak self] in
             do {
                 let result = try await operation()
-                guard !Task.isCancelled else { return }
+                let cancelled = Task.isCancelled
                 await MainActor.run {
-                    self?.isBusy = false
-                    self?.calls = result.calls.filter { $0.state != 0x09 }
-                    if let success {
-                        self?.stateText = success
-                        self?.detailText = Self.describe(result)
+                    guard let self, self.requestGeneration == generation else { return }
+                    self.requestWatchdogTask?.cancel()
+                    self.isBusy = false
+                    self.calls = result.calls.filter { $0.state != 0x09 }
+                    if enablePollingOnSuccess {
+                        self.shouldPollStatus = true
                     }
-                    self?.requestTask = nil
+                    if !cancelled, let success {
+                        self.stateText = success
+                        self.detailText = Self.describe(result)
+                    }
+                    self.requestTask = nil
                 }
             } catch {
-                guard !Task.isCancelled else { return }
+                let cancelled = Task.isCancelled
                 await MainActor.run {
-                    self?.isBusy = false
-                    if reportFailure {
-                        self?.stateText = "控制请求失败"
-                        self?.detailText = error.localizedDescription
+                    guard let self, self.requestGeneration == generation else { return }
+                    self.requestWatchdogTask?.cancel()
+                    self.isBusy = false
+                    if disablePollingOnFailure {
+                        self.shouldPollStatus = false
                     }
-                    self?.requestTask = nil
+                    if !cancelled, reportFailure {
+                        self.stateText = "控制请求失败"
+                        self.detailText = error.localizedDescription
+                    }
+                    self.requestTask = nil
                 }
             }
         }

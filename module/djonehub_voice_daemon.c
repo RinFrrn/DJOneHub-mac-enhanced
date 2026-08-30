@@ -447,6 +447,7 @@ int main(int argc, char **argv)
         }
     }
     (void)close(listener);
+    djonehub_qmi_voice_shutdown();
     memset(key, 0, sizeof(key));
     return exit_status;
 }

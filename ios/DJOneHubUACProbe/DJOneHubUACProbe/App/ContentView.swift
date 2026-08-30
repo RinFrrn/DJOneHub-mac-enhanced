@@ -45,7 +45,7 @@ struct ContentView: View {
         .task(id: voiceControl.moduleIdentifier) {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
-                if voiceControl.canControlCalls {
+                if voiceControl.canControlCalls && voiceControl.shouldPollStatus {
                     voiceControl.pollStatus()
                 }
             }
