@@ -36,6 +36,10 @@ func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotImplemented, "iOS STATUS 测试仅在 macOS 版本可用")
 }
 
+func (a *app) voiceTestArmSessionAPI(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotImplemented, "iOS 电话控制会话测试仅在 macOS 版本可用")
+}
+
 func (a *app) voiceTestUninstallAPI(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotImplemented, "iOS STATUS 测试仅在 macOS 版本可用")
 }

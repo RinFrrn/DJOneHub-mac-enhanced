@@ -13,6 +13,10 @@
 
 int main(void)
 {
+	CHECK(djonehub_voice_daemon_operation_allowed(0, 0));
+	CHECK(djonehub_voice_daemon_operation_allowed(0, 1));
+	CHECK(djonehub_voice_daemon_operation_allowed(1, 1));
+	CHECK(!djonehub_voice_daemon_operation_allowed(1, 0));
     CHECK(!djonehub_voice_daemon_should_stop(
         0, DJONEHUB_DAEMON_AUTHENTICATED_RESPONSE_SENT));
     CHECK(!djonehub_voice_daemon_should_stop(

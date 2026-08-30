@@ -28,6 +28,28 @@ type voiceTestArmRequest struct {
 	ArtifactPath     string `json:"artifact_path"`
 }
 
+type voiceTestArmMode struct {
+	confirmOperation string
+	purpose          string
+	markerPath       string
+	filePrefix       string
+}
+
+var (
+	voiceStatusOnceMode = voiceTestArmMode{
+		confirmOperation: "arm-ios-status-once",
+		purpose:          voiceTestStatusPurpose,
+		markerPath:       voiceTestRemoteOnceMarker,
+		filePrefix:       "DJOneHub-STATUS-pairing-",
+	}
+	voiceControlSessionMode = voiceTestArmMode{
+		confirmOperation: "arm-ios-control-session",
+		purpose:          voiceTestSessionPurpose,
+		markerPath:       voiceTestRemoteSessionMarker,
+		filePrefix:       "DJOneHub-CONTROL-pairing-",
+	}
+)
+
 func voiceTestInstallLinkCommand() string {
 	return "root_rw=0; " +
 		"restore_ro() { if test \"$root_rw\" = 1; then sync; mount -o remount,ro /; fi; }; " +
@@ -77,7 +99,7 @@ func stopVoiceTestProcess(adb *adbClient) error {
 
 func startVoiceTestForValidation(adb *adbClient) error {
 	command := "rm -f '" + voiceTestPIDFile + "' /tmp/djonehub-voice-test-validate.log; " +
-		"LD_LIBRARY_PATH=/usr/lib nohup '" + voiceTestRemoteBinary + "' --key-file '" + voiceTestRemoteKey + "' " +
+		"LD_LIBRARY_PATH=/usr/lib nohup '" + voiceTestRemoteBinary + "' --once --status-only --key-file '" + voiceTestRemoteKey + "' " +
 		"</dev/null >/tmp/djonehub-voice-test-validate.log 2>&1 & pid=$!; " +
 		"printf '%s\\n' \"$pid\" > '" + voiceTestPIDFile + "'; " +
 		"ready=0; attempt=0; while test \"$attempt\" -lt 30; do " +
@@ -379,7 +401,8 @@ func (a *app) voiceTestStatusAPI(w http.ResponseWriter, _ *http.Request) {
 	out, status, err := adb.shellChecked(
 		"printf 'binary=%s\\n' \"$(test -x '"+voiceTestRemoteBinary+"' && echo yes || echo no)\"; "+
 			"printf 'key=%s\\n' \"$(test -f '"+voiceTestRemoteKey+"' && echo present || echo absent)\"; "+
-			"printf 'marker=%s\\n' \"$(test -f '"+voiceTestRemoteMarker+"' && echo armed || echo absent)\"; "+
+				"printf 'status_marker=%s\\n' \"$(test -f '"+voiceTestRemoteOnceMarker+"' && echo armed || echo absent)\"; "+
+				"printf 'session_marker=%s\\n' \"$(test -f '"+voiceTestRemoteSessionMarker+"' && echo armed || echo absent)\"; "+
 			"printf 'link=%s\\n' \"$(test -L '"+voiceTestInitLink+"' && readlink '"+voiceTestInitLink+"' || echo absent)\"; "+
 			"printf 'state=%s\\n' \"$(test -f '"+voiceTestRemoteState+"' && cat '"+voiceTestRemoteState+"' || echo absent)\"; "+
 			"echo 'log_begin'; test ! -f '"+voiceTestRemoteLog+"' || tail -n 60 '"+voiceTestRemoteLog+"'; echo 'log_end'",
@@ -393,12 +416,20 @@ func (a *app) voiceTestStatusAPI(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, r *http.Request) {
+	a.voiceTestArmAPI(w, r, voiceStatusOnceMode)
+}
+
+func (a *app) voiceTestArmSessionAPI(w http.ResponseWriter, r *http.Request) {
+	a.voiceTestArmAPI(w, r, voiceControlSessionMode)
+}
+
+func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voiceTestArmMode) {
 	var request voiceTestArmRequest
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if !request.Confirm || request.ConfirmOperation != "arm-ios-status-once" {
-		writeError(w, http.StatusBadRequest, "需要 confirm=true 且 confirm_operation=arm-ios-status-once")
+	if !request.Confirm || request.ConfirmOperation != mode.confirmOperation {
+		writeError(w, http.StatusBadRequest, "需要 confirm=true 且 confirm_operation="+mode.confirmOperation)
 		return
 	}
 	data, artifactPath, err := loadVoiceDaemonArtifact(request.ArtifactPath)
@@ -416,7 +447,7 @@ func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, r *http.Request) {
 			key[index] = 0
 		}
 	}()
-	bundle, identifier, err := encodeDevelopmentPairingBundle(key, time.Now())
+	bundle, identifier, err := encodeDevelopmentPairingBundle(key, mode.purpose, time.Now())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "生成测试配对包失败: "+err.Error())
 		return
@@ -457,7 +488,7 @@ func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, r *http.Request) {
 	armed := false
 	defer func() {
 		if !armed {
-			_ = sentinelShell(adb, "rm -f '"+voiceTestRemoteKey+"' '"+voiceTestRemoteMarker+"'", 8*time.Second)
+			_ = sentinelShell(adb, "rm -f '"+voiceTestRemoteKey+"' '"+voiceTestLegacyOnceMarker+"' '"+voiceTestRemoteOnceMarker+"' '"+voiceTestRemoteSessionMarker+"'", 8*time.Second)
 		}
 	}()
 	if err := sentinelShell(adb, "test -d /usrdata && mkdir -p '"+voiceTestRemoteDir+"' && chmod 700 '"+voiceTestRemoteDir+"'", 8*time.Second); err != nil {
@@ -472,7 +503,7 @@ func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "推送测试 pairing key 失败: "+err.Error())
 		return
 	}
-	if err := adb.pushContext(r.Context(), []byte(voiceTestStartOnceScript), voiceTestRemoteScript, 0o100700, 15*time.Second); err != nil {
+	if err := adb.pushContext(r.Context(), []byte(voiceTestStartScript), voiceTestRemoteScript, 0o100700, 15*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "推送测试启动脚本失败: "+err.Error())
 		return
 	}
@@ -498,14 +529,14 @@ func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sentinelShell(adb,
-		"rm -f '"+voiceTestRemoteState+"' '"+voiceTestRemoteLog+"' && : > '"+voiceTestRemoteMarker+"' && chmod 600 '"+voiceTestRemoteMarker+"' && sync",
+		"rm -f '"+voiceTestRemoteState+"' '"+voiceTestRemoteLog+"' '"+voiceTestLegacyOnceMarker+"' '"+voiceTestRemoteOnceMarker+"' '"+voiceTestRemoteSessionMarker+"' && : > '"+mode.markerPath+"' && chmod 600 '"+mode.markerPath+"' && sync",
 		8*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "设置一次性测试标记失败: "+err.Error())
 		return
 	}
 	armed = true
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Disposition", "attachment; filename=DJOneHub-STATUS-pairing-"+identifier[:8]+".json")
+	w.Header().Set("Content-Disposition", "attachment; filename="+mode.filePrefix+identifier[:8]+".json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-DJOneHub-Artifact-Path", artifactPath)
 	w.Header().Set("X-DJOneHub-Module-Identifier", identifier)
@@ -544,7 +575,7 @@ func (a *app) voiceTestUninstallAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "停止测试 daemon 失败: "+err.Error())
 		return
 	}
-	cleanup := "rm -f '" + voiceTestRemoteMarker + "' '" + voiceTestRemoteState + "' '" + voiceTestRemoteLog + "' '" +
+	cleanup := "rm -f '" + voiceTestLegacyOnceMarker + "' '" + voiceTestRemoteOnceMarker + "' '" + voiceTestRemoteSessionMarker + "' '" + voiceTestRemoteState + "' '" + voiceTestRemoteLog + "' '" +
 		voiceTestRemoteScript + "' '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteKey + "' '" + voiceTestPIDFile + "'; " +
 		"rmdir '" + voiceTestRemoteDir + "' 2>/dev/null || true; sync"
 	if err := sentinelShell(adb, cleanup, 10*time.Second); err != nil {

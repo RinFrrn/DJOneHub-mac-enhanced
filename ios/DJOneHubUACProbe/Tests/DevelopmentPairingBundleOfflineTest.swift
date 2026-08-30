@@ -15,6 +15,19 @@ struct DevelopmentPairingBundleOfflineTest {
         let decoded = try DevelopmentPairingBundle.decodeAndValidate(valid, now: now)
         precondition(decoded.moduleIdentifier == identifier)
         precondition(decoded.pairingKey == key)
+        precondition(decoded.access == .statusOnly)
+
+        let control = try DevelopmentPairingBundle.decodeAndValidate(
+            bundleData(
+                key: key,
+                identifier: identifier,
+                createdAt: now,
+                expiresAt: now.addingTimeInterval(3_600),
+                purpose: DevelopmentPairingBundle.controlSessionPurpose
+            ),
+            now: now
+        )
+        precondition(control.access == .controlSession)
 
         expect(.identifierMismatch) {
             try DevelopmentPairingBundle.decodeAndValidate(
@@ -67,12 +80,13 @@ struct DevelopmentPairingBundleOfflineTest {
         key: Data,
         identifier: String,
         createdAt: Date,
-        expiresAt: Date
+        expiresAt: Date,
+        purpose: String = DevelopmentPairingBundle.statusPurpose
     ) -> Data {
         let formatter = ISO8601DateFormatter()
         return try! JSONSerialization.data(withJSONObject: [
             "version": 1,
-            "purpose": DevelopmentPairingBundle.purpose,
+            "purpose": purpose,
             "module_identifier": identifier,
             "pairing_key_base64": key.base64EncodedString(),
             "host": DevelopmentPairingBundle.host,

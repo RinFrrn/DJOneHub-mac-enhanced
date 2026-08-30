@@ -30,6 +30,7 @@ enum VoiceControlStatus: UInt8, Sendable {
     case qmiFailed = 4
     case confirmationTimeout = 5
     case internalError = 6
+    case forbidden = 7
 }
 
 struct VoiceCallSnapshot: Equatable, Sendable {

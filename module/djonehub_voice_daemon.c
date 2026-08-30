@@ -283,7 +283,8 @@ static enum djonehub_qmi_voice_error execute_request(
 }
 
 static int handle_client(int descriptor,
-                         const uint8_t key[DJONEHUB_PAIRING_KEY_BYTES])
+                         const uint8_t key[DJONEHUB_PAIRING_KEY_BYTES],
+                         int status_only)
 {
     uint8_t nonce[DJONEHUB_CONTROL_NONCE_BYTES];
     uint8_t frame[DJONEHUB_CONTROL_MAX_FRAME_BYTES];
@@ -318,8 +319,20 @@ static int handle_client(int descriptor,
         memset(nonce, 0, sizeof(nonce));
         return -1;
     }
-    qmi_error = execute_request(&request, &qmi_result);
     memset(&control_result, 0, sizeof(control_result));
+    if (!djonehub_voice_daemon_operation_allowed(
+            status_only, request.operation == DJONEHUB_VOICE_STATUS)) {
+        frame_length = djonehub_control_encode_response(
+            key, nonce, DJONEHUB_CONTROL_FORBIDDEN, request.request_id, NULL,
+            frame, sizeof(frame));
+        memset(nonce, 0, sizeof(nonce));
+        if (frame_length == 0U ||
+            write_exact(descriptor, frame, frame_length) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+    qmi_error = execute_request(&request, &qmi_result);
     if (qmi_error == DJONEHUB_QMI_VOICE_SUCCESS) {
         status = DJONEHUB_CONTROL_OK;
         control_result.operation = request.operation;
@@ -347,15 +360,18 @@ static int handle_client(int descriptor,
 }
 
 static int parse_arguments(int argc, char **argv, const char **key_file,
-                           int *once)
+                           int *once, int *status_only)
 {
     int index;
 
     *key_file = DEFAULT_KEY_FILE;
     *once = 0;
+    *status_only = 0;
     for (index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--once") == 0) {
             *once = 1;
+        } else if (strcmp(argv[index], "--status-only") == 0) {
+            *status_only = 1;
         } else if (strcmp(argv[index], "--key-file") == 0 &&
                    index + 1 < argc) {
             *key_file = argv[++index];
@@ -371,11 +387,13 @@ int main(int argc, char **argv)
     uint8_t key[DJONEHUB_PAIRING_KEY_BYTES];
     const char *key_file;
     int once;
+    int status_only;
     int listener;
     int exit_status = EXIT_SUCCESS;
 
-    if (parse_arguments(argc, argv, &key_file, &once) != 0) {
-        daemon_logf("usage: djonehub-voice-daemon [--once] [--key-file PATH]");
+    if (parse_arguments(argc, argv, &key_file, &once, &status_only) != 0) {
+        daemon_logf("usage: djonehub-voice-daemon [--once] [--status-only] "
+                    "[--key-file PATH]");
         return EXIT_FAILURE;
     }
     if (!valid_key_owner(key_file) ||
@@ -414,7 +432,7 @@ int main(int argc, char **argv)
         if (peer_length == (socklen_t)sizeof(peer) &&
             peer.sin_family == AF_INET && peer_is_usb_host(&peer) &&
             configure_client(client) == 0) {
-            if (handle_client(client, key) == 0) {
+            if (handle_client(client, key, status_only) == 0) {
                 outcome = DJONEHUB_DAEMON_AUTHENTICATED_RESPONSE_SENT;
             }
         }

@@ -51,6 +51,23 @@ struct VoiceControlProtocolOfflineTest {
         precondition(decoded.result?.calls[1].id == 2)
         precondition(decoded.result?.calls[1].state == 3)
 
+        var forbiddenResponse = Data(hex: "444a4f4801030700000000000102030405060708")
+        var authenticatedForbidden = nonce
+        authenticatedForbidden.append(forbiddenResponse)
+        forbiddenResponse.append(contentsOf: HMAC<SHA256>.authenticationCode(
+            for: authenticatedForbidden,
+            using: SymmetricKey(data: key)
+        ))
+        let forbidden = try VoiceControlProtocol.decodeResponse(
+            pairingKey: key,
+            nonce: nonce,
+            frame: forbiddenResponse,
+            expectedRequestID: requestID,
+            expectedOperation: .status
+        )
+        precondition(forbidden.status == .forbidden)
+        precondition(forbidden.result == nil)
+
         var tampered = response
         tampered[tampered.count - 1] ^= 0x01
         do {

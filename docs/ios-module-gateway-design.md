@@ -25,11 +25,10 @@ QDC507 当前 ECM 地址固定为 `192.168.225.1`，认证 voice daemon 监听 T
 - connect/read/write 默认 5 秒有界，超时和任务取消都会关闭连接；
 - DIAL 与 call ID 在客户端先做白名单校验。
 
-探针 UI 已增加只读控制区域：`VoiceControlModel` 默认没有凭据，`STATUS` 按钮保持禁用；
-生产配对层完成后只能通过内存注入，或显式读取对应模块的 Keychain 项来解锁该按钮。
-UI 不接收自由格式 AT/QMI 命令，不把 key 放入文本框、UserDefaults 或日志，也不会在
-探针启动时自动读写 Keychain。拨号、接听、挂断仍需在配对和 CallKit 生命周期完成后
-再接入。
+探针 UI 已接入受限电话控制区域：`VoiceControlModel` 默认没有凭据；短期 STATUS 凭据
+只能读取状态，短期 control-session 凭据才会显示拨号、按 call ID 接听和挂断。App
+每秒执行一次认证 STATUS 轮询来刷新来电状态，拨号前要求界面二次确认。UI 不接收自由
+格式 AT/QMI 命令，也不把 key 放入文本框、UserDefaults 或日志。
 
 仍未完成：模块到 iPhone 的双向 PCM 媒体传输、生产 pairing/轮换/撤销、后台来电与
 CallKit 生命周期、以及真机上完整的 iOS 本地网络/USB 配件权限和断线恢复策略。
@@ -38,6 +37,12 @@ CallKit 生命周期、以及真机上完整的 iOS 本地网络/USB 配件权�
 Mac 后端生成随机 32 字节 key、在模块启动一次认证 daemon，并输出一小时内可导入的 JSON
 配对包；iOS 校验固定 purpose/endpoint、有效期和 key 指纹后，按模块写入不可同步
 Keychain。该流程仍依赖 Mac 完成首次武装，不能替代下节要求的生产信任根。
+
+STATUS 实机闭环通过后又增加了 `development-control-session`：模块下次启动时只消费一次
+marker，daemon 就绪后删除模块磁盘上的 key，但不以 `--once` 退出，因此同一供电周期可
+连续执行 `STATUS / DIAL / ANSWER / END`。断电即结束会话。原
+`development-status-only` 明确以 `--once --status-only` 启动，非 STATUS 请求在模块
+侧返回 `FORBIDDEN`，iOS Keychain 的旧 32 字节裸值也只会迁移为只读权限。
 
 ### 1.0.1 配对是独立的产品门槛
 

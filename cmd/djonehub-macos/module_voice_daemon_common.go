@@ -23,12 +23,15 @@ const (
 	voiceTestRemoteBinary     = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
 	voiceTestRemoteKey        = voiceTestRemoteDir + "/pairing.key"
 	voiceTestRemoteScript     = voiceTestRemoteDir + "/start-once.sh"
-	voiceTestRemoteMarker     = voiceTestRemoteDir + "/run-once"
+	voiceTestLegacyOnceMarker = voiceTestRemoteDir + "/run-once"
+	voiceTestRemoteOnceMarker = voiceTestRemoteDir + "/run-status-once"
+	voiceTestRemoteSessionMarker = voiceTestRemoteDir + "/run-control-session"
 	voiceTestRemoteState      = voiceTestRemoteDir + "/last-start.state"
 	voiceTestRemoteLog        = voiceTestRemoteDir + "/last-start.log"
 	voiceTestInitLink         = "/etc/rc5.d/S99djonehub-voice-test"
 	voiceTestPIDFile          = "/run/djonehub-voice-test.pid"
-	voiceTestPairingPurpose   = "development-status-only"
+	voiceTestStatusPurpose    = "development-status-only"
+	voiceTestSessionPurpose   = "development-control-session"
 	voiceTestPairingValidity  = time.Hour
 
 	voiceControlMagic        = 0x444a4f48
@@ -62,14 +65,17 @@ func developmentPairingModuleIdentifier(key []byte) (string, error) {
 	return hex.EncodeToString(sum[:16]), nil
 }
 
-func encodeDevelopmentPairingBundle(key []byte, now time.Time) ([]byte, string, error) {
+func encodeDevelopmentPairingBundle(key []byte, purpose string, now time.Time) ([]byte, string, error) {
 	identifier, err := developmentPairingModuleIdentifier(key)
 	if err != nil {
 		return nil, "", err
 	}
+	if purpose != voiceTestStatusPurpose && purpose != voiceTestSessionPurpose {
+		return nil, "", errors.New("测试配对包 purpose 无效")
+	}
 	bundle := developmentPairingBundle{
 		Version:          1,
-		Purpose:          voiceTestPairingPurpose,
+		Purpose:          purpose,
 		ModuleIdentifier: identifier,
 		PairingKeyBase64: base64.StdEncoding.EncodeToString(key),
 		Host:             "192.168.225.1",
@@ -216,18 +222,27 @@ func voiceDaemonReplyFrameForTest(key, nonce []byte, requestID uint64, payload [
 	return append(unsigned, voiceControlTag(key, nonce, unsigned)...)
 }
 
-const voiceTestStartOnceScript = `#!/bin/sh
+const voiceTestStartScript = `#!/bin/sh
 base=/usrdata/djonehub/voice-test
 binary="$base/djonehub-voice-daemon.armv7"
 key="$base/pairing.key"
-marker="$base/run-once"
+once_marker="$base/run-status-once"
+session_marker="$base/run-control-session"
 state="$base/last-start.state"
 log="$base/last-start.log"
 pidfile=/run/djonehub-voice-test.pid
 
-test -f "$marker" || exit 0
-rm -f "$marker"
-printf 'marker-consumed\n' >"$state"
+if test -f "$once_marker"; then
+    mode=status-once
+    daemon_args="--once --status-only"
+elif test -f "$session_marker"; then
+    mode=control-session
+    daemon_args=
+else
+    exit 0
+fi
+rm -f "$once_marker" "$session_marker"
+printf 'marker-consumed:%s\n' "$mode" >"$state"
 : >"$log"
 sync
 
@@ -237,7 +252,7 @@ sync
         if ip addr show 2>/dev/null | grep -q 'inet 192\.168\.225\.1/'; then
             printf 'daemon-starting\n' >"$state"
             chmod 600 "$key" || exit 1
-            LD_LIBRARY_PATH=/usr/lib "$binary" --once --key-file "$key" >>"$log" 2>&1 &
+            LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" >>"$log" 2>&1 &
             daemon_pid=$!
             printf '%s\n' "$daemon_pid" >"$pidfile"
             ready=0

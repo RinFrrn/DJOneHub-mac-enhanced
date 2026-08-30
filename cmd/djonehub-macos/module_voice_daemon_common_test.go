@@ -93,7 +93,7 @@ func TestDevelopmentPairingBundleMatchesIOSContract(t *testing.T) {
 		key[index] = byte(index)
 	}
 	now := time.Unix(2_000_000_000, 0).UTC()
-	data, identifier, err := encodeDevelopmentPairingBundle(key, now)
+	data, identifier, err := encodeDevelopmentPairingBundle(key, voiceTestStatusPurpose, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,43 @@ func TestDevelopmentPairingBundleMatchesIOSContract(t *testing.T) {
 }
 
 func TestDevelopmentPairingBundleRejectsWrongKeyLength(t *testing.T) {
-	if _, _, err := encodeDevelopmentPairingBundle(make([]byte, 31), time.Now()); err == nil {
+	if _, _, err := encodeDevelopmentPairingBundle(make([]byte, 31), voiceTestStatusPurpose, time.Now()); err == nil {
 		t.Fatal("short pairing key accepted")
+	}
+}
+
+func TestDevelopmentControlSessionBundleMatchesIOSContract(t *testing.T) {
+	key := make([]byte, voiceControlTagBytes)
+	now := time.Unix(2_000_000_000, 0).UTC()
+	data, _, err := encodeDevelopmentPairingBundle(key, voiceTestSessionPurpose, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle developmentPairingBundle
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Purpose != "development-control-session" {
+		t.Fatalf("unexpected purpose: %q", bundle.Purpose)
+	}
+}
+
+func TestDevelopmentPairingBundleRejectsUnknownPurpose(t *testing.T) {
+	if _, _, err := encodeDevelopmentPairingBundle(make([]byte, voiceControlTagBytes), "production", time.Now()); err == nil {
+		t.Fatal("unknown pairing purpose accepted")
+	}
+}
+
+func TestVoiceTestStartScriptSeparatesReadOnlyAndControlModes(t *testing.T) {
+	for _, required := range []string{
+		"run-status-once",
+		"run-control-session",
+		"daemon_args=\"--once --status-only\"",
+		"mode=control-session",
+		"rm -f \"$once_marker\" \"$session_marker\"",
+	} {
+		if !strings.Contains(voiceTestStartScript, required) {
+			t.Fatalf("start script missing %q", required)
+		}
 	}
 }

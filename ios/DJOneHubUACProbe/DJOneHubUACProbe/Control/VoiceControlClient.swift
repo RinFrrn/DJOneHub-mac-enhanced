@@ -8,6 +8,9 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var moduleIdentifier: String?
     @Published private(set) var availableModuleIdentifiers: [String] = []
+    @Published private(set) var access: VoiceControlAccess?
+    @Published private(set) var calls: [VoiceCallSnapshot] = []
+    @Published var dialNumber = ""
     @Published var isImportingPairing = false
     @Published var isConfirmingUnpair = false
 
@@ -16,10 +19,12 @@ final class VoiceControlModel: ObservableObject {
     private var requestTask: Task<Void, Never>?
 
     var isConfigured: Bool { client != nil }
+    var canControlCalls: Bool { client != nil && access == .controlSession }
 
     init(client: VoiceControlClient? = nil) {
         self.client = client
         if client != nil {
+            access = .controlSession
             stateText = "已配置（内存）"
         }
     }
@@ -35,10 +40,12 @@ final class VoiceControlModel: ObservableObject {
         moduleIdentifier = nil
         do {
             client = try VoiceControlClient(pairingKey: pairingKey)
+            access = .controlSession
             stateText = "已配置（内存）"
             detailText = ""
         } catch {
             client = nil
+            access = nil
             stateText = "pairing key 无效"
             detailText = error.localizedDescription
         }
@@ -48,7 +55,7 @@ final class VoiceControlModel: ObservableObject {
     /// pairing store. The app does not call this during probe startup.
     func configure(from keyStore: PairingKeyStore) {
         do {
-            guard let key = try keyStore.load() else {
+            guard let credential = try keyStore.load() else {
                 client = nil
                 self.keyStore = nil
                 moduleIdentifier = nil
@@ -56,10 +63,8 @@ final class VoiceControlModel: ObservableObject {
                 detailText = "请先完成生产配对"
                 return
             }
-            configure(pairingKey: key)
+            try selectPairing(moduleIdentifier: keyStore.moduleIdentifier, credential: credential)
             self.keyStore = keyStore
-            moduleIdentifier = keyStore.moduleIdentifier
-            stateText = "已配对 · \(Self.shortIdentifier(keyStore.moduleIdentifier))"
         } catch {
             client = nil
             self.keyStore = nil
@@ -81,7 +86,7 @@ final class VoiceControlModel: ObservableObject {
                 }
                 return
             }
-            try selectPairing(moduleIdentifier: pairing.moduleIdentifier, key: pairing.key)
+            try selectPairing(moduleIdentifier: pairing.moduleIdentifier, credential: pairing.credential)
         } catch {
             clearConfiguration(preservingModuleList: true)
             stateText = "读取 pairing key 失败"
@@ -100,10 +105,10 @@ final class VoiceControlModel: ObservableObject {
         }
         do {
             let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
-            guard let key = try keyStore.load() else {
+            guard let credential = try keyStore.load() else {
                 throw PairingKeyStoreError.unexpectedData
             }
-            try selectPairing(moduleIdentifier: moduleIdentifier, key: key)
+            try selectPairing(moduleIdentifier: moduleIdentifier, credential: credential)
         } catch {
             clearConfiguration(preservingModuleList: true)
             stateText = "选择模块失败"
@@ -115,7 +120,8 @@ final class VoiceControlModel: ObservableObject {
         do {
             let pairing = try DevelopmentPairingBundle.decodeAndValidate(data)
             let keyStore = try PairingKeyStore(moduleIdentifier: pairing.moduleIdentifier)
-            try keyStore.save(pairing.pairingKey)
+            try keyStore.save(StoredPairingCredential(key: pairing.pairingKey, access: pairing.access))
+            try PairingKeyStore.deleteAll(exceptModuleIdentifier: pairing.moduleIdentifier)
             restorePairings()
             selectPairing(moduleIdentifier: pairing.moduleIdentifier)
             detailText = "测试凭据已保存到本机 Keychain；请删除原始配对文件"
@@ -152,6 +158,8 @@ final class VoiceControlModel: ObservableObject {
         client = nil
         keyStore = nil
         moduleIdentifier = nil
+        access = nil
+        calls = []
         if !preservingModuleList {
             availableModuleIdentifiers = []
         }
@@ -160,12 +168,15 @@ final class VoiceControlModel: ObservableObject {
         detailText = ""
     }
 
-    private func selectPairing(moduleIdentifier: String, key: Data) throws {
+    private func selectPairing(moduleIdentifier: String, credential: StoredPairingCredential) throws {
         let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
-        client = try VoiceControlClient(pairingKey: key)
+        client = try VoiceControlClient(pairingKey: credential.key)
         self.keyStore = keyStore
         self.moduleIdentifier = moduleIdentifier
-        stateText = "已配对 · \(Self.shortIdentifier(moduleIdentifier))"
+        access = credential.access
+        stateText = credential.access == .controlSession
+            ? "控制会话 · \(Self.shortIdentifier(moduleIdentifier))"
+            : "STATUS 配对 · \(Self.shortIdentifier(moduleIdentifier))"
         detailText = ""
     }
 
@@ -179,27 +190,82 @@ final class VoiceControlModel: ObservableObject {
             detailText = "控制请求被阻止：先完成生产配对流程"
             return
         }
-        guard !isBusy else { return }
+        perform(state: "读取中…", success: "模块已响应 STATUS") {
+            try await client.status()
+        }
+    }
 
+    func pollStatus() {
+        guard let client, canControlCalls else { return }
+        perform(state: nil, success: nil, reportFailure: false) {
+            try await client.status()
+        }
+    }
+
+    func dial() {
+        guard let client, requireCallControl() else { return }
+        let number = dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        perform(state: "拨号中…", success: "拨号命令已确认") {
+            try await client.dial(number)
+        }
+    }
+
+    func answer(callID: UInt8) {
+        guard let client, requireCallControl() else { return }
+        perform(state: "接听中…", success: "接听命令已确认") {
+            try await client.answer(callID: callID)
+        }
+    }
+
+    func end(callID: UInt8) {
+        guard let client, requireCallControl() else { return }
+        perform(state: "挂断中…", success: "挂断命令已确认") {
+            try await client.end(callID: callID)
+        }
+    }
+
+    private func requireCallControl() -> Bool {
+        guard canControlCalls else {
+            stateText = "当前凭据仅允许 STATUS"
+            detailText = "请导入控制会话配对包"
+            return false
+        }
+        return true
+    }
+
+    private func perform(
+        state: String?,
+        success: String?,
+        reportFailure: Bool = true,
+        operation: @escaping @Sendable () async throws -> VoiceControlResult
+    ) {
+        guard !isBusy else { return }
         isBusy = true
-        stateText = "读取中…"
-        detailText = ""
+        if let state {
+            stateText = state
+            detailText = ""
+        }
         requestTask = Task { [weak self] in
             do {
-                let result = try await client.status()
+                let result = try await operation()
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self?.isBusy = false
-                    self?.stateText = "模块已响应 STATUS"
-                    self?.detailText = Self.describe(result)
+                    self?.calls = result.calls.filter { $0.state != 0x09 }
+                    if let success {
+                        self?.stateText = success
+                        self?.detailText = Self.describe(result)
+                    }
                     self?.requestTask = nil
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self?.isBusy = false
-                    self?.stateText = "控制请求失败"
-                    self?.detailText = error.localizedDescription
+                    if reportFailure {
+                        self?.stateText = "控制请求失败"
+                        self?.detailText = error.localizedDescription
+                    }
                     self?.requestTask = nil
                 }
             }
@@ -236,7 +302,7 @@ actor VoiceControlClient {
         var ioTimeout: Duration = .seconds(5)
     }
 
-    enum ClientError: Error {
+    enum ClientError: Error, LocalizedError {
         case invalidPort
         case connectionFailed(String)
         case connectionClosed
@@ -244,6 +310,33 @@ actor VoiceControlClient {
         case sendFailed(String)
         case receiveFailed(String)
         case responseStatus(VoiceControlStatus)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidPort:
+                return "模块控制端口无效"
+            case .connectionFailed(let detail):
+                return "连接模块失败：\(detail)"
+            case .connectionClosed:
+                return "模块提前关闭了连接"
+            case .timeout:
+                return "模块控制请求超时"
+            case .sendFailed(let detail):
+                return "发送控制请求失败：\(detail)"
+            case .receiveFailed(let detail):
+                return "读取模块响应失败：\(detail)"
+            case .responseStatus(.forbidden):
+                return "当前模块会话不允许该操作"
+            case .responseStatus(.precondition):
+                return "当前通话状态不允许该操作"
+            case .responseStatus(.confirmationTimeout):
+                return "模块未能确认通话状态变化"
+            case .responseStatus(.authenticationFailed):
+                return "模块拒绝了配对凭据"
+            case .responseStatus(let status):
+                return "模块返回控制错误（\(status.rawValue)）"
+            }
+        }
     }
 
     private let pairingKey: Data

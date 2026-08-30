@@ -204,6 +204,15 @@ static int test_response(void)
                                            &request_id, &decoded) == 0);
     CHECK(status == DJONEHUB_CONTROL_PRECONDITION);
     CHECK(request_id == 43U);
+
+    length = djonehub_control_encode_response(
+        key, nonce, DJONEHUB_CONTROL_FORBIDDEN, 44U, NULL, frame,
+        sizeof(frame));
+    CHECK(length == DJONEHUB_CONTROL_HEADER_BYTES + DJONEHUB_CONTROL_TAG_BYTES);
+    CHECK(djonehub_control_decode_response(key, nonce, frame, length, &status,
+                                           &request_id, &decoded) == 0);
+    CHECK(status == DJONEHUB_CONTROL_FORBIDDEN);
+    CHECK(request_id == 44U);
     return 0;
 }
 

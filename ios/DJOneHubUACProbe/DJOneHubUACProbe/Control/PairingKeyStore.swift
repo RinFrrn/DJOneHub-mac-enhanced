@@ -2,6 +2,16 @@ import Foundation
 import CryptoKit
 import Security
 
+enum VoiceControlAccess: UInt8, Sendable {
+    case statusOnly = 1
+    case controlSession = 2
+}
+
+struct StoredPairingCredential: Sendable {
+    let key: Data
+    let access: VoiceControlAccess
+}
+
 enum PairingKeyStoreError: Error, LocalizedError {
     case invalidKeyLength
     case invalidModuleIdentifier
@@ -49,7 +59,9 @@ struct PairingKeyStore: Sendable {
         self.account = "module:\(moduleIdentifier)"
     }
 
-    func load() throws -> Data? {
+    private static let envelopePrefix = Data([0x44, 0x4A, 0x50, 0x01])
+
+    func load() throws -> StoredPairingCredential? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -59,8 +71,7 @@ struct PairingKeyStore: Sendable {
         switch status {
         case errSecSuccess:
             guard let data = result as? Data else { throw PairingKeyStoreError.unexpectedData }
-            guard data.count == Self.keyLength else { throw PairingKeyStoreError.invalidKeyLength }
-            return data
+            return try Self.decodeCredential(data)
         case errSecItemNotFound:
             return nil
         default:
@@ -68,11 +79,12 @@ struct PairingKeyStore: Sendable {
         }
     }
 
-    func save(_ key: Data) throws {
-        guard key.count == Self.keyLength else { throw PairingKeyStoreError.invalidKeyLength }
+    func save(_ credential: StoredPairingCredential) throws {
+        guard credential.key.count == Self.keyLength else { throw PairingKeyStoreError.invalidKeyLength }
+        let encoded = Self.encodeCredential(credential)
 
         var item = baseQuery
-        item[kSecValueData as String] = key
+        item[kSecValueData as String] = encoded
         item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
         let addStatus = SecItemAdd(item as CFDictionary, nil)
@@ -85,7 +97,7 @@ struct PairingKeyStore: Sendable {
         // reject changing kSecAttrAccessible during an update even when the value
         // itself is otherwise valid.
         let updateStatus = SecItemUpdate(baseQuery as CFDictionary, [
-            kSecValueData as String: key
+            kSecValueData as String: encoded
         ] as CFDictionary)
         guard updateStatus == errSecSuccess else {
             throw PairingKeyStoreError.securityStatus(updateStatus)
@@ -99,7 +111,7 @@ struct PairingKeyStore: Sendable {
         }
     }
 
-    static func loadAll(service: String = defaultService) throws -> [(moduleIdentifier: String, key: Data)] {
+    static func loadAll(service: String = defaultService) throws -> [(moduleIdentifier: String, credential: StoredPairingCredential)] {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -122,12 +134,41 @@ struct PairingKeyStore: Sendable {
                   account.hasPrefix("module:") else {
                 return nil
             }
-            guard let key = item[kSecValueData as String] as? Data,
-                  key.count == keyLength else {
+            guard let data = item[kSecValueData as String] as? Data else {
                 throw PairingKeyStoreError.unexpectedData
             }
-            return (String(account.dropFirst("module:".count)), key)
+            return (String(account.dropFirst("module:".count)), try decodeCredential(data))
         }.sorted { $0.moduleIdentifier < $1.moduleIdentifier }
+    }
+
+    static func deleteAll(exceptModuleIdentifier retainedIdentifier: String? = nil) throws {
+        for pairing in try loadAll() where pairing.moduleIdentifier != retainedIdentifier {
+            try PairingKeyStore(moduleIdentifier: pairing.moduleIdentifier).delete()
+        }
+    }
+
+    private static func encodeCredential(_ credential: StoredPairingCredential) -> Data {
+        var encoded = envelopePrefix
+        encoded.append(credential.access.rawValue)
+        encoded.append(credential.key)
+        return encoded
+    }
+
+    private static func decodeCredential(_ data: Data) throws -> StoredPairingCredential {
+        // Migrate the original STATUS-only Keychain value without granting it
+        // the newly introduced mutating control capability.
+        if data.count == keyLength {
+            return StoredPairingCredential(key: data, access: .statusOnly)
+        }
+        guard data.count == envelopePrefix.count + 1 + keyLength,
+              data.prefix(envelopePrefix.count) == envelopePrefix,
+              let access = VoiceControlAccess(rawValue: data[envelopePrefix.count]) else {
+            throw PairingKeyStoreError.unexpectedData
+        }
+        return StoredPairingCredential(
+            key: data.suffix(keyLength),
+            access: access
+        )
     }
 
     private var baseQuery: [String: Any] {
@@ -155,7 +196,7 @@ enum DevelopmentPairingBundleError: Error, LocalizedError, Equatable {
         switch self {
         case .malformed: return "测试配对包格式无效"
         case .unsupportedVersion: return "测试配对包版本不受支持"
-        case .wrongPurpose: return "该文件不是 STATUS 测试配对包"
+        case .wrongPurpose: return "该文件不是受支持的 DJOneHub 测试配对包"
         case .invalidEndpoint: return "测试配对包指向了非预期模块地址"
         case .invalidKey: return "测试配对包中的 key 无效"
         case .identifierMismatch: return "模块标识与 pairing key 指纹不匹配"
@@ -167,7 +208,8 @@ enum DevelopmentPairingBundleError: Error, LocalizedError, Equatable {
 }
 
 struct DevelopmentPairingBundle: Decodable, Sendable {
-    static let purpose = "development-status-only"
+    static let statusPurpose = "development-status-only"
+    static let controlSessionPurpose = "development-control-session"
     static let host = "192.168.225.1"
     static let port: UInt16 = 45_750
     static let maximumValidity: TimeInterval = 60 * 60
@@ -193,6 +235,7 @@ struct DevelopmentPairingBundle: Decodable, Sendable {
     struct Validated: Sendable {
         let moduleIdentifier: String
         let pairingKey: Data
+        let access: VoiceControlAccess
     }
 
     static func decodeAndValidate(_ data: Data, now: Date = Date()) throws -> Validated {
@@ -203,7 +246,15 @@ struct DevelopmentPairingBundle: Decodable, Sendable {
             throw DevelopmentPairingBundleError.malformed
         }
         guard bundle.version == 1 else { throw DevelopmentPairingBundleError.unsupportedVersion }
-        guard bundle.purpose == purpose else { throw DevelopmentPairingBundleError.wrongPurpose }
+        let access: VoiceControlAccess
+        switch bundle.purpose {
+        case statusPurpose:
+            access = .statusOnly
+        case controlSessionPurpose:
+            access = .controlSession
+        default:
+            throw DevelopmentPairingBundleError.wrongPurpose
+        }
         guard bundle.host == host, bundle.port == port else {
             throw DevelopmentPairingBundleError.invalidEndpoint
         }
@@ -228,7 +279,7 @@ struct DevelopmentPairingBundle: Decodable, Sendable {
               expiresAt.timeIntervalSince(createdAt) <= maximumValidity else {
             throw DevelopmentPairingBundleError.validityTooLong
         }
-        return Validated(moduleIdentifier: expectedIdentifier, pairingKey: key)
+        return Validated(moduleIdentifier: expectedIdentifier, pairingKey: key, access: access)
     }
 
     static func moduleIdentifier(for key: Data) -> String {

@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var probe: AudioProbeModel
     @EnvironmentObject private var networkProbe: ModuleNetworkProbe
     @EnvironmentObject private var voiceControl: VoiceControlModel
+    @State private var isConfirmingDial = false
 
     var body: some View {
         NavigationStack {
@@ -41,6 +42,24 @@ struct ContentView: View {
                 voiceControl.unpairCurrentModule()
             }
         }
+        .task(id: voiceControl.moduleIdentifier) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if voiceControl.canControlCalls {
+                    voiceControl.pollStatus()
+                }
+            }
+        }
+        .confirmationDialog(
+            "确认拨打 \(voiceControl.dialNumber)？",
+            isPresented: $isConfirmingDial,
+            titleVisibility: .visible
+        ) {
+            Button("拨打") {
+                voiceControl.dial()
+            }
+            Button("取消", role: .cancel) {}
+        }
     }
 
     private var voiceControlSection: some View {
@@ -59,7 +78,7 @@ struct ContentView: View {
                 }
             }
 
-            Button("导入 STATUS 测试配对包") {
+            Button("导入测试配对包") {
                 voiceControl.isImportingPairing = true
             }
 
@@ -67,6 +86,40 @@ struct ContentView: View {
                 voiceControl.refreshStatus()
             }
             .disabled(voiceControl.isBusy || !voiceControl.isConfigured)
+
+            if voiceControl.canControlCalls {
+                TextField("电话号码", text: $voiceControl.dialNumber)
+                    .keyboardType(.phonePad)
+                    .textContentType(.telephoneNumber)
+
+                Button("拨打电话") {
+                    isConfirmingDial = true
+                }
+                .disabled(
+                    voiceControl.isBusy ||
+                    voiceControl.dialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+
+            ForEach(voiceControl.calls, id: \.id) { call in
+                VStack(alignment: .leading, spacing: 8) {
+                    LabeledContent("通话 #\(call.id)", value: callStateName(call.state))
+                    HStack {
+                        if voiceControl.canControlCalls && [UInt8(0x02), 0x07].contains(call.state) {
+                            Button("接听") {
+                                voiceControl.answer(callID: call.id)
+                            }
+                            .disabled(voiceControl.isBusy)
+                        }
+                        if voiceControl.canControlCalls && call.state != 0x09 {
+                            Button("挂断", role: .destructive) {
+                                voiceControl.end(callID: call.id)
+                            }
+                            .disabled(voiceControl.isBusy)
+                        }
+                    }
+                }
+            }
 
             if voiceControl.isConfigured {
                 Button("撤销当前测试配对", role: .destructive) {
@@ -80,9 +133,24 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("当前只接入只读 STATUS。测试配对包由 Mac 武装流程生成，显式导入后只保存到本机不可同步 Keychain；请随即删除原文件。它不是最终的无 Mac 生产配对方案。")
+            Text(voiceControl.canControlCalls
+                 ? "当前是一次启动有效的开发控制会话，可执行拨号、接听和挂断。模块断电后会话失效；测试凭据只保存在本机不可同步 Keychain。这仍不是最终的无 Mac 生产配对方案。"
+                 : "STATUS 配对仅允许只读状态。测试配对包由 Mac 武装流程生成，显式导入后只保存到本机不可同步 Keychain；请随即删除原文件。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func callStateName(_ state: UInt8) -> String {
+        switch state {
+        case 0x01: return "拨号中"
+        case 0x02: return "来电"
+        case 0x03: return "通话中"
+        case 0x04: return "呼叫进展"
+        case 0x05: return "振铃"
+        case 0x07: return "等待"
+        case 0x09: return "结束"
+        default: return "状态 0x\(String(state, radix: 16))"
         }
     }
 

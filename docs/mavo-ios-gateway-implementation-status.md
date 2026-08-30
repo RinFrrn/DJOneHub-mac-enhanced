@@ -75,14 +75,19 @@
   `exit_status=0`、`call_count=0`。写接口实现要求 `confirm=true` 与精确的
   `confirm_operation`，号码/Call ID 在 Go 后端和 ARM 工具两层校验，QMI action 后必须
   回读状态确认；该阶段当时尚未调用任何 Dial/Answer/End 写命令。
-- iOS 探针已把控制客户端接入页面的只读状态区域：默认无 pairing key 时按钮保持禁用；
-  显式内存注入或导入测试配对包后，才允许发出单次 `STATUS` 请求并在页面显示通话快照。
-  客户端连接被限定到 `.wiredEthernet`；Keychain 按稳定模块标识隔离并禁止同步，只在用户
-  明确导入时写入，启动时可恢复本 App 已保存的项目。尚未开放拨号/接听/挂断按钮。
+- iOS 探针已把控制客户端接入页面：默认无 pairing key 时按钮保持禁用；STATUS-only
+  凭据只允许状态查询，control-session 凭据才显示拨号、接听和挂断。客户端连接被限定
+  到 `.wiredEthernet`；Keychain 禁止同步并在值内保存权限 envelope，旧 32 字节裸 key
+  只迁移为只读。App 每秒轮询 call snapshot，拨号要求界面二次确认。
 - 后续补齐 development-only 的 STATUS 测试配对包：Mac 一次性武装接口生成随机 key，
   在返回文件前完成真实认证 STATUS 预检；iOS 显式导入后校验固定 endpoint、一小时
   有效期、创建时间及 SHA-256 模块标识，再写入不可同步 Keychain。App 可选择
   多模块并逐项撤销；已配对时禁用裸 TCP 探针，避免旧 one-shot daemon 被提前消费。
+- iPhone 经 USB ECM 的真实认证 STATUS 已完成：模块返回当前无活动通话；接回 Mac 后
+  状态为 `key=absent`、`marker=absent`、`daemon-exit:0`，证明 key 在 daemon 就绪后
+  已从磁盘删除，一次性请求完成后正常退出。随后增加一次供电周期有效的控制会话模式：
+  同样只消费一次启动 marker 并删除磁盘 key，但 daemon 保持在内存中处理多个认证请求；
+  断电即结束，不等同于生产常驻配对。
 - 实机发现 LaunchAgent 直接读取 Downloads 的新 ARM 文件会被 macOS TCC 卡在 `open(2)`，
   且后台进程无法可靠展示授权窗。安装器现由交互式终端校验 Actions 清单并把固定范围的
   ARM 文件缓存到 DJOneHub 的 Application Support；后端只读该缓存并再次执行固定哈希
@@ -95,14 +100,15 @@
   新增候选 `djonehub-voice-daemon`。它固定绑定 ECM `bridge0` 与
   `192.168.225.1:45750`，只接受 STATUS/DIAL/ANSWER/END，逐连接生成 32 字节随机
   challenge，并以完整 HMAC-SHA256 标签认证请求和响应；每个连接只处理一个请求，
-  因而旧连接上的帧不能拿到新 challenge 后重放。密钥必须是 root 所有、组/其他权限
+  因而旧连接上的帧不能拿到新 challenge 后重放。`--status-only` 在模块侧拒绝 DIAL、
+  ANSWER 和 END，避免短期只读凭据被自定义客户端越权。密钥必须是 root 所有、组/其他权限
   全关且内容恰好 32 字节。未经认证的帧不进入 QMI，也不返回控制结果；`--once` 只在
   完整认证请求已处理且签名响应已发送后退出，裸 TCP 探针、错误 key 和截断帧不会消费它。
 - 控制协议已通过 RFC HMAC-SHA256 已知向量、Swift/C 共享固定帧、错误密钥、帧篡改、
   替换 challenge、非法号码/Call ID、严格 C11、Clang 静态分析和
   Address/Undefined Sanitizer 测试。该
-  daemon 目前仍是源码候选；需等 ARM CI 产物审计通过后，只以 `/tmp` + `--once`
-  做 STATUS 网络闭环，尚未部署或持久化。
+  daemon 的上一固定哈希版本已完成 iPhone STATUS 网络闭环；新增权限模式需重新经过
+  ARM CI 交叉编译、固定哈希更新和实机部署验收。
 - 同一测试中，旧 macOS 通话观察器在 active 后仍会尝试启动 MaVo 音频桥，并因公开
   源码包不含私有模块语音运行时而失败；这不影响 QMI 控制成功，但说明控制面完成不能
   等同于 iOS 双向媒体完成。主动 Dial 尚未做真实号码验收。

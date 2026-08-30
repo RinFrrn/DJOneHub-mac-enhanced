@@ -319,7 +319,7 @@ size_t djonehub_control_encode_response(
     size_t unsigned_length;
 
     if (key == NULL || nonce == NULL || output == NULL || request_id == 0U ||
-        status < DJONEHUB_CONTROL_OK || status > DJONEHUB_CONTROL_INTERNAL) {
+        status < DJONEHUB_CONTROL_OK || status > DJONEHUB_CONTROL_FORBIDDEN) {
         return 0U;
     }
     if (status == DJONEHUB_CONTROL_OK) {
@@ -399,7 +399,7 @@ int djonehub_control_decode_response(
         result == NULL ||
         valid_header(frame, frame_length, FRAME_RESPONSE, &payload_length,
                      &decoded_request_id) != 0 ||
-        frame[6] > (uint8_t)DJONEHUB_CONTROL_INTERNAL ||
+        frame[6] > (uint8_t)DJONEHUB_CONTROL_FORBIDDEN ||
         decoded_request_id == 0U ||
         payload_length > DJONEHUB_CONTROL_SNAPSHOT_BYTES) {
         return -1;

@@ -162,6 +162,21 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-once \
 配对包只允许在创建后一小时内导入，module identifier 必须等于 key 的 SHA-256 前 16 字节；
 错误 endpoint、过期包和被替换的 identifier 都会被拒绝。
 
+STATUS 闭环通过后，可武装一次“本次供电有效”的开发控制会话：
+
+```sh
+curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-session \
+  -H 'Content-Type: application/json' \
+  -d '{"confirm":true,"confirm_operation":"arm-ios-control-session"}' \
+  -o "$HOME/Downloads/DJOneHub-CONTROL-pairing.json"
+```
+
+控制会话允许认证的 `STATUS / DIAL / ANSWER / END`，App 每秒刷新活动 call snapshot，
+拨号前还会要求一次界面确认。模块启动脚本在 daemon 成功载入 key 后立即删除磁盘 key；
+daemon 只在当前模块供电周期内存活，断电后不会自行恢复。原 STATUS 模式则以
+`--once --status-only` 启动，模块端会拒绝任何变更通话状态的命令，不能靠修改 App
+绕过。两类短期凭据在 Keychain 中带不同权限，新包导入后会清除旧的开发凭据。
+
 接回 Mac 后查看状态或完整卸载：
 
 ```sh
@@ -172,10 +187,10 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/uninstall \
 
 卸载接口只会删除精确指向 DJOneHub 测试脚本的启动链接；遇到同名非本项目文件会拒绝。
 
-当前模块侧已经有经过真实 STATUS/ANSWER/END 验收的一次性认证 voice daemon 候选；
+当前模块侧已经有经过真实 STATUS/ANSWER/END 验收的认证 voice daemon 候选；
 Mac 侧会用临时 key 启动它，并明确报告 `one_shot=true`、`persistent=false`。iOS 侧新增
-的是该控制协议客户端，不会部署 daemon、写模块持久分区或建立生产 pairing。生产通话
-仍缺方向正确的双向 PCM 媒体平面。
+的是该控制协议客户端和一次供电周期内的开发控制会话，不会建立生产 pairing。生产通话
+仍缺方向正确的双向 PCM 媒体平面、后台来电与 CallKit 生命周期。
 
 如果界面显示 `POSIX 错误 61`，它是 `ECONNREFUSED` 的系统表示，含义相同：ECM
 链路已经到达模块，但 `45750` 没有监听进程。仓库现在提供一个仅用于闭环验证的
