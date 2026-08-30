@@ -74,7 +74,14 @@
 - 固定哈希部署端随后只开放该候选的 `status` 子命令，并已在真实模块得到 HTTP 200、
   `exit_status=0`、`call_count=0`。写接口实现要求 `confirm=true` 与精确的
   `confirm_operation`，号码/Call ID 在 Go 后端和 ARM 工具两层校验，QMI action 后必须
-  回读状态确认；截至本记录尚未调用任何 Dial/Answer/End 写命令。
+  回读状态确认；该阶段当时尚未调用任何 Dial/Answer/End 写命令。
+- 真实来电写操作验收随后完成：先以 `status` 锁定唯一的 `call_id=1` 和 `incoming`，
+  `answer 1` 在约 0.43 秒内返回成功并回读确认；独立 `status` 随后得到
+  `state=conversation`；`end 1` 同样在约 0.43 秒内确认，最终 `call_count=0`。
+  部署端每次执行后都会删除模块 `/tmp` 中的固定路径候选，没有写入持久分区。
+- 同一测试中，旧 macOS 通话观察器在 active 后仍会尝试启动 MaVo 音频桥，并因公开
+  源码包不含私有模块语音运行时而失败；这不影响 QMI 控制成功，但说明控制面完成不能
+  等同于 iOS 双向媒体完成。主动 Dial 尚未做真实号码验收。
 - 已在 WSL Ubuntu 26.04 使用 `arm-linux-gnueabi-gcc 15.2.0`，通过真实模块
   glibc 2.22 sysroot 构建 ARMv7 soft-float 产物；连续两次构建逐字节一致。
 - release ELF 仅直接依赖 `libpthread.so.0`、`libdl.so.2`、`libc.so.6` 和

@@ -196,6 +196,13 @@ END 的顺序逐项开放写操作。所有写操作必须串行、限定超时�
 精确操作确认串。号码只允许数字、开头的 `+`、`*`、`#`，Call ID 只允许 1..255，
 二者在 macOS 后端和 ARM 候选内重复校验，避免 shell/QMI 参数透传。
 
+真实来电的 Answer/End 闭环也已完成。部署端先读取唯一 `incoming` call ID，固定
+`answer` 操作在约 0.43 秒内回读到成功，独立状态查询确认 `conversation`；随后固定
+`end` 操作在约 0.43 秒内确认，最终快照为空。由此 STATUS、ANSWER、END 的 QMI
+transport、消息格式、状态策略和清理路径均已通过实机验证；DIAL 仍需使用明确的测试
+号码单独验收。通话期间 macOS 的旧 MaVo 音频桥启动失败不属于 QMI 控制故障，媒体面
+仍需按本设计由模块网关和 iOS 客户端另行实现。
+
 #### 3.1.2 ECM 闭环 sentinel
 
 在真正接入内部 AT 通道前，可以先部署仓库中的 `module/djonehubd.c` 做网络闭环
