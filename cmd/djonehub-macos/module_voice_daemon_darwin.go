@@ -66,11 +66,23 @@ func stopTemporaryVoiceDaemon(adb *adbClient) error {
 }
 
 func sentinelOwnedProcessRunning(adb *adbClient) bool {
-	command := "test -s '" + sentinelPIDFile + "' && read pid < '" + sentinelPIDFile + "' && " +
-		"case \"$pid\" in ''|*[!0-9]*) exit 1;; esac && test -d \"/proc/$pid\" && " +
-		"test \"$(tr '\\000' '\\n' < \"/proc/$pid/cmdline\" 2>/dev/null | sed -n '1p')\" = '" + sentinelRemoteBinary + "'"
+	command := "for proc in /proc/[0-9]*; do test -r \"$proc/cmdline\" || continue; " +
+		"argv0=$(tr '\\000' '\\n' < \"$proc/cmdline\" 2>/dev/null | sed -n '1p'); " +
+		"test \"$argv0\" = '" + sentinelRemoteBinary + "' && exit 0; done; exit 1"
 	_, status, err := adb.shellChecked(command, 8*time.Second)
 	return err == nil && status == 0
+}
+
+func stopOwnedSentinelProcesses(adb *adbClient) error {
+	command := "pids=''; for proc in /proc/[0-9]*; do test -r \"$proc/cmdline\" || continue; " +
+		"argv0=$(tr '\\000' '\\n' < \"$proc/cmdline\" 2>/dev/null | sed -n '1p'); " +
+		"if test \"$argv0\" = '" + sentinelRemoteBinary + "'; then pid=${proc#/proc/}; " +
+		"case \"$pid\" in ''|*[!0-9]*) exit 1;; esac; kill -TERM \"$pid\" 2>/dev/null || true; pids=\"$pids $pid\"; fi; done; " +
+		"attempt=0; while test \"$attempt\" -lt 30; do alive=0; for pid in $pids; do " +
+		"test -d \"/proc/$pid\" && alive=1; done; test \"$alive\" = 0 && break; " +
+		"sleep 0.1; attempt=$((attempt + 1)); done; " +
+		"for pid in $pids; do test ! -d \"/proc/$pid\" || exit 1; done; rm -f '" + sentinelPIDFile + "'"
+	return sentinelShell(adb, command, 10*time.Second)
 }
 
 func restartSentinelHealth(adb *adbClient) error {
@@ -191,7 +203,7 @@ func (a *app) qmiVoiceDaemonStatusAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	wasSentinelRunning := sentinelOwnedProcessRunning(adb)
 	if wasSentinelRunning {
-		if err := sentinelStopOwnedProcess(adb); err != nil {
+		if err := stopOwnedSentinelProcesses(adb); err != nil {
 			writeError(w, http.StatusBadGateway, "停止已确认归属的 sentinel 失败: "+err.Error())
 			return
 		}
@@ -227,11 +239,15 @@ func (a *app) qmiVoiceDaemonStatusAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "启动临时 QMI Voice daemon 失败: "+err.Error())
 		return
 	}
-	time.Sleep(300 * time.Millisecond)
-	readyCommand := "test -s '" + voiceDaemonRemotePIDPath + "' && read pid < '" + voiceDaemonRemotePIDPath + "' && " +
-		"test -d \"/proc/$pid\" && grep -F 'authenticated control listening on 192.168.225.1:45750' '" + voiceDaemonRemoteLogPath + "' >/dev/null"
+	readyCommand := "attempt=0; while test \"$attempt\" -lt 20; do " +
+		"if test -s '" + voiceDaemonRemotePIDPath + "'; then read pid < '" + voiceDaemonRemotePIDPath + "'; " +
+		"if test -d \"/proc/$pid\" && grep -F 'authenticated control listening on 192.168.225.1:45750' '" + voiceDaemonRemoteLogPath + "' >/dev/null 2>&1; then exit 0; fi; " +
+		"test -d \"/proc/$pid\" || break; fi; sleep 0.1; attempt=$((attempt + 1)); done; exit 1"
 	if _, status, readyErr := adb.shellChecked(readyCommand, 8*time.Second); readyErr != nil || status != 0 {
-		logOutput, _, _ := adb.shellChecked("test ! -f '"+voiceDaemonRemoteLogPath+"' || tail -n 40 '"+voiceDaemonRemoteLogPath+"'", 8*time.Second)
+		diagnostic := "printf 'pid='; test ! -f '" + voiceDaemonRemotePIDPath + "' || cat '" + voiceDaemonRemotePIDPath + "'; " +
+			"echo; test ! -f '" + voiceDaemonRemoteLogPath + "' || tail -n 40 '" + voiceDaemonRemoteLogPath + "'; " +
+			"awk '$2 ~ /:B2B6$/ && $4 == \"0A\" { print \"listener=\" $0 }' /proc/net/tcp"
+		logOutput, _, _ := adb.shellChecked(diagnostic, 8*time.Second)
 		writeError(w, http.StatusBadGateway, "QMI Voice daemon 未就绪: "+sentinelCleanShellOutput(logOutput))
 		return
 	}
