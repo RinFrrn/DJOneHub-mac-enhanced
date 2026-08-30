@@ -245,7 +245,12 @@ func (a *app) qmiVoiceDaemonStatusAPI(w http.ResponseWriter, r *http.Request) {
 		"test -d \"/proc/$pid\" || break; fi; sleep 0.1; attempt=$((attempt + 1)); done; exit 1"
 	if _, status, readyErr := adb.shellChecked(readyCommand, 8*time.Second); readyErr != nil || status != 0 {
 		diagnostic := "printf 'pid='; test ! -f '" + voiceDaemonRemotePIDPath + "' || cat '" + voiceDaemonRemotePIDPath + "'; " +
-			"echo; test ! -f '" + voiceDaemonRemoteLogPath + "' || tail -n 40 '" + voiceDaemonRemoteLogPath + "'; " +
+			"echo; if test -s '" + voiceDaemonRemotePIDPath + "'; then read pid < '" + voiceDaemonRemotePIDPath + "'; " +
+			"printf 'cmdline='; tr '\\000' ' ' < \"/proc/$pid/cmdline\" 2>/dev/null || true; echo; " +
+			"printf 'wchan='; cat \"/proc/$pid/wchan\" 2>/dev/null || true; echo; " +
+			"echo 'status_begin'; sed -n '1,40p' \"/proc/$pid/status\" 2>/dev/null || true; echo 'status_end'; fi; " +
+			"ls -l '" + voiceDaemonRemoteLogPath + "' 2>/dev/null || true; " +
+			"echo 'daemon_log_begin'; test ! -f '" + voiceDaemonRemoteLogPath + "' || tail -n 40 '" + voiceDaemonRemoteLogPath + "'; echo 'daemon_log_end'; " +
 			"awk '$2 ~ /:B2B6$/ && $4 == \"0A\" { print \"listener=\" $0 }' /proc/net/tcp"
 		logOutput, _, _ := adb.shellChecked(diagnostic, 8*time.Second)
 		writeError(w, http.StatusBadGateway, "QMI Voice daemon 未就绪: "+sentinelCleanShellOutput(logOutput))
