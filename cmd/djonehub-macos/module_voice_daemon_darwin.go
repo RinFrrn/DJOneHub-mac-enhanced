@@ -234,7 +234,7 @@ func (a *app) qmiVoiceDaemonStatusAPI(w http.ResponseWriter, r *http.Request) {
 		"rm -f '" + voiceDaemonRemotePIDPath + "' '" + voiceDaemonRemoteLogPath + "' && " +
 		"{ LD_LIBRARY_PATH=/usr/lib nohup '" + voiceDaemonRemotePath + "' --once --key-file '" + voiceDaemonRemoteKeyPath + "' " +
 		"</dev/null > '" + voiceDaemonRemoteLogPath + "' 2>&1 & pid=$!; " +
-		"printf '%s\\n' \"$pid\" > '" + voiceDaemonRemotePIDPath + "'; }"
+		"printf '%s\\n' \"$pid\" > '" + voiceDaemonRemotePIDPath + "'; sleep 1; }"
 	if err := sentinelShell(adb, verifyAndStart, 15*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "启动临时 QMI Voice daemon 失败: "+err.Error())
 		return
