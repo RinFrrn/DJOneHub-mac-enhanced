@@ -2,9 +2,19 @@ package main
 
 import (
 	"encoding/binary"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestDefaultModuleArtifactPathAvoidsDownloads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, "Library", "Application Support", "DJOneHub", "artifacts", "test.armv7")
+	if got := defaultModuleArtifactPath("test.armv7"); got != want {
+		t.Fatalf("artifact path = %q, want %q", got, want)
+	}
+}
 
 func testSentinelELF() []byte {
 	data := make([]byte, 52)

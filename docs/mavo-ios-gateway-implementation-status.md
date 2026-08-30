@@ -83,6 +83,10 @@
   在返回文件前完成真实认证 STATUS 预检；iOS 显式导入后校验固定 endpoint、一小时
   有效期、创建时间及 SHA-256 模块标识，再写入不可同步 Keychain。App 可选择
   多模块并逐项撤销；已配对时禁用裸 TCP 探针，避免旧 one-shot daemon 被提前消费。
+- 实机发现 LaunchAgent 直接读取 Downloads 的新 ARM 文件会被 macOS TCC 卡在 `open(2)`，
+  且后台进程无法可靠展示授权窗。安装器现由交互式终端校验 Actions 清单并把固定范围的
+  ARM 文件缓存到 DJOneHub 的 Application Support；后端只读该缓存并再次执行固定哈希
+  与 ELF 校验。该问题与 quarantine 标记不同，不能只靠 `xattr -d` 解决。
 - 真实来电写操作验收随后完成：先以 `status` 锁定唯一的 `call_id=1` 和 `incoming`，
   `answer 1` 在约 0.43 秒内返回成功并回读确认；独立 `status` 随后得到
   `state=conversation`；`end 1` 同样在约 0.43 秒内确认，最终 `call_count=0`。

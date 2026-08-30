@@ -144,6 +144,12 @@ xcodebuild \
 保持模块连接 Mac，使用匹配当前固定 SHA-256 的 ARM artifact 武装，并把响应直接保存成
 文件，避免 key 出现在终端输出：
 
+先运行仓库的 `scripts/install-latest-macos-backend.sh`。安装器会在交互式终端中校验
+Downloads 里最新的 ARM Actions 产物，再将四个固定范围的 `.armv7` 文件缓存到
+`~/Library/Application Support/DJOneHub/artifacts/`；LaunchAgent 只读取该目录，避免
+macOS 因后台进程无法展示 Downloads/TCC 授权而把 `open(2)` 长时间挂起。后端仍会独立
+执行编译时固定的 SHA-256 和 ELF 校验。
+
 ```sh
 curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-once \
   -H 'Content-Type: application/json' \

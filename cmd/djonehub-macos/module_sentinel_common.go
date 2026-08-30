@@ -65,11 +65,15 @@ func sentinelRemoveLinkCommand() string {
 }
 
 func defaultSentinelArtifactPath() string {
+	return defaultModuleArtifactPath("djonehubd.armv7")
+}
+
+func defaultModuleArtifactPath(filename string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, "Downloads", "djonehubd-armv7-sentinel", "djonehubd.armv7")
+	return filepath.Join(home, "Library", "Application Support", "DJOneHub", "artifacts", filename)
 }
 
 func validateSentinelELF(data []byte) error {

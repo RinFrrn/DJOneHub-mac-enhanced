@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 )
 
 const (
@@ -19,24 +17,12 @@ const (
 	qmiVoiceProbeMaximumSize    = 2 * 1024 * 1024
 )
 
-func defaultPinnedQMIArtifactPath(filename string, validate func([]byte) error) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	downloads := filepath.Join(home, "Downloads")
-	fallback := filepath.Join(downloads, "djonehubd-armv7-sentinel", filename)
-	matches, err := filepath.Glob(filepath.Join(downloads, "djonehubd-armv7-sentinel*", filename))
-	if err != nil {
-		return fallback
-	}
-	for _, path := range matches {
-		data, readErr := os.ReadFile(path)
-		if readErr == nil && validate(data) == nil {
-			return path
-		}
-	}
-	return fallback
+func defaultPinnedQMIArtifactPath(filename string, _ func([]byte) error) string {
+	// LaunchAgents can block indefinitely when macOS asks them to access a
+	// quarantined Downloads item without an interactive TCC presentation.  The
+	// terminal-side installer validates and stages artifacts in Application
+	// Support; the backend still enforces its independently pinned SHA-256.
+	return defaultModuleArtifactPath(filename)
 }
 
 func defaultQMIVoiceProbeArtifactPath() string {

@@ -7,6 +7,7 @@ set -eu
 
 DOWNLOADS_ROOT=${1:-"${HOME}/Downloads"}
 RUNTIME_BIN="${HOME}/Library/Application Support/DJOneHub/runtime/bin/djonehub-macos"
+ARTIFACT_DIR="${HOME}/Library/Application Support/DJOneHub/artifacts"
 LAUNCH_LABEL="gui/$(id -u)/com.jamie.djonehub"
 
 latest_zip=
@@ -54,6 +55,49 @@ lipo "${package_binary}" -verify_arch arm64
 lipo "${package_binary}" -verify_arch x86_64
 codesign --verify "${package_binary}"
 
+# Select the newest complete ARM Actions artifact while this interactive
+# terminal process still has Downloads access.  The background LaunchAgent
+# must not open Downloads directly: macOS can suspend that open while waiting
+# for a TCC prompt the agent cannot present.
+latest_arm_dir=
+latest_arm_mtime=0
+for candidate in "${DOWNLOADS_ROOT}"/djonehubd-armv7-sentinel*; do
+  [ -d "${candidate}" ] || continue
+  [ -f "${candidate}/djonehub-voice-daemon.armv7" ] || continue
+  candidate_mtime=$(stat -f '%m' "${candidate}/djonehub-voice-daemon.armv7")
+  if [ "${candidate_mtime}" -gt "${latest_arm_mtime}" ]; then
+    latest_arm_dir=${candidate}
+    latest_arm_mtime=${candidate_mtime}
+  fi
+done
+
+staged_artifacts="${work_dir}/artifacts"
+if [ -n "${latest_arm_dir}" ]; then
+  mkdir -p "${staged_artifacts}"
+  echo "使用最新 ARM 产物：${latest_arm_dir}"
+  for name in \
+    djonehubd.armv7 \
+    djonehub-qmi-probe.armv7 \
+    djonehub-qmi-voice-control.armv7 \
+    djonehub-voice-daemon.armv7
+  do
+    source_file="${latest_arm_dir}/${name}"
+    source_checksum="${source_file}.sha256"
+    if [ ! -f "${source_file}" ] || [ ! -f "${source_checksum}" ]; then
+      echo "ARM 产物不完整：${source_file}" >&2
+      exit 1
+    fi
+    (
+      cd "${latest_arm_dir}"
+      shasum -a 256 -c "${name}.sha256"
+    )
+    install -m 700 "${source_file}" "${staged_artifacts}/${name}"
+    if /usr/bin/xattr -p com.apple.quarantine "${staged_artifacts}/${name}" >/dev/null 2>&1; then
+      /usr/bin/xattr -d com.apple.quarantine "${staged_artifacts}/${name}"
+    fi
+  done
+fi
+
 if [ ! -x "${RUNTIME_BIN}" ]; then
   echo "当前用户运行目录不存在：${RUNTIME_BIN}" >&2
   echo "请先正常安装一次 DJOneHub App。" >&2
@@ -87,6 +131,14 @@ attempt=0
 # broken build and roll back a healthy backend.
 while [ "${attempt}" -lt 60 ]; do
   if curl -fsS --max-time 2 http://127.0.0.1:7575/api/health >/dev/null 2>&1; then
+    if [ -d "${staged_artifacts}" ]; then
+      mkdir -p "${ARTIFACT_DIR}"
+      for staged in "${staged_artifacts}"/*.armv7; do
+        install -m 700 "${staged}" "${ARTIFACT_DIR}/$(basename -- "${staged}").new"
+        mv -f "${ARTIFACT_DIR}/$(basename -- "${staged}").new" "${ARTIFACT_DIR}/$(basename -- "${staged}")"
+      done
+      echo "ARM 产物已缓存到：${ARTIFACT_DIR}"
+    fi
     echo "安装完成，后端健康检查通过。"
     echo "上一个后端保存在：${previous_binary}"
     exit 0
