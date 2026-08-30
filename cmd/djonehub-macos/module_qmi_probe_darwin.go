@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +17,14 @@ import (
 type qmiVoiceProbeRequest struct {
 	Confirm      bool   `json:"confirm"`
 	ArtifactPath string `json:"artifact_path"`
+}
+
+type qmiVoiceControlRequest struct {
+	Confirm          bool   `json:"confirm"`
+	ConfirmOperation string `json:"confirm_operation"`
+	ArtifactPath     string `json:"artifact_path"`
+	Number           string `json:"number"`
+	CallID           int    `json:"call_id"`
 }
 
 func loadQMIVoiceProbeArtifact(path string) ([]byte, string, error) {
@@ -141,6 +150,71 @@ func (a *app) qmiVoiceProbeAPI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) runQMIVoiceControlCandidate(w http.ResponseWriter, r *http.Request, data []byte, artifactPath, operation, argument string) {
+	a.moduleVoiceOpMu.Lock()
+	defer a.moduleVoiceOpMu.Unlock()
+	adb, err := openDJIUSBADB()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "无法打开模块 ADB: "+err.Error())
+		return
+	}
+	defer adb.Close()
+	if err := sentinelRequireRoot(adb); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	// Operation is selected only by a fixed route handler. Argument has already
+	// passed a strict digits/*/#/+ or decimal call-ID validator, so neither can
+	// become an arbitrary shell or QMI message.
+	_, _, _ = adb.shellChecked("rm -f '"+qmiVoiceControlRemotePath+"'", 8*time.Second)
+	if err := adb.pushContext(r.Context(), data, qmiVoiceControlRemotePath, 0o100700, 30*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "推送 QMI Voice 控制候选失败: "+err.Error())
+		return
+	}
+	defer func() {
+		if _, _, cleanupErr := adb.shellChecked("rm -f '"+qmiVoiceControlRemotePath+"'", 8*time.Second); cleanupErr != nil {
+			log.Printf("QMI Voice control candidate cleanup failed: %v", cleanupErr)
+		}
+	}()
+
+	command := operation
+	if argument != "" {
+		command += " '" + argument + "'"
+	}
+	verifyAndRun := "chmod 700 '" + qmiVoiceControlRemotePath + "' && " +
+		"test \"$(sha256sum '" + qmiVoiceControlRemotePath + "' | awk '{print $1}')\" = '" + qmiVoiceControlExpectedSHA256 + "' && " +
+		"LD_LIBRARY_PATH=/usr/lib '" + qmiVoiceControlRemotePath + "' " + command + " 2>&1"
+	output, status, runErr := adb.shellChecked(verifyAndRun, 35*time.Second)
+	cleanOutput := sentinelCleanShellOutput(output)
+	if runErr != nil || status != 0 {
+		runErrorText := fmt.Sprintf("exit status %d", status)
+		if runErr != nil {
+			runErrorText = runErr.Error()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":         "运行 QMI Voice 控制候选 " + operation + " 失败: " + runErrorText,
+			"output":        cleanOutput,
+			"exit_status":   status,
+			"artifact_path": artifactPath,
+			"sha256":        qmiVoiceControlExpectedSHA256,
+			"persistent":    false,
+			"operation":     operation,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"compatible":    true,
+		"exit_status":   status,
+		"output":        cleanOutput,
+		"artifact_path": artifactPath,
+		"sha256":        qmiVoiceControlExpectedSHA256,
+		"remote_path":   qmiVoiceControlRemotePath,
+		"persistent":    false,
+		"operation":     operation,
+	})
+}
+
 func (a *app) qmiVoiceControlStatusAPI(w http.ResponseWriter, r *http.Request) {
 	var request qmiVoiceProbeRequest
 	if !decodeJSON(w, r, &request) {
@@ -155,57 +229,55 @@ func (a *app) qmiVoiceControlStatusAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.runQMIVoiceControlCandidate(w, r, data, artifactPath, "status", "")
+}
 
-	a.moduleVoiceOpMu.Lock()
-	defer a.moduleVoiceOpMu.Unlock()
-	adb, err := openDJIUSBADB()
+func (a *app) qmiVoiceControlDialAPI(w http.ResponseWriter, r *http.Request) {
+	var request qmiVoiceControlRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if !request.Confirm || request.ConfirmOperation != "dial" {
+		writeError(w, http.StatusBadRequest, "需要 confirm=true 且 confirm_operation=dial")
+		return
+	}
+	if !validQMIVoiceDialNumber(request.Number) {
+		writeError(w, http.StatusBadRequest, "拨号号码无效，只允许数字、开头的 +、* 和 #")
+		return
+	}
+	data, artifactPath, err := loadQMIVoiceControlArtifact(request.ArtifactPath)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "无法打开模块 ADB: "+err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	defer adb.Close()
-	if err := sentinelRequireRoot(adb); err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
+	a.runQMIVoiceControlCandidate(w, r, data, artifactPath, "dial", request.Number)
+}
 
-	// The command is a literal "status". No request field can select dial,
-	// answer, end, a call ID, a number, or an arbitrary shell/QMI argument.
-	_, _, _ = adb.shellChecked("rm -f '"+qmiVoiceControlRemotePath+"'", 8*time.Second)
-	if err := adb.pushContext(r.Context(), data, qmiVoiceControlRemotePath, 0o100700, 30*time.Second); err != nil {
-		writeError(w, http.StatusBadGateway, "推送 QMI Voice 控制候选失败: "+err.Error())
-		return
-	}
-	defer func() {
-		if _, _, cleanupErr := adb.shellChecked("rm -f '"+qmiVoiceControlRemotePath+"'", 8*time.Second); cleanupErr != nil {
-			log.Printf("QMI Voice control candidate cleanup failed: %v", cleanupErr)
-		}
-	}()
+func (a *app) qmiVoiceControlAnswerAPI(w http.ResponseWriter, r *http.Request) {
+	a.qmiVoiceControlCallIDAPI(w, r, "answer")
+}
 
-	verifyAndRun := "chmod 700 '" + qmiVoiceControlRemotePath + "' && " +
-		"test \"$(sha256sum '" + qmiVoiceControlRemotePath + "' | awk '{print $1}')\" = '" + qmiVoiceControlExpectedSHA256 + "' && " +
-		"LD_LIBRARY_PATH=/usr/lib '" + qmiVoiceControlRemotePath + "' status 2>&1"
-	output, status, runErr := adb.shellChecked(verifyAndRun, 20*time.Second)
-	cleanOutput := sentinelCleanShellOutput(output)
-	if runErr != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"error":         "运行 QMI Voice 控制候选 status 失败: " + runErr.Error(),
-			"output":        cleanOutput,
-			"artifact_path": artifactPath,
-			"sha256":        qmiVoiceControlExpectedSHA256,
-			"persistent":    false,
-			"operation":     "status",
-		})
+func (a *app) qmiVoiceControlEndAPI(w http.ResponseWriter, r *http.Request) {
+	a.qmiVoiceControlCallIDAPI(w, r, "end")
+}
+
+func (a *app) qmiVoiceControlCallIDAPI(w http.ResponseWriter, r *http.Request, operation string) {
+	var request qmiVoiceControlRequest
+	if !decodeJSON(w, r, &request) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"compatible":    status == 0,
-		"exit_status":   status,
-		"output":        cleanOutput,
-		"artifact_path": artifactPath,
-		"sha256":        qmiVoiceControlExpectedSHA256,
-		"remote_path":   qmiVoiceControlRemotePath,
-		"persistent":    false,
-		"operation":     "status",
-	})
+	if !request.Confirm || request.ConfirmOperation != operation {
+		writeError(w, http.StatusBadRequest, "需要 confirm=true 且 confirm_operation="+operation)
+		return
+	}
+	if !validQMIVoiceCallID(request.CallID) {
+		writeError(w, http.StatusBadRequest, "call_id 必须在 1..255")
+		return
+	}
+	data, artifactPath, err := loadQMIVoiceControlArtifact(request.ArtifactPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.runQMIVoiceControlCandidate(w, r, data, artifactPath, operation, strconv.Itoa(request.CallID))
 }

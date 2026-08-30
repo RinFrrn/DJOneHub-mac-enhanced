@@ -71,6 +71,10 @@
   incoming/waiting、挂断 call ID 必须存在，并在 action response 后轮询 `0x2f` 回读确认。
   当前 macOS API 仍只固定哈希并执行 read-only probe，因此这项代码提交不会自行拨号、
   接听或挂断。
+- 固定哈希部署端随后只开放该候选的 `status` 子命令，并已在真实模块得到 HTTP 200、
+  `exit_status=0`、`call_count=0`。写接口实现要求 `confirm=true` 与精确的
+  `confirm_operation`，号码/Call ID 在 Go 后端和 ARM 工具两层校验，QMI action 后必须
+  回读状态确认；截至本记录尚未调用任何 Dial/Answer/End 写命令。
 - 已在 WSL Ubuntu 26.04 使用 `arm-linux-gnueabi-gcc 15.2.0`，通过真实模块
   glibc 2.22 sysroot 构建 ARMv7 soft-float 产物；连续两次构建逐字节一致。
 - release ELF 仅直接依赖 `libpthread.so.0`、`libdl.so.2`、`libc.so.6` 和

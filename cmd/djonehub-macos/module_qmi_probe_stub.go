@@ -11,3 +11,15 @@ func (a *app) qmiVoiceProbeAPI(w http.ResponseWriter, _ *http.Request) {
 func (a *app) qmiVoiceControlStatusAPI(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotImplemented, "QMI Voice 控制候选部署仅在 macOS 版本可用")
 }
+
+func (a *app) qmiVoiceControlDialAPI(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotImplemented, "QMI Voice 控制候选部署仅在 macOS 版本可用")
+}
+
+func (a *app) qmiVoiceControlAnswerAPI(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotImplemented, "QMI Voice 控制候选部署仅在 macOS 版本可用")
+}
+
+func (a *app) qmiVoiceControlEndAPI(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotImplemented, "QMI Voice 控制候选部署仅在 macOS 版本可用")
+}

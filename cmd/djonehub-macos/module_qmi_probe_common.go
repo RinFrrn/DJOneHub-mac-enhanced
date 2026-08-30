@@ -97,3 +97,28 @@ func validateQMIVoiceControlArtifact(data []byte) error {
 	}
 	return nil
 }
+
+func validQMIVoiceDialNumber(number string) bool {
+	if len(number) == 0 || len(number) > 81 {
+		return false
+	}
+	hasDigit := false
+	for index := 0; index < len(number); index++ {
+		character := number[index]
+		if character >= '0' && character <= '9' {
+			hasDigit = true
+			continue
+		}
+		if character == '*' || character == '#' {
+			continue
+		}
+		if character != '+' || index != 0 {
+			return false
+		}
+	}
+	return hasDigit
+}
+
+func validQMIVoiceCallID(callID int) bool {
+	return callID >= 1 && callID <= 255
+}
