@@ -7,6 +7,14 @@ on:
       - "module/djonehubd.c"
       - "module/djonehub_qmi_probe.c"
       - "module/djonehub_qmi_voice_control.c"
+      - "module/djonehub_qmi_voice_engine.c"
+      - "module/djonehub_qmi_voice_engine.h"
+      - "module/djonehub_voice_daemon.c"
+      - "module/djonehub_control_protocol.c"
+      - "module/djonehub_control_protocol.h"
+      - "module/djonehub_control_protocol_test.c"
+      - "module/djonehub_crypto.c"
+      - "module/djonehub_crypto.h"
       - "module/djonehub_voice_codec.c"
       - "module/djonehub_voice_codec.h"
       - "module/djonehub_voice_codec_test.c"
@@ -87,6 +95,26 @@ jobs:
             module/djonehub_voice_codec_test.c \
             -o outputs/module/djonehub-voice-codec-test
           outputs/module/djonehub-voice-codec-test
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_control_protocol.c \
+            module/djonehub_control_protocol_test.c \
+            -o outputs/module/djonehub-control-protocol-test
+          outputs/module/djonehub-control-protocol-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_control_protocol.c \
+            module/djonehub_control_protocol_test.c \
+            -o outputs/module/djonehub-control-protocol-test-sanitized
+          outputs/module/djonehub-control-protocol-test-sanitized
           zig cc \
             -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
             -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
@@ -106,14 +134,31 @@ jobs:
             -Wundef -Werror \
             -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
             module/djonehub_qmi_voice_control.c \
+            module/djonehub_qmi_voice_engine.c \
             module/djonehub_voice_codec.c module/djonehub_voice_policy.c -ldl \
             -o outputs/module/djonehub-qmi-voice-control.armv7.unstripped
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_voice_daemon.c \
+            module/djonehub_qmi_voice_engine.c \
+            module/djonehub_control_protocol.c module/djonehub_crypto.c \
+            module/djonehub_voice_codec.c module/djonehub_voice_policy.c -ldl \
+            -o outputs/module/djonehub-voice-daemon.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
             -o outputs/module/djonehub-qmi-probe.armv7 \
             outputs/module/djonehub-qmi-probe.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
             -o outputs/module/djonehub-qmi-voice-control.armv7 \
             outputs/module/djonehub-qmi-voice-control.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-voice-daemon.armv7 \
+            outputs/module/djonehub-voice-daemon.armv7.unstripped
           audit_qmi_binary() {
             binary=$1
             file "$binary"
@@ -150,8 +195,10 @@ jobs:
           }
           audit_qmi_binary outputs/module/djonehub-qmi-probe.armv7
           audit_qmi_binary outputs/module/djonehub-qmi-voice-control.armv7
+          audit_qmi_binary outputs/module/djonehub-voice-daemon.armv7
           (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
           (cd outputs/module && sha256sum djonehub-qmi-voice-control.armv7 > djonehub-qmi-voice-control.armv7.sha256)
+          (cd outputs/module && sha256sum djonehub-voice-daemon.armv7 > djonehub-voice-daemon.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
 
           qmi_probe=dynamically linked ARMv7 EABI5 soft-float, glibc <= 2.7
@@ -159,6 +206,10 @@ jobs:
           qmi_probe_writes=no call control, no modem configuration, no persistence
           qmi_control=candidate one-shot status/dial/answer/end with precondition and read-back confirmation
           qmi_control_deployment=not pinned by the macOS API; do not persist
+          voice_daemon=authenticated one-request TCP control on 192.168.225.1:45750
+          voice_daemon_auth=fresh 32-byte challenge + full HMAC-SHA256 request and response tags
+          voice_daemon_scope=fixed status/dial/answer/end only; no shell, AT passthrough, or arbitrary QMI
+          voice_daemon_deployment=temporary validation only; do not persist yet
           EOF
 
       - name: Upload sentinel artifact

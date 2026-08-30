@@ -426,27 +426,25 @@ prepare 阶段返回 `EINVAL`；D4 完全退出时 Auxpcm ACDB 已校准且 lega
 
 ## 7. 控制协议
 
-建议 TCP 控制端口 `45750`，采用长度前缀 JSON 或 WebSocket。应用层只开放白名单：
+TCP 控制端口固定为 `192.168.225.1:45750`。候选协议使用紧凑二进制帧而非开放 JSON：
 
-```json
-{"id":1,"op":"dial","number":"+86138XXXXXXXX"}
-{"id":2,"op":"answer"}
-{"id":3,"op":"hangup"}
-{"id":4,"op":"dtmf","digit":"5"}
-```
+1. 模块每次 `accept` 后从 `/dev/urandom` 生成 32 字节 challenge，发出 HELLO。
+2. 客户端发送版本、固定操作码、非零 request ID、长度受限 payload，以及覆盖
+   `challenge + header + payload` 的完整 HMAC-SHA256。
+3. 模块常量时间校验通过后才执行 STATUS/DIAL/ANSWER/END；每个 TCP 连接只接受一条
+   请求，从而使旧连接的认证帧无法跨连接重放。
+4. 模块以同一 challenge 对结构化结果签名；客户端必须同时核对 tag 与 request ID。
 
-状态事件：
+请求头固定 20 字节，保留字段必须为零，payload 最大 81 字节。STATUS payload 为空；
+DIAL 只允许 `+0123456789*#` 且 `+` 只能出现在首位；ANSWER/END payload 是一个非零
+call ID。响应只包含固定状态码、动作结果和最多 8 条定长 call snapshot。当前协议只做
+身份与完整性认证，不提供内容保密；电话号码不会进入蜂窝公网监听面，但同一 USB 链路
+上的明文可见性需在威胁模型中明确。如需保密，应在协议定稿前升级为具备 AEAD 的握手，
+而不是在 HMAC 帧外临时加可选加密。
 
-```json
-{
-  "event":"call",
-  "state":"incoming",
-  "number":"+86138XXXXXXXX",
-  "session":1234
-}
-```
-
-生产协议不要开放未经保护的通用 `/api/at`。电话号码只允许 `+0123456789*#`；DTMF 只允许标准字符；任何网络字符串都不能拼接进 shell 命令。
+主动事件推送尚未定稿。第一版 iOS 客户端可短轮询 STATUS；验证 QMI indication 的线程
+与回调生命周期后，再增加有界、认证的来电状态流。生产协议绝不开放通用 `/api/at`、
+远程 shell 或客户端指定 QMI message ID。
 
 ## 8. 模块内部 AT 通道
 

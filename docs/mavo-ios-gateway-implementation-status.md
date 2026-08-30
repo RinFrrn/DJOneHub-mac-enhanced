@@ -79,6 +79,16 @@
   `answer 1` 在约 0.43 秒内返回成功并回读确认；独立 `status` 随后得到
   `state=conversation`；`end 1` 同样在约 0.43 秒内确认，最终 `call_count=0`。
   部署端每次执行后都会删除模块 `/tmp` 中的固定路径候选，没有写入持久分区。
+- 已把实机验证过的 QMI 初始化、状态查询、动作前置条件和动作后回读抽成共享引擎，并
+  新增候选 `djonehub-voice-daemon`。它固定绑定 ECM `bridge0` 与
+  `192.168.225.1:45750`，只接受 STATUS/DIAL/ANSWER/END，逐连接生成 32 字节随机
+  challenge，并以完整 HMAC-SHA256 标签认证请求和响应；每个连接只处理一个请求，
+  因而旧连接上的帧不能拿到新 challenge 后重放。密钥必须是 root 所有、组/其他权限
+  全关且内容恰好 32 字节。未经认证的帧不进入 QMI，也不返回控制结果。
+- 控制协议已通过 RFC HMAC-SHA256 已知向量、错误密钥、帧篡改、替换 challenge、非法
+  号码/Call ID、严格 C11、Clang 静态分析和 Address/Undefined Sanitizer 测试。该
+  daemon 目前仍是源码候选；需等 ARM CI 产物审计通过后，只以 `/tmp` + `--once`
+  做 STATUS 网络闭环，尚未部署或持久化。
 - 同一测试中，旧 macOS 通话观察器在 active 后仍会尝试启动 MaVo 音频桥，并因公开
   源码包不含私有模块语音运行时而失败；这不影响 QMI 控制成功，但说明控制面完成不能
   等同于 iOS 双向媒体完成。主动 Dial 尚未做真实号码验收。
@@ -215,8 +225,9 @@ USB ADB 路径，不要据此判断模块未连接。
   IORegistry 显示 AppleUserECM 控制/数据接口，同时保留 USB AT、ADB 与 UAC。
   随后真实 iPhone 也已完成 ECM 上网与模块 TCP 闭环；NCM 仍未验证，恢复目标是原始
   `usbnet=0`。
-- QMI Voice 的只读状态路径和离线编解码已实现；生产 daemon 的鉴权、请求串行化、
-  indication/轮询状态机，以及受控 Dial/Answer/End 执行仍未实施。iOS
+- QMI Voice 的离线编解码、受控动作、共享执行引擎和认证 daemon 候选已经实现；ARM
+  实机兼容、ECM STATUS 闭环、来电事件 indication/轮询状态机和持久启动仍未验收。
+  iOS
   `Network.framework`/`VoiceProcessingIO` 生产客户端和安全持久化启动也仍未实施。
 - 为继续实施前的安全盘点，macOS 后端新增 `GET /api/module/adb-inventory` 只读接口；它
   通过现有 ADB 传输收集 `/dev` 节点、相关进程、TTY 驱动和 Unix socket，不接受任意
