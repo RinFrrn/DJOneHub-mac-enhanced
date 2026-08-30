@@ -218,7 +218,7 @@ jobs:
           voice_daemon=authenticated one-request TCP control on 192.168.225.1:45750
           voice_daemon_auth=fresh 32-byte challenge + full HMAC-SHA256 request and response tags
           voice_daemon_scope=fixed status/dial/answer/end only; no shell, AT passthrough, or arbitrary QMI
-          voice_daemon_deployment=temporary validation only; do not persist yet
+          voice_daemon_deployment=development one-shot boot arming only; production persistence is not approved
           EOF
 
       - name: Upload sentinel artifact

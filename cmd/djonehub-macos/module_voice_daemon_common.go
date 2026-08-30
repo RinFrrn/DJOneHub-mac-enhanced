@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	voiceDaemonExpectedSHA256 = "d9fc370f2b3b62cef7c8bdcaa10c4cca71672f5d9aedc330f9c12082caf377ec"
+	voiceDaemonExpectedSHA256 = "e07dbc1a1ee915272de4cd472aa51af05c38acc799b13898b5589151fb6b4301"
 	voiceDaemonRemotePath     = "/tmp/djonehub-voice-daemon.armv7"
 	voiceDaemonRemoteKeyPath  = "/tmp/djonehub-control.key"
 	voiceDaemonRemotePIDPath  = "/tmp/djonehub-voice-daemon.pid"
