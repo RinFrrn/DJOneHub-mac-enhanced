@@ -9,6 +9,9 @@
 		A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* DJOneHubUACProbeApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
 		A10000000000000000000003 /* AudioProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AudioProbeModel.swift */; };
+		A10000000000000000000004 /* VoiceControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* VoiceControlProtocol.swift */; };
+		A10000000000000000000005 /* VoiceControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* VoiceControlClient.swift */; };
+		A10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,6 +21,9 @@
 		A20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000005 /* DJOneHubUACProbe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DJOneHubUACProbe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000006 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		A20000000000000000000007 /* VoiceControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlProtocol.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* VoiceControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlClient.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* PairingKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKeyStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +50,7 @@
 			children = (
 				A40000000000000000000003 /* App */,
 				A40000000000000000000004 /* Audio */,
+				A40000000000000000000006 /* Control */,
 				A20000000000000000000004 /* Info.plist */,
 			);
 			path = DJOneHubUACProbe;
@@ -64,6 +71,16 @@
 				A20000000000000000000003 /* AudioProbeModel.swift */,
 			);
 			path = Audio;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* Control */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000007 /* VoiceControlProtocol.swift */,
+				A20000000000000000000008 /* VoiceControlClient.swift */,
+				A20000000000000000000009 /* PairingKeyStore.swift */,
+			);
+			path = Control;
 			sourceTree = "<group>";
 		};
 		A40000000000000000000005 /* Products */ = {
@@ -135,6 +152,9 @@
 				A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* AudioProbeModel.swift in Sources */,
+				A10000000000000000000004 /* VoiceControlProtocol.swift in Sources */,
+				A10000000000000000000005 /* VoiceControlClient.swift in Sources */,
+				A10000000000000000000006 /* PairingKeyStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

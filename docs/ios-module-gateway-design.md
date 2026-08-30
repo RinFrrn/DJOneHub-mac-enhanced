@@ -6,6 +6,53 @@
 
 当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机基线是 Qualcomm 厂商 `rmnet`，不是通用 USB Ethernet。ECM 已分别在 Mac 和真实 iPhone 上完成枚举、上网及模块 TCP 闭环验证；NCM 仍未验证。
 
+### 1.0 控制平面当前进度（2026-08-30）
+
+QDC507 当前 ECM 地址固定为 `192.168.225.1`，认证 voice daemon 监听 TCP `45750`。
+现有一次性候选已在 Mac 侧完成真实来电 `STATUS`、`ANSWER`、`END` 验收；最近一次
+`STATUS` 部署结果明确为 `authenticated=true`、`one_shot=true`、`persistent=false`。
+这只证明控制面，不代表 iOS 双向通话媒体已经完成。
+
+`ios/DJOneHubUACProbe` 现在增加纯 Swift 控制客户端：
+
+- `Network.framework` 建立 ECM TCP 连接，每连接只允许一个请求，并强制走
+  `.wiredEthernet`，避免相同 Wi-Fi 子网抢占路由；
+- `CryptoKit` 执行完整 32-byte HMAC-SHA256(`nonce || unsigned frame`)；
+- 严格解析 20-byte 大端 header、32-byte HELLO nonce、request ID、状态码和 call snapshot；
+- 仅暴露 `status/dial/answer/end` async API，不提供任意 QMI/AT 透传；
+- pairing key 必须由调用方注入 32 字节内存值，仓库不硬编码、不生成凭据；生产配对
+  完成后只允许按稳定模块标识显式写入不可同步的设备 Keychain；
+- connect/read/write 默认 5 秒有界，超时和任务取消都会关闭连接；
+- DIAL 与 call ID 在客户端先做白名单校验。
+
+探针 UI 已增加只读控制区域：`VoiceControlModel` 默认没有凭据，`STATUS` 按钮保持禁用；
+生产配对层完成后只能通过内存注入，或显式读取对应模块的 Keychain 项来解锁该按钮。
+UI 不接收自由格式 AT/QMI 命令，不把 key 放入文本框、UserDefaults 或日志，也不会在
+探针启动时自动读写 Keychain。拨号、接听、挂断仍需在配对和 CallKit 生命周期完成后
+再接入。
+
+仍未完成：模块到 iPhone 的双向 PCM 媒体传输、生产 pairing/轮换/撤销、后台来电与
+CallKit 生命周期、以及真机上完整的 iOS 本地网络/USB 配件权限和断线恢复策略。
+
+### 1.0.1 配对是独立的产品门槛
+
+当前 daemon 的 `--key-file` 只解决“双方已经持有同一把密钥”后的认证，并没有解决
+首次把密钥安全交给 iPhone。ECM 是可访问网络，不能把 pairing key 明文或通过未认证
+TCP 传给 App；否则插入模块的任意主机都能接管电话控制。要实现真正的“只用 iPhone”，
+模块还必须提供一个用户可确认的一次性配对通道，例如实体按键/LED PIN、出厂 QR 或
+受保护的 USB 配置接口。配对完成后再执行以下生命周期：
+
+1. iPhone 生成临时公钥并发送配对请求；模块仅在物理确认窗口内接受请求。
+2. 双方用临时密钥协商出会话密钥，模块随机生成新的 32 字节控制 key，并只通过该
+   加密会话返回一次。
+3. iPhone 将 key 放入 Keychain（不可同步、设备解锁后可用），模块以 `0600` 写入
+   `/usrdata/djonehub/pairing.key`；两端回读指纹，不回显 key 内容。
+4. 轮换先建立第二把 key 并完成一次 STATUS，再原子替换旧 key；撤销则清除模块 key
+   并让 App 删除对应 Keychain 项。
+
+在上述硬件/固件配对入口落地前，App 只能保留内存注入和只读 STATUS 的开发接口，不能
+声称已具备无 Mac 的生产拨号能力。
+
 ### 1.1 现有 UAC 不能单独组成 iPhone 通话
 
 2026-08-28 使用本机 Xcode 27 / iOS 27 SDK 复核 Apple 公共 API 后，否定了“保留

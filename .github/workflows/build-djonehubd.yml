@@ -10,6 +10,8 @@ on:
       - "module/djonehub_qmi_voice_engine.c"
       - "module/djonehub_qmi_voice_engine.h"
       - "module/djonehub_voice_daemon.c"
+      - "module/djonehub_voice_daemon_policy.h"
+      - "module/djonehub_voice_daemon_policy_test.c"
       - "module/djonehub_control_protocol.c"
       - "module/djonehub_control_protocol.h"
       - "module/djonehub_control_protocol_test.c"
@@ -115,6 +117,13 @@ jobs:
             module/djonehub_control_protocol_test.c \
             -o outputs/module/djonehub-control-protocol-test-sanitized
           outputs/module/djonehub-control-protocol-test-sanitized
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_voice_daemon_policy_test.c \
+            -o outputs/module/djonehub-voice-daemon-policy-test
+          outputs/module/djonehub-voice-daemon-policy-test
           zig cc \
             -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
             -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \

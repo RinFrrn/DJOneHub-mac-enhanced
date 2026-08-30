@@ -12,6 +12,40 @@
         }                                                                       \
     } while (0)
 
+static int hex_value(char character)
+{
+    if (character >= '0' && character <= '9') {
+        return character - '0';
+    }
+    if (character >= 'a' && character <= 'f') {
+        return character - 'a' + 10;
+    }
+    if (character >= 'A' && character <= 'F') {
+        return character - 'A' + 10;
+    }
+    return -1;
+}
+
+static size_t decode_hex(const char *hex, uint8_t *output, size_t capacity)
+{
+    size_t index;
+    size_t length = strlen(hex);
+
+    if ((length & 1U) != 0U || capacity < length / 2U) {
+        return 0U;
+    }
+    for (index = 0U; index < length; index += 2U) {
+        int high = hex_value(hex[index]);
+        int low = hex_value(hex[index + 1U]);
+
+        if (high < 0 || low < 0) {
+            return 0U;
+        }
+        output[index / 2U] = (uint8_t)((high << 4) | low);
+    }
+    return length / 2U;
+}
+
 static int test_hmac_vector(void)
 {
     static const uint8_t expected[DJONEHUB_SHA256_BYTES] = {
@@ -173,6 +207,73 @@ static int test_response(void)
     return 0;
 }
 
+/* These exact frames are shared with VoiceControlProtocolOfflineTest.swift. */
+static int test_swift_interoperability_vectors(void)
+{
+    static const char status_request_hex[] =
+        "444a4f4801020100000000000102030405060708"
+        "2b1e51c2c396d82484f7d93af35eb3562658ded867963af2b36fe614b1f75bc4";
+    static const char status_response_hex[] =
+        "444a4f4801030000001200000102030405060708"
+        "010000020102000100000002030002000000"
+        "5d47e52caa5a9ab5c4c1d430d84b014f11ae06f5cc2a28f6167f9e8f53bbb9d6";
+    uint8_t key[DJONEHUB_PAIRING_KEY_BYTES];
+    uint8_t nonce[DJONEHUB_CONTROL_NONCE_BYTES];
+    uint8_t expected[DJONEHUB_CONTROL_MAX_FRAME_BYTES];
+    uint8_t frame[DJONEHUB_CONTROL_MAX_FRAME_BYTES];
+    struct djonehub_control_request request;
+    struct djonehub_control_result result;
+    enum djonehub_control_status status;
+    uint64_t request_id;
+    size_t expected_length;
+    size_t frame_length;
+    size_t index;
+
+    for (index = 0U; index < sizeof(key); ++index) {
+        key[index] = (uint8_t)index;
+        nonce[index] = (uint8_t)(0x20U + index);
+    }
+
+    expected_length = decode_hex(status_request_hex, expected,
+                                 sizeof(expected));
+    CHECK(expected_length != 0U);
+    frame_length = djonehub_control_encode_request(
+        key, nonce, DJONEHUB_VOICE_STATUS, 0x0102030405060708ULL, NULL, 0U,
+        frame, sizeof(frame));
+    CHECK(frame_length == expected_length);
+    CHECK(memcmp(frame, expected, frame_length) == 0);
+    CHECK(djonehub_control_decode_request(key, nonce, expected,
+                                          expected_length, &request) == 0);
+    CHECK(request.operation == DJONEHUB_VOICE_STATUS);
+
+    memset(&result, 0, sizeof(result));
+    result.operation = DJONEHUB_VOICE_STATUS;
+    result.snapshot.count = 2U;
+    result.snapshot.calls[0].id = 1U;
+    result.snapshot.calls[0].state = 2U;
+    result.snapshot.calls[0].direction = 1U;
+    result.snapshot.calls[1].id = 2U;
+    result.snapshot.calls[1].state = 3U;
+    result.snapshot.calls[1].direction = 2U;
+
+    expected_length = decode_hex(status_response_hex, expected,
+                                 sizeof(expected));
+    CHECK(expected_length != 0U);
+    frame_length = djonehub_control_encode_response(
+        key, nonce, DJONEHUB_CONTROL_OK, 0x0102030405060708ULL, &result,
+        frame, sizeof(frame));
+    CHECK(frame_length == expected_length);
+    CHECK(memcmp(frame, expected, frame_length) == 0);
+    CHECK(djonehub_control_decode_response(
+              key, nonce, expected, expected_length, &status, &request_id,
+              &result) == 0);
+    CHECK(status == DJONEHUB_CONTROL_OK);
+    CHECK(request_id == 0x0102030405060708ULL);
+    CHECK(result.operation == DJONEHUB_VOICE_STATUS);
+    CHECK(result.snapshot.count == 2U);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_hmac_vector() == 0);
@@ -180,6 +281,7 @@ int main(void)
     CHECK(test_request_authentication() == 0);
     CHECK(test_request_validation() == 0);
     CHECK(test_response() == 0);
+    CHECK(test_swift_interoperability_vectors() == 0);
     puts("djonehub_control_protocol_test: ok");
     return 0;
 }

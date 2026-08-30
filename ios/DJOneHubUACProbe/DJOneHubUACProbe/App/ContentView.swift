@@ -3,12 +3,14 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var probe: AudioProbeModel
     @EnvironmentObject private var networkProbe: ModuleNetworkProbe
+    @EnvironmentObject private var voiceControl: VoiceControlModel
 
     var body: some View {
         NavigationStack {
             List {
                 statusSection
                 networkSection
+                voiceControlSection
                 routeSection
                 controlsSection
                 logSection
@@ -21,6 +23,27 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var voiceControlSection: some View {
+        Section("模块电话控制（实验）") {
+            LabeledContent("认证状态", value: voiceControl.stateText)
+
+            Button(voiceControl.isBusy ? "读取中…" : "读取模块通话状态") {
+                voiceControl.refreshStatus()
+            }
+            .disabled(voiceControl.isBusy || !voiceControl.isConfigured)
+
+            if !voiceControl.detailText.isEmpty {
+                Text(voiceControl.detailText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("当前只接入只读 STATUS。pairing key 必须由尚未实现的生产配对流程在内存中注入；App 不生成、不持久化，也不在界面中要求粘贴真实密钥。未完成配对前，按钮保持禁用。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 

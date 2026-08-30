@@ -85,7 +85,7 @@ final class AudioProbeModel: ObservableObject {
         refresh(reason: "app launched")
     }
 
-    deinit {
+    isolated deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
     }
 
@@ -516,7 +516,7 @@ final class ModuleNetworkProbe: ObservableObject {
     let host = "192.168.225.1"
     let port: UInt16 = 45_750
 
-    private let pathMonitor = NWPathMonitor()
+    private let pathMonitor = NWPathMonitor(requiredInterfaceType: .wiredEthernet)
     private let pathQueue = DispatchQueue(label: "DJOneHubUACProbe.network-path")
     private var connection: NWConnection?
     private var probeTimeoutTask: Task<Void, Never>?
@@ -554,7 +554,13 @@ final class ModuleNetworkProbe: ObservableObject {
 
         let started = Date()
         let endpoint = NWEndpoint.Host(host)
-        let connection = NWConnection(host: endpoint, port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .wiredEthernet
+        let connection = NWConnection(
+            host: endpoint,
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: parameters
+        )
         self.connection = connection
         probeTimeoutTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 8_000_000_000)

@@ -3,8 +3,11 @@
 这是一个只使用 Apple 公共 API 的 iPhone/iPad 真机探针，用于回答一个具体问题：
 QDC507 模块现有 `f_audio` USB gadget 是否会被 iOS 同时选为音频输入和输出。
 
-探针不使用 ADB、libusb、DriverKit 或 ExternalAccessory，也不控制电话。它只通过
-`AVAudioSession`：
+探针 UI 不使用 ADB、libusb、DriverKit 或 ExternalAccessory；现有 UAC 页面仍只负责
+音频/ECM 诊断。项目现在额外包含一个基于 `Network.framework` + `CryptoKit` 的认证电话
+控制客户端库，用于连接模块 `192.168.225.1:45750`，但没有把它描述成 iOS 双向媒体实现。
+
+UAC 探针通过 `AVAudioSession`：
 
 - 激活 `playAndRecord`；
 - 从 `availableInputs` 中偏好选择 `.usbAudio`；
@@ -18,6 +21,57 @@ QDC507 模块现有 `f_audio` USB gadget 是否会被 iOS 同时选为音频输�
 它将上下行拆开验证，是因为 iOS 17–26.1 的普通/多路 Audio Session 不能同时采集模块
 USB 输入和 iPhone 内置麦克风。iOS 26.2 新增的 `dualRoute` 虽支持两个输入设备，但
 Apple 当前列出的第二设备只有有线耳麦和 Bluetooth LE/HFP，不包括 USB Audio。
+
+## 认证电话控制客户端
+
+`DJOneHubUACProbe/Control/VoiceControlProtocol.swift` 和
+`DJOneHubUACProbe/Control/VoiceControlClient.swift` 实现模块现有一次性 voice daemon 的
+固定白名单协议：`STATUS`、`DIAL`、`ANSWER`、`END`。每次 API 调用建立一个新的 TCP
+连接，只执行一次 HELLO / request / response，然后关闭连接；连接强制使用
+`.wiredEthernet`，避免同网段 Wi-Fi 抢走到模块的路由；不提供任意 AT/QMI 透传。
+
+探针页面现在显示“模块电话控制（实验）”区域，并接入一个只读 `STATUS` 调用入口。该
+区域默认保持禁用，因为生产 pairing ceremony 尚未完成；只有业务层显式调用
+`VoiceControlModel.configure(pairingKey:)` 注入内存中的 32 字节 key 后才会启用读取。
+UI 不提供粘贴密钥的文本框，也不会把 key 写入 UserDefaults、Keychain 或日志。
+
+调用方必须注入恰好 32 字节的 pairing key：
+
+```swift
+let client = try VoiceControlClient(pairingKey: pairingKeyData)
+let snapshot = try await client.status()
+let dialed = try await client.dial("+18005551212")
+let answered = try await client.answer(callID: 1)
+let ended = try await client.end(callID: 1)
+```
+
+仓库不包含真实 key，当前探针也不会自行生成或自动持久化 key。生产配对/轮换/撤销流程
+仍未设计完成；测试时只能由外部可信流程把临时 32 字节 key 注入客户端和模块一次性
+daemon。不要把测试 key、设备 key 或模块持久凭据提交到仓库。
+
+`Control/PairingKeyStore.swift` 已提供生产配对完成后的 Keychain 存储边界：只接受 32 字节
+值，使用 `AfterFirstUnlockThisDeviceOnly`、明确禁止同步，并要求使用经过认证的稳定模块
+标识建立独立 Keychain account，避免不同模块互相覆盖；它支持读取、原子更新和撤销。
+当前探针不会自动调用它，也不会因该文件存在而改变临时调试流程。配对完成后，业务层
+可显式调用 `VoiceControlModel.configure(from:)` 将已保存的 key 注入内存。
+
+客户端严格检查 20 字节大端 header、HELLO 32 字节 challenge、request ID、完整
+HMAC-SHA256 tag、响应 operation 与 call snapshot。号码只允许 `0-9`、`*`、`#` 和首位
+`+`，控制层最多 80 UTF-8/ASCII 字节；ANSWER/END 只接受非零 1-byte call ID。连接、
+发送和接收默认各 5 秒超时，取消或超时会主动关闭 `NWConnection`。
+
+离线协议向量测试（使用公开的确定性测试字节，不是真实 pairing key）；其中 STATUS
+request/response 固定帧也由模块 C 测试读取，用于防止 Swift/C 两端格式漂移：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Control/VoiceControlProtocol.swift \
+  ios/DJOneHubUACProbe/Tests/VoiceControlProtocolOfflineTest.swift \
+  -o /tmp/djonehub-ios-protocol-test
+/tmp/djonehub-ios-protocol-test
+```
+
+预期输出：`VoiceControlProtocolOfflineTest: PASS`。
 
 ## 构建
 
@@ -59,8 +113,14 @@ xcodebuild \
 - “网络可达，端口未监听”：ECM/IP 链路正常，但模块侧 daemon 尚未部署；
 - “控制端口不可达”：先检查 ECM 接口、地址和模块供电。
 
-当前 `djonehubd` 尚未实现，因而出现“端口未监听”是预期结果。不要把互联网可访问
-误认为控制 daemon 已就绪；生产通话仍需先完成模块侧控制面和方向正确的 PCM 驱动。
+探针与认证客户端都限定在 iOS 的 `.wiredEthernet` 路径。模块认证 daemon 的 `--once`
+只会在完整认证请求已经收到且签名响应已经发出后消费；裸 TCP 探针、错误 HMAC、截断帧
+和非 USB peer 均不会让一次性 daemon 提前退出。
+
+当前模块侧已经有经过真实 STATUS/ANSWER/END 验收的一次性认证 voice daemon 候选；
+Mac 侧会用临时 key 启动它，并明确报告 `one_shot=true`、`persistent=false`。iOS 侧新增
+的是该控制协议客户端，不会部署 daemon、写模块持久分区或建立生产 pairing。生产通话
+仍缺方向正确的双向 PCM 媒体平面。
 
 如果界面显示 `POSIX 错误 61`，它是 `ECONNREFUSED` 的系统表示，含义相同：ECM
 链路已经到达模块，但 `45750` 没有监听进程。仓库现在提供一个仅用于闭环验证的

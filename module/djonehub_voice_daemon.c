@@ -27,6 +27,7 @@
 
 #include "djonehub_control_protocol.h"
 #include "djonehub_qmi_voice_engine.h"
+#include "djonehub_voice_daemon_policy.h"
 
 #define CONTROL_ADDRESS "192.168.225.1"
 #define CONTROL_INTERFACE "bridge0"
@@ -400,6 +401,8 @@ int main(int argc, char **argv)
         struct sockaddr_in peer;
         socklen_t peer_length = (socklen_t)sizeof(peer);
         int client = accept(listener, (struct sockaddr *)&peer, &peer_length);
+        enum djonehub_voice_daemon_client_outcome outcome =
+            DJONEHUB_DAEMON_CLIENT_REJECTED;
 
         if (client < 0) {
             if (errno == EINTR) {
@@ -411,10 +414,17 @@ int main(int argc, char **argv)
         if (peer_length == (socklen_t)sizeof(peer) &&
             peer.sin_family == AF_INET && peer_is_usb_host(&peer) &&
             configure_client(client) == 0) {
-            (void)handle_client(client, key);
+            if (handle_client(client, key) == 0) {
+                outcome = DJONEHUB_DAEMON_AUTHENTICATED_RESPONSE_SENT;
+            }
         }
         (void)close(client);
-        if (once != 0) {
+        /*
+         * A reachability probe, wrong key, truncated frame or non-USB peer must
+         * not consume the one-shot daemon.  Only a completely authenticated
+         * request for which a signed response was sent completes --once.
+         */
+        if (djonehub_voice_daemon_should_stop(once, outcome)) {
             break;
         }
     }

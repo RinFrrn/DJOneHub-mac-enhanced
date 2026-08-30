@@ -75,6 +75,10 @@
   `exit_status=0`、`call_count=0`。写接口实现要求 `confirm=true` 与精确的
   `confirm_operation`，号码/Call ID 在 Go 后端和 ARM 工具两层校验，QMI action 后必须
   回读状态确认；该阶段当时尚未调用任何 Dial/Answer/End 写命令。
+- iOS 探针已把控制客户端接入页面的只读状态区域：默认无 pairing key 时按钮保持禁用；
+  只有生产配对层显式以内存方式注入 32 字节 key 后，才允许发出单次 `STATUS` 请求并在
+  页面显示通话快照。客户端连接被限定到 `.wiredEthernet`；Keychain 边界要求按稳定模块
+  标识隔离凭据并禁止同步，但当前 UI 不会自动保存或加载。尚未开放拨号/接听/挂断按钮。
 - 真实来电写操作验收随后完成：先以 `status` 锁定唯一的 `call_id=1` 和 `incoming`，
   `answer 1` 在约 0.43 秒内返回成功并回读确认；独立 `status` 随后得到
   `state=conversation`；`end 1` 同样在约 0.43 秒内确认，最终 `call_count=0`。
@@ -84,9 +88,11 @@
   `192.168.225.1:45750`，只接受 STATUS/DIAL/ANSWER/END，逐连接生成 32 字节随机
   challenge，并以完整 HMAC-SHA256 标签认证请求和响应；每个连接只处理一个请求，
   因而旧连接上的帧不能拿到新 challenge 后重放。密钥必须是 root 所有、组/其他权限
-  全关且内容恰好 32 字节。未经认证的帧不进入 QMI，也不返回控制结果。
-- 控制协议已通过 RFC HMAC-SHA256 已知向量、错误密钥、帧篡改、替换 challenge、非法
-  号码/Call ID、严格 C11、Clang 静态分析和 Address/Undefined Sanitizer 测试。该
+  全关且内容恰好 32 字节。未经认证的帧不进入 QMI，也不返回控制结果；`--once` 只在
+  完整认证请求已处理且签名响应已发送后退出，裸 TCP 探针、错误 key 和截断帧不会消费它。
+- 控制协议已通过 RFC HMAC-SHA256 已知向量、Swift/C 共享固定帧、错误密钥、帧篡改、
+  替换 challenge、非法号码/Call ID、严格 C11、Clang 静态分析和
+  Address/Undefined Sanitizer 测试。该
   daemon 目前仍是源码候选；需等 ARM CI 产物审计通过后，只以 `/tmp` + `--once`
   做 STATUS 网络闭环，尚未部署或持久化。
 - 同一测试中，旧 macOS 通话观察器在 active 后仍会尝试启动 MaVo 音频桥，并因公开
@@ -226,9 +232,10 @@ USB ADB 路径，不要据此判断模块未连接。
   随后真实 iPhone 也已完成 ECM 上网与模块 TCP 闭环；NCM 仍未验证，恢复目标是原始
   `usbnet=0`。
 - QMI Voice 的离线编解码、受控动作、共享执行引擎和认证 daemon 候选已经实现；ARM
-  实机兼容、ECM STATUS 闭环、来电事件 indication/轮询状态机和持久启动仍未验收。
-  iOS
-  `Network.framework`/`VoiceProcessingIO` 生产客户端和安全持久化启动也仍未实施。
+  实机兼容、ECM STATUS 闭环和真实来电 ANSWER/END 闭环均已验收。iOS 探针现在包含
+  `Network.framework` + `CryptoKit` 的认证控制客户端骨架（固定 STATUS/DIAL/ANSWER/END，
+  单连接、challenge/HMAC、严格快照校验），但尚未接入生产 UI、配对/轮换/撤销流程，
+  也没有实现 `VoiceProcessingIO`/双向 PCM 媒体或安全持久化启动。
 - 为继续实施前的安全盘点，macOS 后端新增 `GET /api/module/adb-inventory` 只读接口；它
   通过现有 ADB 传输收集 `/dev` 节点、相关进程、TTY 驱动和 Unix socket，不接受任意
   shell 输入，也不向模块设备节点写数据。只有据此确认内部 AT/QMI 通道后，才可实现
