@@ -6,8 +6,13 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var stateText = "未配置 pairing key"
     @Published private(set) var detailText = ""
     @Published private(set) var isBusy = false
+    @Published private(set) var moduleIdentifier: String?
+    @Published private(set) var availableModuleIdentifiers: [String] = []
+    @Published var isImportingPairing = false
+    @Published var isConfirmingUnpair = false
 
     private var client: VoiceControlClient?
+    private var keyStore: PairingKeyStore?
     private var requestTask: Task<Void, Never>?
 
     var isConfigured: Bool { client != nil }
@@ -26,6 +31,8 @@ final class VoiceControlModel: ObservableObject {
     /// Injects a key only for the lifetime of this model; it is never persisted.
     /// The production pairing ceremony will call this after authenticating the user.
     func configure(pairingKey: Data) {
+        keyStore = nil
+        moduleIdentifier = nil
         do {
             client = try VoiceControlClient(pairingKey: pairingKey)
             stateText = "已配置（内存）"
@@ -43,25 +50,127 @@ final class VoiceControlModel: ObservableObject {
         do {
             guard let key = try keyStore.load() else {
                 client = nil
+                self.keyStore = nil
+                moduleIdentifier = nil
                 stateText = "未找到 pairing key"
                 detailText = "请先完成生产配对"
                 return
             }
             configure(pairingKey: key)
+            self.keyStore = keyStore
+            moduleIdentifier = keyStore.moduleIdentifier
+            stateText = "已配对 · \(Self.shortIdentifier(keyStore.moduleIdentifier))"
         } catch {
             client = nil
+            self.keyStore = nil
+            moduleIdentifier = nil
             stateText = "读取 pairing key 失败"
             detailText = error.localizedDescription
         }
     }
 
+    func restorePairings() {
+        do {
+            let pairings = try PairingKeyStore.loadAll()
+            availableModuleIdentifiers = pairings.map(\.moduleIdentifier)
+            guard pairings.count == 1, let pairing = pairings.first else {
+                clearConfiguration(preservingModuleList: true)
+                if pairings.count > 1 {
+                    stateText = "请选择模块"
+                    detailText = "Keychain 中保存了 \(pairings.count) 个模块"
+                }
+                return
+            }
+            try selectPairing(moduleIdentifier: pairing.moduleIdentifier, key: pairing.key)
+        } catch {
+            clearConfiguration(preservingModuleList: true)
+            stateText = "读取 pairing key 失败"
+            detailText = error.localizedDescription
+        }
+    }
+
+    func selectPairing(moduleIdentifier: String) {
+        guard !moduleIdentifier.isEmpty else {
+            clearConfiguration(preservingModuleList: true)
+            if availableModuleIdentifiers.count > 1 {
+                stateText = "请选择模块"
+                detailText = "Keychain 中保存了 \(availableModuleIdentifiers.count) 个模块"
+            }
+            return
+        }
+        do {
+            let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
+            guard let key = try keyStore.load() else {
+                throw PairingKeyStoreError.unexpectedData
+            }
+            try selectPairing(moduleIdentifier: moduleIdentifier, key: key)
+        } catch {
+            clearConfiguration(preservingModuleList: true)
+            stateText = "选择模块失败"
+            detailText = error.localizedDescription
+        }
+    }
+
+    func importDevelopmentPairingBundle(_ data: Data) {
+        do {
+            let pairing = try DevelopmentPairingBundle.decodeAndValidate(data)
+            let keyStore = try PairingKeyStore(moduleIdentifier: pairing.moduleIdentifier)
+            try keyStore.save(pairing.pairingKey)
+            restorePairings()
+            selectPairing(moduleIdentifier: pairing.moduleIdentifier)
+            detailText = "测试凭据已保存到本机 Keychain；请删除原始配对文件"
+        } catch {
+            stateText = "导入测试配对失败"
+            detailText = error.localizedDescription
+        }
+    }
+
+    func reportPairingImportFailure(_ error: Error) {
+        stateText = "读取测试配对文件失败"
+        detailText = error.localizedDescription
+    }
+
+    func unpairCurrentModule() {
+        guard let keyStore else { return }
+        do {
+            try keyStore.delete()
+            restorePairings()
+            detailText = "已从本机 Keychain 撤销测试凭据"
+        } catch {
+            stateText = "撤销配对失败"
+            detailText = error.localizedDescription
+        }
+    }
+
     func clearConfiguration() {
+        clearConfiguration(preservingModuleList: false)
+    }
+
+    private func clearConfiguration(preservingModuleList: Bool) {
         requestTask?.cancel()
         requestTask = nil
         client = nil
+        keyStore = nil
+        moduleIdentifier = nil
+        if !preservingModuleList {
+            availableModuleIdentifiers = []
+        }
         isBusy = false
         stateText = "未配置 pairing key"
         detailText = ""
+    }
+
+    private func selectPairing(moduleIdentifier: String, key: Data) throws {
+        let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
+        client = try VoiceControlClient(pairingKey: key)
+        self.keyStore = keyStore
+        self.moduleIdentifier = moduleIdentifier
+        stateText = "已配对 · \(Self.shortIdentifier(moduleIdentifier))"
+        detailText = ""
+    }
+
+    private static func shortIdentifier(_ identifier: String) -> String {
+        String(identifier.prefix(8))
     }
 
     func refreshStatus() {

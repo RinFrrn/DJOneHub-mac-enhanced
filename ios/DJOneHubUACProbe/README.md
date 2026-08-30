@@ -31,9 +31,10 @@ Apple 当前列出的第二设备只有有线耳麦和 Bluetooth LE/HFP，不包
 `.wiredEthernet`，避免同网段 Wi-Fi 抢走到模块的路由；不提供任意 AT/QMI 透传。
 
 探针页面现在显示“模块电话控制（实验）”区域，并接入一个只读 `STATUS` 调用入口。该
-区域默认保持禁用，因为生产 pairing ceremony 尚未完成；只有业务层显式调用
-`VoiceControlModel.configure(pairingKey:)` 注入内存中的 32 字节 key 后才会启用读取。
-UI 不提供粘贴密钥的文本框，也不会把 key 写入 UserDefaults、Keychain 或日志。
+区域默认保持禁用，因为生产 pairing ceremony 尚未完成。业务层可显式注入内存中的
+32 字节 key；用于真机闭环的开发流程也可导入一小时有效的 JSON 测试配对包。测试 key
+按其 SHA-256 指纹隔离保存在 `AfterFirstUnlockThisDeviceOnly` Keychain 中，不进入
+UserDefaults 或日志，也不提供粘贴密钥的文本框。
 
 调用方必须注入恰好 32 字节的 pairing key：
 
@@ -52,8 +53,12 @@ daemon。不要把测试 key、设备 key 或模块持久凭据提交到仓库�
 `Control/PairingKeyStore.swift` 已提供生产配对完成后的 Keychain 存储边界：只接受 32 字节
 值，使用 `AfterFirstUnlockThisDeviceOnly`、明确禁止同步，并要求使用经过认证的稳定模块
 标识建立独立 Keychain account，避免不同模块互相覆盖；它支持读取、原子更新和撤销。
-当前探针不会自动调用它，也不会因该文件存在而改变临时调试流程。配对完成后，业务层
-可显式调用 `VoiceControlModel.configure(from:)` 将已保存的 key 注入内存。
+只有用户显式导入测试配对包时才会写入；App 启动时只读取本 App 已有的配对项。生产
+配对完成后，业务层也可调用 `VoiceControlModel.configure(from:)` 将指定模块的 key
+注入内存。
+
+App 启动时会枚举本 App 自己的 Keychain 项：只有一个模块时恢复该模块；有多个模块时
+要求用户选择。App 内“撤销当前测试配对”只删除对应模块的 Keychain 项，不影响其他模块。
 
 客户端严格检查 20 字节大端 header、HELLO 32 字节 challenge、request ID、完整
 HMAC-SHA256 tag、响应 operation 与 call snapshot。号码只允许 `0-9`、`*`、`#` 和首位
@@ -72,6 +77,17 @@ xcrun swiftc \
 ```
 
 预期输出：`VoiceControlProtocolOfflineTest: PASS`。
+
+开发测试配对包解析测试：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Control/VoiceControlProtocol.swift \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Control/PairingKeyStore.swift \
+  ios/DJOneHubUACProbe/Tests/DevelopmentPairingBundleOfflineTest.swift \
+  -o /tmp/djonehub-pairing-bundle-test
+/tmp/djonehub-pairing-bundle-test
+```
 
 ## 构建
 
@@ -116,6 +132,39 @@ xcodebuild \
 探针与认证客户端都限定在 iOS 的 `.wiredEthernet` 路径。模块认证 daemon 的 `--once`
 只会在完整认证请求已经收到且签名响应已经发出后消费；裸 TCP 探针、错误 HMAC、截断帧
 和非 USB peer 均不会让一次性 daemon 提前退出。
+
+### iPhone STATUS 一次性闭环
+
+这只是开发测试流程，不是最终生产配对。它会在模块 `/usrdata/djonehub/voice-test/` 写入
+固定哈希 daemon、短期 pairing key 和一次性启动脚本，并精准建立
+`/etc/rc5.d/S99djonehub-voice-test`；启动标记只消费一次，daemon 成功载入 key 后会立即
+删除模块上的 key 文件。API 在武装前先运行一次认证 STATUS 预检，并拒绝与仍处于 armed
+状态的旧 sentinel 并存。
+
+保持模块连接 Mac，使用匹配当前固定 SHA-256 的 ARM artifact 武装，并把响应直接保存成
+文件，避免 key 出现在终端输出：
+
+```sh
+curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-once \
+  -H 'Content-Type: application/json' \
+  -d '{"confirm":true,"confirm_operation":"arm-ios-status-once"}' \
+  -o "$HOME/Downloads/DJOneHub-STATUS-pairing.json"
+```
+
+先把该 JSON 交给 iPhone，在 App 中选择“导入 STATUS 测试配对包”；确认显示“已配对”后，
+删除原始 JSON，再把模块换接 iPhone。此时不要运行裸 TCP 探针，直接点“读取模块通话状态”。
+配对包只允许在创建后一小时内导入，module identifier 必须等于 key 的 SHA-256 前 16 字节；
+错误 endpoint、过期包和被替换的 identifier 都会被拒绝。
+
+接回 Mac 后查看状态或完整卸载：
+
+```sh
+curl -fsS http://127.0.0.1:7575/api/ios/voice-test
+curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/uninstall \
+  -H 'Content-Type: application/json' -d '{"confirm":true}'
+```
+
+卸载接口只会删除精确指向 DJOneHub 测试脚本的启动链接；遇到同名非本项目文件会拒绝。
 
 当前模块侧已经有经过真实 STATUS/ANSWER/END 验收的一次性认证 voice daemon 候选；
 Mac 侧会用临时 key 启动它，并明确报告 `one_shot=true`、`persistent=false`。iOS 侧新增

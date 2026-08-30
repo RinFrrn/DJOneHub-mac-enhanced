@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var probe: AudioProbeModel
@@ -24,16 +25,54 @@ struct ContentView: View {
                 }
             }
         }
+        .fileImporter(
+            isPresented: $voiceControl.isImportingPairing,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            importPairing(result)
+        }
+        .confirmationDialog(
+            "撤销当前模块的测试配对？",
+            isPresented: $voiceControl.isConfirmingUnpair,
+            titleVisibility: .visible
+        ) {
+            Button("撤销配对", role: .destructive) {
+                voiceControl.unpairCurrentModule()
+            }
+        }
     }
 
     private var voiceControlSection: some View {
         Section("模块电话控制（实验）") {
             LabeledContent("认证状态", value: voiceControl.stateText)
 
+            if voiceControl.availableModuleIdentifiers.count > 1 {
+                Picker("模块", selection: Binding(
+                    get: { voiceControl.moduleIdentifier ?? "" },
+                    set: { voiceControl.selectPairing(moduleIdentifier: $0) }
+                )) {
+                    Text("请选择").tag("")
+                    ForEach(voiceControl.availableModuleIdentifiers, id: \.self) { identifier in
+                        Text(String(identifier.prefix(8))).tag(identifier)
+                    }
+                }
+            }
+
+            Button("导入 STATUS 测试配对包") {
+                voiceControl.isImportingPairing = true
+            }
+
             Button(voiceControl.isBusy ? "读取中…" : "读取模块通话状态") {
                 voiceControl.refreshStatus()
             }
             .disabled(voiceControl.isBusy || !voiceControl.isConfigured)
+
+            if voiceControl.isConfigured {
+                Button("撤销当前测试配对", role: .destructive) {
+                    voiceControl.isConfirmingUnpair = true
+                }
+            }
 
             if !voiceControl.detailText.isEmpty {
                 Text(voiceControl.detailText)
@@ -41,9 +80,22 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("当前只接入只读 STATUS。pairing key 必须由尚未实现的生产配对流程在内存中注入；App 不生成、不持久化，也不在界面中要求粘贴真实密钥。未完成配对前，按钮保持禁用。")
+            Text("当前只接入只读 STATUS。测试配对包由 Mac 武装流程生成，显式导入后只保存到本机不可同步 Keychain；请随即删除原文件。它不是最终的无 Mac 生产配对方案。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func importPairing(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer {
+                if scoped { url.stopAccessingSecurityScopedResource() }
+            }
+            voiceControl.importDevelopmentPairingBundle(try Data(contentsOf: url))
+        } catch {
+            voiceControl.reportPairingImportFailure(error)
         }
     }
 
@@ -57,7 +109,7 @@ struct ContentView: View {
             Button(networkProbe.isTesting ? "探测中…" : "测试模块控制端口") {
                 networkProbe.probeControlPort()
             }
-            .disabled(networkProbe.isTesting)
+            .disabled(networkProbe.isTesting || voiceControl.isConfigured)
 
             if !networkProbe.detailText.isEmpty {
                 Text(networkProbe.detailText)
@@ -65,7 +117,9 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("只探测 TCP 控制面，不发送拨号、PCM 或其他通话命令。ECM 已能上网但端口拒绝时，表示网络链路正常，模块侧 djonehubd 尚未监听。")
+            Text(voiceControl.isConfigured
+                 ? "已有测试配对时请使用认证 STATUS；裸 TCP 探针已禁用，避免旧版 one-shot daemon 被提前消费。"
+                 : "只探测 TCP 控制面，不发送拨号、PCM 或其他通话命令。ECM 已能上网但端口拒绝时，表示网络链路正常，模块侧 djonehubd 尚未监听。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

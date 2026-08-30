@@ -22,6 +22,95 @@ type voiceDaemonStatusRequest struct {
 	ArtifactPath     string `json:"artifact_path"`
 }
 
+type voiceTestArmRequest struct {
+	Confirm          bool   `json:"confirm"`
+	ConfirmOperation string `json:"confirm_operation"`
+	ArtifactPath     string `json:"artifact_path"`
+}
+
+func voiceTestInstallLinkCommand() string {
+	return "root_rw=0; " +
+		"restore_ro() { if test \"$root_rw\" = 1; then sync; mount -o remount,ro /; fi; }; " +
+		"trap restore_ro EXIT HUP INT TERM; " +
+		"mount -o remount,rw / && root_rw=1 && " +
+		"test ! -e '" + voiceTestInitLink + "' && test ! -L '" + voiceTestInitLink + "' && " +
+		"ln -s '" + voiceTestRemoteScript + "' '" + voiceTestInitLink + "' && " +
+		"sync && mount -o remount,ro / && root_rw=0 && " +
+		"test \"$(readlink '" + voiceTestInitLink + "')\" = '" + voiceTestRemoteScript + "' && " +
+		"awk '$2 == \"/\" && $4 ~ /(^|,)ro(,|$)/ { found=1 } END { exit found ? 0 : 1 }' /proc/mounts"
+}
+
+func voiceTestRemoveLinkCommand() string {
+	return "root_rw=0; " +
+		"restore_ro() { if test \"$root_rw\" = 1; then sync; mount -o remount,ro /; fi; }; " +
+		"trap restore_ro EXIT HUP INT TERM; " +
+		"mount -o remount,rw / && root_rw=1 && " +
+		"test \"$(readlink '" + voiceTestInitLink + "')\" = '" + voiceTestRemoteScript + "' && " +
+		"rm -f '" + voiceTestInitLink + "' && sync && " +
+		"mount -o remount,ro / && root_rw=0 && test ! -e '" + voiceTestInitLink + "' && " +
+		"awk '$2 == \"/\" && $4 ~ /(^|,)ro(,|$)/ { found=1 } END { exit found ? 0 : 1 }' /proc/mounts"
+}
+
+func voiceTestCheckLink(adb *adbClient) (string, error) {
+	out, status, err := adb.shellChecked(
+		"if test -L '"+voiceTestInitLink+"'; then readlink '"+voiceTestInitLink+"'; "+
+			"elif test -e '"+voiceTestInitLink+"'; then echo __CONFLICT__; else echo __ABSENT__; fi",
+		8*time.Second,
+	)
+	if err != nil || status != 0 {
+		return "", fmt.Errorf("检查测试启动链接失败: %v %s", err, sentinelCleanShellOutput(out))
+	}
+	return sentinelCleanShellOutput(out), nil
+}
+
+func stopVoiceTestProcess(adb *adbClient) error {
+	command := "if test -s '" + voiceTestPIDFile + "'; then " +
+		"read pid < '" + voiceTestPIDFile + "' || true; " +
+		"case \"$pid\" in ''|*[!0-9]*) true;; *) " +
+		"owned() { test -d \"/proc/$pid\" && " +
+		"test \"$(tr '\\000' '\\n' < \"/proc/$pid/cmdline\" 2>/dev/null | sed -n '1p')\" = '" + voiceTestRemoteBinary + "'; }; " +
+		"if owned; then kill -TERM \"$pid\" 2>/dev/null || true; " +
+		"attempt=0; while owned && test \"$attempt\" -lt 30; do sleep 0.1; attempt=$((attempt + 1)); done; " +
+		"owned && exit 1 || true; fi;; esac; fi; rm -f '" + voiceTestPIDFile + "'"
+	return sentinelShell(adb, command, 8*time.Second)
+}
+
+func startVoiceTestForValidation(adb *adbClient) error {
+	command := "rm -f '" + voiceTestPIDFile + "' /tmp/djonehub-voice-test-validate.log; " +
+		"LD_LIBRARY_PATH=/usr/lib nohup '" + voiceTestRemoteBinary + "' --key-file '" + voiceTestRemoteKey + "' " +
+		"</dev/null >/tmp/djonehub-voice-test-validate.log 2>&1 & pid=$!; " +
+		"printf '%s\\n' \"$pid\" > '" + voiceTestPIDFile + "'; " +
+		"ready=0; attempt=0; while test \"$attempt\" -lt 30; do " +
+		"if test -d \"/proc/$pid\" && grep -F 'authenticated control listening on 192.168.225.1:45750' /tmp/djonehub-voice-test-validate.log >/dev/null 2>&1; then ready=1; break; fi; " +
+		"test -d \"/proc/$pid\" || break; sleep 0.1; attempt=$((attempt + 1)); done; test \"$ready\" = 1"
+	return sentinelShell(adb, command, 10*time.Second)
+}
+
+func installVoiceTestLink(adb *adbClient) error {
+	state, err := voiceTestCheckLink(adb)
+	if err != nil {
+		return err
+	}
+	if state == voiceTestRemoteScript {
+		return nil
+	}
+	if state != "__ABSENT__" {
+		return fmt.Errorf("拒绝覆盖已有启动项 %s（当前：%s）", voiceTestInitLink, state)
+	}
+	return sentinelShell(adb, voiceTestInstallLinkCommand(), 15*time.Second)
+}
+
+func removeVoiceTestLink(adb *adbClient) error {
+	state, err := voiceTestCheckLink(adb)
+	if err != nil || state == "__ABSENT__" {
+		return err
+	}
+	if state != voiceTestRemoteScript {
+		return fmt.Errorf("拒绝删除非 DJOneHub 启动项 %s（当前：%s）", voiceTestInitLink, state)
+	}
+	return sentinelShell(adb, voiceTestRemoveLinkCommand(), 15*time.Second)
+}
+
 func defaultVoiceDaemonArtifactPath() string {
 	return defaultPinnedQMIArtifactPath("djonehub-voice-daemon.armv7", validateVoiceDaemonArtifact)
 }
@@ -276,4 +365,191 @@ func (a *app) qmiVoiceDaemonStatusAPI(w http.ResponseWriter, r *http.Request) {
 		"persistent":    false,
 		"one_shot":      true,
 	})
+}
+
+func (a *app) voiceTestStatusAPI(w http.ResponseWriter, _ *http.Request) {
+	a.moduleVoiceOpMu.Lock()
+	defer a.moduleVoiceOpMu.Unlock()
+	adb, err := openDJIUSBADB()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer adb.Close()
+	out, status, err := adb.shellChecked(
+		"printf 'binary=%s\\n' \"$(test -x '"+voiceTestRemoteBinary+"' && echo yes || echo no)\"; "+
+			"printf 'key=%s\\n' \"$(test -f '"+voiceTestRemoteKey+"' && echo present || echo absent)\"; "+
+			"printf 'marker=%s\\n' \"$(test -f '"+voiceTestRemoteMarker+"' && echo armed || echo absent)\"; "+
+			"printf 'link=%s\\n' \"$(test -L '"+voiceTestInitLink+"' && readlink '"+voiceTestInitLink+"' || echo absent)\"; "+
+			"printf 'state=%s\\n' \"$(test -f '"+voiceTestRemoteState+"' && cat '"+voiceTestRemoteState+"' || echo absent)\"; "+
+			"echo 'log_begin'; test ! -f '"+voiceTestRemoteLog+"' || tail -n 60 '"+voiceTestRemoteLog+"'; echo 'log_end'",
+		8*time.Second,
+	)
+	if err != nil || status != 0 {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("读取 iOS STATUS 测试状态失败: %v %s", err, sentinelCleanShellOutput(out)))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"detail": sentinelCleanShellOutput(out)})
+}
+
+func (a *app) voiceTestArmOnceAPI(w http.ResponseWriter, r *http.Request) {
+	var request voiceTestArmRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if !request.Confirm || request.ConfirmOperation != "arm-ios-status-once" {
+		writeError(w, http.StatusBadRequest, "需要 confirm=true 且 confirm_operation=arm-ios-status-once")
+		return
+	}
+	data, artifactPath, err := loadVoiceDaemonArtifact(request.ArtifactPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	key := make([]byte, voiceControlTagBytes)
+	if _, err := rand.Read(key); err != nil {
+		writeError(w, http.StatusInternalServerError, "生成临时 pairing key 失败: "+err.Error())
+		return
+	}
+	defer func() {
+		for index := range key {
+			key[index] = 0
+		}
+	}()
+	bundle, identifier, err := encodeDevelopmentPairingBundle(key, time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "生成测试配对包失败: "+err.Error())
+		return
+	}
+
+	a.moduleVoiceOpMu.Lock()
+	defer a.moduleVoiceOpMu.Unlock()
+	adb, err := openDJIUSBADB()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer adb.Close()
+	if err := sentinelRequireRoot(adb); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if _, status, err := adb.shellChecked("test ! -f '"+sentinelRemoteMarker+"'", 8*time.Second); err != nil || status != 0 {
+		writeError(w, http.StatusConflict, "sentinel 仍处于 armed 状态，请先卸载或消费 sentinel")
+		return
+	}
+	wasSentinelRunning := sentinelOwnedProcessRunning(adb)
+	if wasSentinelRunning {
+		if err := stopOwnedSentinelProcesses(adb); err != nil {
+			writeError(w, http.StatusBadGateway, "停止 sentinel 失败: "+err.Error())
+			return
+		}
+		defer func() { _ = restartSentinelHealth(adb) }()
+	}
+	if err := stopTemporaryVoiceDaemon(adb); err != nil {
+		writeError(w, http.StatusBadGateway, "清理临时 daemon 失败: "+err.Error())
+		return
+	}
+	if err := stopVoiceTestProcess(adb); err != nil {
+		writeError(w, http.StatusBadGateway, "停止旧测试 daemon 失败: "+err.Error())
+		return
+	}
+	armed := false
+	defer func() {
+		if !armed {
+			_ = sentinelShell(adb, "rm -f '"+voiceTestRemoteKey+"' '"+voiceTestRemoteMarker+"'", 8*time.Second)
+		}
+	}()
+	if err := sentinelShell(adb, "test -d /usrdata && mkdir -p '"+voiceTestRemoteDir+"' && chmod 700 '"+voiceTestRemoteDir+"'", 8*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "准备测试目录失败: "+err.Error())
+		return
+	}
+	if err := adb.pushContext(r.Context(), data, voiceTestRemoteBinary, 0o100700, 30*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "推送认证 daemon 失败: "+err.Error())
+		return
+	}
+	if err := adb.pushContext(r.Context(), key, voiceTestRemoteKey, 0o100600, 15*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "推送测试 pairing key 失败: "+err.Error())
+		return
+	}
+	if err := adb.pushContext(r.Context(), []byte(voiceTestStartOnceScript), voiceTestRemoteScript, 0o100700, 15*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "推送测试启动脚本失败: "+err.Error())
+		return
+	}
+	verify := "chmod 700 '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteScript + "' && chmod 600 '" + voiceTestRemoteKey + "' && " +
+		"test \"$(sha256sum '" + voiceTestRemoteBinary + "' | awk '{print $1}')\" = '" + voiceDaemonExpectedSHA256 + "' && " +
+		"test \"$(wc -c < '" + voiceTestRemoteKey + "')\" = 32"
+	if err := sentinelShell(adb, verify, 12*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "模块端测试文件校验失败: "+err.Error())
+		return
+	}
+	if err := startVoiceTestForValidation(adb); err != nil {
+		writeError(w, http.StatusBadGateway, "认证 daemon 临时启动失败: "+err.Error())
+		return
+	}
+	reply, queryErr := queryTemporaryVoiceDaemon(key)
+	stopErr := stopVoiceTestProcess(adb)
+	if queryErr != nil || reply.Status != 0 || stopErr != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("认证 STATUS 预检失败: query=%v status=%d stop=%v", queryErr, reply.Status, stopErr))
+		return
+	}
+	if err := installVoiceTestLink(adb); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := sentinelShell(adb,
+		"rm -f '"+voiceTestRemoteState+"' '"+voiceTestRemoteLog+"' && : > '"+voiceTestRemoteMarker+"' && chmod 600 '"+voiceTestRemoteMarker+"' && sync",
+		8*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "设置一次性测试标记失败: "+err.Error())
+		return
+	}
+	armed = true
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=DJOneHub-STATUS-pairing-"+identifier[:8]+".json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-DJOneHub-Artifact-Path", artifactPath)
+	w.Header().Set("X-DJOneHub-Module-Identifier", identifier)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(bundle)
+}
+
+func (a *app) voiceTestUninstallAPI(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Confirm bool `json:"confirm"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if !request.Confirm {
+		writeError(w, http.StatusBadRequest, "需要明确确认卸载 iOS STATUS 测试")
+		return
+	}
+	a.moduleVoiceOpMu.Lock()
+	defer a.moduleVoiceOpMu.Unlock()
+	adb, err := openDJIUSBADB()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer adb.Close()
+	if err := sentinelRequireRoot(adb); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := removeVoiceTestLink(adb); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := stopVoiceTestProcess(adb); err != nil {
+		writeError(w, http.StatusBadGateway, "停止测试 daemon 失败: "+err.Error())
+		return
+	}
+	cleanup := "rm -f '" + voiceTestRemoteMarker + "' '" + voiceTestRemoteState + "' '" + voiceTestRemoteLog + "' '" +
+		voiceTestRemoteScript + "' '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteKey + "' '" + voiceTestPIDFile + "'; " +
+		"rmdir '" + voiceTestRemoteDir + "' 2>/dev/null || true; sync"
+	if err := sentinelShell(adb, cleanup, 10*time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, "清理 iOS STATUS 测试失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"uninstalled": true})
 }

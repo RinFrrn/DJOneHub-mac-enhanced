@@ -12,6 +12,9 @@ struct DJOneHubUACProbeApp: App {
                 .environmentObject(audioProbe)
                 .environmentObject(networkProbe)
                 .environmentObject(voiceControl)
+                .task {
+                    voiceControl.restorePairings()
+                }
         }
     }
 }

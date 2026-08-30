@@ -5,8 +5,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func voiceDaemonTestMaterial() ([]byte, []byte) {
@@ -82,5 +84,36 @@ func TestVoiceDaemonHeaderUsesNetworkOrder(t *testing.T) {
 	header := voiceControlHeader(voiceControlFrameRequest, voiceControlOpStatus, 7, 0x0102030405060708)
 	if binary.BigEndian.Uint16(header[8:10]) != 7 || binary.BigEndian.Uint64(header[12:20]) != 0x0102030405060708 {
 		t.Fatal("header network byte order mismatch")
+	}
+}
+
+func TestDevelopmentPairingBundleMatchesIOSContract(t *testing.T) {
+	key := make([]byte, voiceControlTagBytes)
+	for index := range key {
+		key[index] = byte(index)
+	}
+	now := time.Unix(2_000_000_000, 0).UTC()
+	data, identifier, err := encodeDevelopmentPairingBundle(key, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle developmentPairingBundle
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Version != 1 || bundle.Purpose != "development-status-only" ||
+		bundle.ModuleIdentifier != identifier || len(identifier) != 32 ||
+		bundle.Host != "192.168.225.1" || bundle.Port != 45750 {
+		t.Fatalf("unexpected bundle: %#v", bundle)
+	}
+	if bundle.CreatedAt != now.Format(time.RFC3339) ||
+		bundle.ExpiresAt != now.Add(time.Hour).Format(time.RFC3339) {
+		t.Fatalf("unexpected validity: %#v", bundle)
+	}
+}
+
+func TestDevelopmentPairingBundleRejectsWrongKeyLength(t *testing.T) {
+	if _, _, err := encodeDevelopmentPairingBundle(make([]byte, 31), time.Now()); err == nil {
+		t.Fatal("short pairing key accepted")
 	}
 }

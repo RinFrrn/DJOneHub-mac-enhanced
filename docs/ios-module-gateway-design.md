@@ -34,6 +34,11 @@ UI 不接收自由格式 AT/QMI 命令，不把 key 放入文本框、UserDefaul
 仍未完成：模块到 iPhone 的双向 PCM 媒体传输、生产 pairing/轮换/撤销、后台来电与
 CallKit 生命周期、以及真机上完整的 iOS 本地网络/USB 配件权限和断线恢复策略。
 
+为推进只读 STATUS 实机闭环，仓库增加了明确标注为 development-only 的一次性测试配对：
+Mac 后端生成随机 32 字节 key、在模块启动一次认证 daemon，并输出一小时内可导入的 JSON
+配对包；iOS 校验固定 purpose/endpoint、有效期和 key 指纹后，按模块写入不可同步
+Keychain。该流程仍依赖 Mac 完成首次武装，不能替代下节要求的生产信任根。
+
 ### 1.0.1 配对是独立的产品门槛
 
 当前 daemon 的 `--key-file` 只解决“双方已经持有同一把密钥”后的认证，并没有解决

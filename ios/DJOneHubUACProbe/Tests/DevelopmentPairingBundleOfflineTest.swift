@@ -1,0 +1,98 @@
+import Foundation
+
+@main
+struct DevelopmentPairingBundleOfflineTest {
+    static func main() throws {
+        let key = Data((0..<32).map(UInt8.init))
+        let identifier = DevelopmentPairingBundle.moduleIdentifier(for: key)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let valid = bundleData(
+            key: key,
+            identifier: identifier,
+            createdAt: now,
+            expiresAt: now.addingTimeInterval(3_600)
+        )
+        let decoded = try DevelopmentPairingBundle.decodeAndValidate(valid, now: now)
+        precondition(decoded.moduleIdentifier == identifier)
+        precondition(decoded.pairingKey == key)
+
+        expect(.identifierMismatch) {
+            try DevelopmentPairingBundle.decodeAndValidate(
+                bundleData(
+                    key: key,
+                    identifier: String(repeating: "0", count: 32),
+                    createdAt: now.addingTimeInterval(-60),
+                    expiresAt: now.addingTimeInterval(3_600)
+                ),
+                now: now
+            )
+        }
+        expect(.expired) {
+            try DevelopmentPairingBundle.decodeAndValidate(
+                bundleData(
+                    key: key,
+                    identifier: identifier,
+                    createdAt: now.addingTimeInterval(-3_600),
+                    expiresAt: now.addingTimeInterval(-1)
+                ),
+                now: now
+            )
+        }
+        expect(.createdInFuture) {
+            try DevelopmentPairingBundle.decodeAndValidate(
+                bundleData(
+                    key: key,
+                    identifier: identifier,
+                    createdAt: now.addingTimeInterval(DevelopmentPairingBundle.maximumClockSkew + 1),
+                    expiresAt: now.addingTimeInterval(DevelopmentPairingBundle.maximumClockSkew + 600)
+                ),
+                now: now
+            )
+        }
+        expect(.validityTooLong) {
+            try DevelopmentPairingBundle.decodeAndValidate(
+                bundleData(
+                    key: key,
+                    identifier: identifier,
+                    createdAt: now,
+                    expiresAt: now.addingTimeInterval(DevelopmentPairingBundle.maximumValidity + 1)
+                ),
+                now: now
+            )
+        }
+        print("DevelopmentPairingBundleOfflineTest: PASS")
+    }
+
+    private static func bundleData(
+        key: Data,
+        identifier: String,
+        createdAt: Date,
+        expiresAt: Date
+    ) -> Data {
+        let formatter = ISO8601DateFormatter()
+        return try! JSONSerialization.data(withJSONObject: [
+            "version": 1,
+            "purpose": DevelopmentPairingBundle.purpose,
+            "module_identifier": identifier,
+            "pairing_key_base64": key.base64EncodedString(),
+            "host": DevelopmentPairingBundle.host,
+            "port": Int(DevelopmentPairingBundle.port),
+            "created_at": formatter.string(from: createdAt),
+            "expires_at": formatter.string(from: expiresAt)
+        ], options: [.sortedKeys])
+    }
+
+    private static func expect(
+        _ expected: DevelopmentPairingBundleError,
+        operation: () throws -> DevelopmentPairingBundle.Validated
+    ) {
+        do {
+            _ = try operation()
+            preconditionFailure("expected \(expected)")
+        } catch let error as DevelopmentPairingBundleError {
+            precondition(error == expected)
+        } catch {
+            preconditionFailure("unexpected error: \(error)")
+        }
+    }
+}

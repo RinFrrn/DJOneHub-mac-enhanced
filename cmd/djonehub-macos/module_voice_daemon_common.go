@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 const (
@@ -16,6 +19,17 @@ const (
 	voiceDaemonRemotePIDPath  = "/tmp/djonehub-voice-daemon.pid"
 	voiceDaemonRemoteLogPath  = "/tmp/djonehub-voice-daemon.log"
 	voiceDaemonAddress        = "192.168.225.1:45750"
+	voiceTestRemoteDir        = "/usrdata/djonehub/voice-test"
+	voiceTestRemoteBinary     = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
+	voiceTestRemoteKey        = voiceTestRemoteDir + "/pairing.key"
+	voiceTestRemoteScript     = voiceTestRemoteDir + "/start-once.sh"
+	voiceTestRemoteMarker     = voiceTestRemoteDir + "/run-once"
+	voiceTestRemoteState      = voiceTestRemoteDir + "/last-start.state"
+	voiceTestRemoteLog        = voiceTestRemoteDir + "/last-start.log"
+	voiceTestInitLink         = "/etc/rc5.d/S99djonehub-voice-test"
+	voiceTestPIDFile          = "/run/djonehub-voice-test.pid"
+	voiceTestPairingPurpose   = "development-status-only"
+	voiceTestPairingValidity  = time.Hour
 
 	voiceControlMagic        = 0x444a4f48
 	voiceControlVersion      = 1
@@ -28,6 +42,47 @@ const (
 	voiceControlTagBytes     = 32
 	voiceControlMaxPayload   = 81
 )
+
+type developmentPairingBundle struct {
+	Version          int    `json:"version"`
+	Purpose          string `json:"purpose"`
+	ModuleIdentifier string `json:"module_identifier"`
+	PairingKeyBase64 string `json:"pairing_key_base64"`
+	Host             string `json:"host"`
+	Port             uint16 `json:"port"`
+	CreatedAt        string `json:"created_at"`
+	ExpiresAt        string `json:"expires_at"`
+}
+
+func developmentPairingModuleIdentifier(key []byte) (string, error) {
+	if len(key) != voiceControlTagBytes {
+		return "", errors.New("pairing key 必须恰好为 32 字节")
+	}
+	sum := sha256.Sum256(key)
+	return hex.EncodeToString(sum[:16]), nil
+}
+
+func encodeDevelopmentPairingBundle(key []byte, now time.Time) ([]byte, string, error) {
+	identifier, err := developmentPairingModuleIdentifier(key)
+	if err != nil {
+		return nil, "", err
+	}
+	bundle := developmentPairingBundle{
+		Version:          1,
+		Purpose:          voiceTestPairingPurpose,
+		ModuleIdentifier: identifier,
+		PairingKeyBase64: base64.StdEncoding.EncodeToString(key),
+		Host:             "192.168.225.1",
+		Port:             45750,
+		CreatedAt:        now.UTC().Format(time.RFC3339),
+		ExpiresAt:        now.Add(voiceTestPairingValidity).UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return nil, "", err
+	}
+	return append(data, '\n'), identifier, nil
+}
 
 type voiceDaemonCall struct {
 	ID        byte `json:"id"`
@@ -160,3 +215,64 @@ func voiceDaemonReplyFrameForTest(key, nonce []byte, requestID uint64, payload [
 	unsigned := append(header, payload...)
 	return append(unsigned, voiceControlTag(key, nonce, unsigned)...)
 }
+
+const voiceTestStartOnceScript = `#!/bin/sh
+base=/usrdata/djonehub/voice-test
+binary="$base/djonehub-voice-daemon.armv7"
+key="$base/pairing.key"
+marker="$base/run-once"
+state="$base/last-start.state"
+log="$base/last-start.log"
+pidfile=/run/djonehub-voice-test.pid
+
+test -f "$marker" || exit 0
+rm -f "$marker"
+printf 'marker-consumed\n' >"$state"
+: >"$log"
+sync
+
+(
+    attempt=0
+    while test "$attempt" -lt 60; do
+        if ip addr show 2>/dev/null | grep -q 'inet 192\.168\.225\.1/'; then
+            printf 'daemon-starting\n' >"$state"
+            chmod 600 "$key" || exit 1
+            LD_LIBRARY_PATH=/usr/lib "$binary" --once --key-file "$key" >>"$log" 2>&1 &
+            daemon_pid=$!
+            printf '%s\n' "$daemon_pid" >"$pidfile"
+            ready=0
+            check=0
+            while test "$check" -lt 50; do
+                if grep -F 'authenticated control listening on 192.168.225.1:45750' "$log" >/dev/null 2>&1; then
+                    ready=1
+                    break
+                fi
+                kill -0 "$daemon_pid" 2>/dev/null || break
+                check=$((check + 1))
+                sleep 0.1
+            done
+            rm -f "$key"
+            sync
+            if test "$ready" = 1; then
+                printf 'listener-ready\n' >"$state"
+                wait "$daemon_pid"
+                result=$?
+                printf 'daemon-exit:%s\n' "$result" >"$state"
+                rm -f "$pidfile"
+                exit "$result"
+            fi
+            printf 'daemon-start-failed\n' >"$state"
+            kill -TERM "$daemon_pid" 2>/dev/null || true
+            rm -f "$pidfile"
+            exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+    rm -f "$key"
+    printf 'address-timeout\n' >"$state"
+    ip addr show 2>/dev/null || true
+    exit 1
+) >>"$log" 2>&1 &
+exit 0
+`

@@ -76,9 +76,13 @@
   `confirm_operation`，号码/Call ID 在 Go 后端和 ARM 工具两层校验，QMI action 后必须
   回读状态确认；该阶段当时尚未调用任何 Dial/Answer/End 写命令。
 - iOS 探针已把控制客户端接入页面的只读状态区域：默认无 pairing key 时按钮保持禁用；
-  只有生产配对层显式以内存方式注入 32 字节 key 后，才允许发出单次 `STATUS` 请求并在
-  页面显示通话快照。客户端连接被限定到 `.wiredEthernet`；Keychain 边界要求按稳定模块
-  标识隔离凭据并禁止同步，但当前 UI 不会自动保存或加载。尚未开放拨号/接听/挂断按钮。
+  显式内存注入或导入测试配对包后，才允许发出单次 `STATUS` 请求并在页面显示通话快照。
+  客户端连接被限定到 `.wiredEthernet`；Keychain 按稳定模块标识隔离并禁止同步，只在用户
+  明确导入时写入，启动时可恢复本 App 已保存的项目。尚未开放拨号/接听/挂断按钮。
+- 后续补齐 development-only 的 STATUS 测试配对包：Mac 一次性武装接口生成随机 key，
+  在返回文件前完成真实认证 STATUS 预检；iOS 显式导入后校验固定 endpoint、一小时
+  有效期、创建时间及 SHA-256 模块标识，再写入不可同步 Keychain。App 可选择
+  多模块并逐项撤销；已配对时禁用裸 TCP 探针，避免旧 one-shot daemon 被提前消费。
 - 真实来电写操作验收随后完成：先以 `status` 锁定唯一的 `call_id=1` 和 `incoming`，
   `answer 1` 在约 0.43 秒内返回成功并回读确认；独立 `status` 随后得到
   `state=conversation`；`end 1` 同样在约 0.43 秒内确认，最终 `call_count=0`。
