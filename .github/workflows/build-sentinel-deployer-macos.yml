@@ -34,7 +34,9 @@ jobs:
             cmd/djonehub-macos/module_sentinel_common.go \
             cmd/djonehub-macos/module_sentinel_common_test.go \
             cmd/djonehub-macos/module_qmi_probe_common.go \
-            cmd/djonehub-macos/module_qmi_probe_common_test.go
+            cmd/djonehub-macos/module_qmi_probe_common_test.go \
+            cmd/djonehub-macos/module_voice_daemon_common.go \
+            cmd/djonehub-macos/module_voice_daemon_common_test.go
 
   package:
     needs: unit-tests

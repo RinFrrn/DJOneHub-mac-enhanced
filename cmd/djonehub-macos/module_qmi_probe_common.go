@@ -14,7 +14,7 @@ import (
 const (
 	qmiVoiceProbeExpectedSHA256 = "440463eed6ccd0185e5d9eb16b2dce466b2c079a2f7d4a4fc03fb106461f95a6"
 	qmiVoiceProbeRemotePath     = "/tmp/djonehub-qmi-probe.armv7"
-	qmiVoiceControlExpectedSHA256 = "5707c78dff6d1b695bf4527c781105d1b37bb9d2b06c9bfc90a5fe12175d9636"
+	qmiVoiceControlExpectedSHA256 = "86922281bc2eb5b52eaa7e272adba4fe1eb0d824556fa1d9e5f835edd5508667"
 	qmiVoiceControlRemotePath     = "/tmp/djonehub-qmi-voice-control.armv7"
 	qmiVoiceProbeMaximumSize    = 2 * 1024 * 1024
 )
