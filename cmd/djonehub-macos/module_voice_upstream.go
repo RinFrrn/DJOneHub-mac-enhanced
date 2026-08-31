@@ -20,6 +20,8 @@ const (
 	voiceRouteRetryWindow = 30 * time.Second
 )
 
+var errLegacyVoiceCardLoaded = errors.New("检测到旧版 qdc507_voice 声卡仍在内核中；为避免热切换语音驱动，请重启模块后再试")
+
 type voiceRuntimeManifest struct {
 	FormatVersion  int    `json:"formatVersion"`
 	RuntimeVersion string `json:"runtimeVersion"`
@@ -43,6 +45,7 @@ func (a *app) voiceStatus() map[string]any {
 	installed, installDetail := upstreamVoiceRuntimeInstalled()
 	return map[string]any{
 		"ready":             a.moduleVoiceReady,
+		"blocked":           a.moduleVoiceBlocked,
 		"last_attempt":      a.moduleVoiceLast,
 		"last_error":        a.moduleVoiceErr,
 		"detail":            a.moduleVoiceDetail,
@@ -64,6 +67,7 @@ func (a *app) setVoiceStatus(ready bool, err error, detail string) {
 	a.moduleVoiceMu.Lock()
 	defer a.moduleVoiceMu.Unlock()
 	a.moduleVoiceReady = ready
+	a.moduleVoiceBlocked = err != nil && errors.Is(err, errLegacyVoiceCardLoaded)
 	a.moduleVoiceLast = time.Now()
 	if err != nil {
 		a.moduleVoiceErr = err.Error()
@@ -92,6 +96,11 @@ func (a *app) ensureModuleVoiceRouteLocked() error {
 	if a.moduleVoiceReady {
 		a.moduleVoiceMu.Unlock()
 		return nil
+	}
+	if a.moduleVoiceBlocked {
+		errText := a.moduleVoiceErr
+		a.moduleVoiceMu.Unlock()
+		return fmt.Errorf("语音路由在本次通话中不再重试：%s", errText)
 	}
 	if time.Since(a.moduleVoiceLast) < voiceRouteRetryWindow {
 		errText := a.moduleVoiceErr
@@ -134,6 +143,12 @@ func (a *app) ensureModuleVoiceRouteBudgeted(budget time.Duration) error {
 	}
 }
 
+func (a *app) moduleVoiceRouteCanAttempt() bool {
+	a.moduleVoiceMu.Lock()
+	defer a.moduleVoiceMu.Unlock()
+	return !a.moduleVoiceBlocked
+}
+
 // stopModuleVoiceRoute tears down the module-side voice route after a call.
 func (a *app) stopModuleVoiceRoute() {
 	a.moduleVoiceOpMu.Lock()
@@ -141,6 +156,10 @@ func (a *app) stopModuleVoiceRoute() {
 
 	a.moduleVoiceMu.Lock()
 	if !a.moduleVoiceReady {
+		// A non-recoverable hot-switch failure is scoped to one call. Allow one
+		// fresh attempt for the next call while retaining the diagnostic text.
+		a.moduleVoiceBlocked = false
+		a.moduleVoiceLast = time.Time{}
 		a.moduleVoiceMu.Unlock()
 		return
 	}
@@ -148,6 +167,7 @@ func (a *app) stopModuleVoiceRoute() {
 	// A concurrent dial/answer will wait on moduleVoiceOpMu and restart after
 	// teardown instead of accepting stale "ready" state.
 	a.moduleVoiceReady = false
+	a.moduleVoiceBlocked = false
 	a.moduleVoiceLast = time.Time{}
 	a.moduleVoiceMu.Unlock()
 
@@ -211,7 +231,7 @@ func (a *app) startModuleVoiceRoute() error {
 	}
 	if !soundReady {
 		if _, status, _ := adb.shellChecked("grep -q '^qdc507_voice ' /proc/modules", 8*time.Second); status == 0 {
-			return errors.New("检测到旧版 qdc507_voice 声卡仍在内核中；为避免热切换语音驱动，请重启模块后再试")
+			return errLegacyVoiceCardLoaded
 		}
 		for _, mod := range manifest.Modules {
 			_, present, _ := adb.shellChecked("grep -q '^"+mod.Name+" ' /proc/modules", 8*time.Second)

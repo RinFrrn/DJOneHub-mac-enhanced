@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -52,6 +53,7 @@
 #define VOICE_DOWNLINK_MIXER "AFE_PCM_RX_Voice Mixer VoLTE"
 #define VOICE_UPLINK_MIXER "VoLTE_Tx Mixer AFE_PCM_TX_VoLTE"
 #define VOICE_AUDIO_ENABLE_PATH "/sys/class/android_usb/f_audio/audio_enable"
+#define NETWORK_UPLINK_PCM_DEVICE "hw:0,5"
 #define NETWORK_DOWNLINK_PCM_DEVICE "hw:0,6"
 #define NETWORK_PCM_FRAME_BYTES 256U
 #define NETWORK_PCM_FRAME_SAMPLES (NETWORK_PCM_FRAME_BYTES / 2U)
@@ -628,6 +630,44 @@ static int set_voice_audio_enabled(int enabled)
     return 0;
 }
 
+static int get_voice_audio_enabled(int *enabled)
+{
+    unsigned char value;
+    int fd;
+    int saved_errno;
+    ssize_t received;
+
+    do {
+        fd = open(VOICE_AUDIO_ENABLE_PATH, O_RDONLY | O_CLOEXEC);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0) {
+        log_message("error", "open(%s) failed: %s", VOICE_AUDIO_ENABLE_PATH,
+                    strerror(errno));
+        return -1;
+    }
+
+    do {
+        received = read(fd, &value, 1U);
+    } while (received < 0 && errno == EINTR);
+    saved_errno = errno;
+    if (close(fd) != 0 && received == (ssize_t)1) {
+        saved_errno = errno;
+        received = -1;
+    }
+    if (received != (ssize_t)1) {
+        log_message("error", "read(%s) failed: %s", VOICE_AUDIO_ENABLE_PATH,
+                    received == 0 ? "empty value" : strerror(saved_errno));
+        return -1;
+    }
+    if (value != (unsigned char)'0' && value != (unsigned char)'1') {
+        log_message("error", "unexpected value in %s: 0x%02x",
+                    VOICE_AUDIO_ENABLE_PATH, (unsigned int)value);
+        return -1;
+    }
+    *enabled = value == (unsigned char)'1' ? 1 : 0;
+    return 0;
+}
+
 struct voice_route_state {
     void *playback;
     void *capture;
@@ -808,10 +848,11 @@ static int run_network_pcm_probe(struct vendor_audio *api, int verbose)
     if (install_signal_handlers() != 0) {
         return EXIT_FAILURE;
     }
-    uplink_pcm = api->pcm_open("hw:0,5", PCM_PLAYBACK_FLAGS, PCM_RATE,
+    uplink_pcm = api->pcm_open(NETWORK_UPLINK_PCM_DEVICE, PCM_PLAYBACK_FLAGS, PCM_RATE,
                                PCM_CHANNELS, PCM_FORMAT_S16_LE, PCM_HOSTLESS);
     if (uplink_pcm == NULL) {
-        log_message("error", "could not open network uplink PCM hw:0,5");
+        log_message("error", "could not open network uplink PCM %s",
+                    NETWORK_UPLINK_PCM_DEVICE);
         goto cleanup;
     }
     downlink_pcm = api->pcm_open(NETWORK_DOWNLINK_PCM_DEVICE,
@@ -896,6 +937,196 @@ cleanup:
     if (uplink_pcm != NULL && api->pcm_close(uplink_pcm) != 0) {
         log_message("warn", "could not close network uplink PCM cleanly");
         result = EXIT_FAILURE;
+    }
+    return result;
+}
+
+static int run_direct_pcm_probe(struct vendor_audio *api, int verbose)
+{
+    static const int16_t tone_cycle[8] = {
+        0, 14142, 20000, 14142, 0, -14142, -20000, -14142
+    };
+    struct voice_route_state route;
+    struct timespec started;
+    struct timespec now;
+    void *uplink_pcm = NULL;
+    void *downlink_pcm = NULL;
+    unsigned char buffer[NETWORK_PCM_FRAME_BYTES];
+    uint64_t sum_magnitude = 0U;
+    uint32_t tone_sample = 0U;
+    unsigned long frames = 0UL;
+    unsigned long nonzero_samples = 0UL;
+    unsigned int uplink_buffer_length;
+    unsigned int downlink_buffer_length;
+    unsigned int peak = 0U;
+    int original_usb_audio = 0;
+    int observed_usb_audio = 0;
+    int usb_audio_changed = 0;
+    int route_started = 0;
+    int result = EXIT_FAILURE;
+
+    memset(&route, 0, sizeof(route));
+    if (install_signal_handlers() != 0) {
+        return EXIT_FAILURE;
+    }
+    if (get_voice_audio_enabled(&original_usb_audio) != 0) {
+        goto cleanup;
+    }
+    if (original_usb_audio != 0) {
+        if (set_voice_audio_enabled(0) != 0) {
+            goto cleanup;
+        }
+        usb_audio_changed = 1;
+    }
+    if (get_voice_audio_enabled(&observed_usb_audio) != 0 ||
+        observed_usb_audio != 0) {
+        log_message("error", "USB UAC bypass verification failed");
+        goto cleanup;
+    }
+    log_message("info", "USB UAC disabled; starting direct D5/D6 PCM probe");
+
+    if (voice_route_start(api, 0, &route) != EXIT_SUCCESS) {
+        goto cleanup;
+    }
+    route_started = 1;
+    uplink_pcm = api->pcm_open(NETWORK_UPLINK_PCM_DEVICE, PCM_PLAYBACK_FLAGS,
+                               PCM_RATE, PCM_CHANNELS, PCM_FORMAT_S16_LE,
+                               PCM_HOSTLESS);
+    if (uplink_pcm == NULL) {
+        log_message("error", "could not open direct uplink PCM %s",
+                    NETWORK_UPLINK_PCM_DEVICE);
+        goto cleanup;
+    }
+    downlink_pcm = api->pcm_open(NETWORK_DOWNLINK_PCM_DEVICE,
+                                 PCM_CAPTURE_FLAGS, PCM_RATE, PCM_CHANNELS,
+                                 PCM_FORMAT_S16_LE, PCM_HOSTLESS);
+    if (downlink_pcm == NULL) {
+        log_message("error", "could not open direct downlink PCM %s",
+                    NETWORK_DOWNLINK_PCM_DEVICE);
+        goto cleanup;
+    }
+    uplink_buffer_length = api->pcm_buffer_len(uplink_pcm);
+    downlink_buffer_length = api->pcm_buffer_len(downlink_pcm);
+    log_message("info", "direct PCM format: 8000 Hz, mono, signed S16_LE; "
+                "uplink=%s/%u bytes downlink=%s/%u bytes",
+                NETWORK_UPLINK_PCM_DEVICE, uplink_buffer_length,
+                NETWORK_DOWNLINK_PCM_DEVICE, downlink_buffer_length);
+    if (uplink_buffer_length != NETWORK_PCM_FRAME_BYTES ||
+        downlink_buffer_length != NETWORK_PCM_FRAME_BYTES) {
+        log_message("error", "direct PCM devices must expose %u-byte buffers",
+                    NETWORK_PCM_FRAME_BYTES);
+        goto cleanup;
+    }
+    if (clock_gettime(CLOCK_MONOTONIC, &started) != 0) {
+        log_message("error", "clock_gettime failed: %s", strerror(errno));
+        goto cleanup;
+    }
+
+    while (!should_stop()) {
+        int64_t elapsed_usec;
+        unsigned int index;
+
+        if (api->pcm_read(downlink_pcm, buffer, NETWORK_PCM_FRAME_BYTES) != 0) {
+            log_message("error", "direct downlink PCM read failed");
+            goto cleanup;
+        }
+        ++frames;
+        for (index = 0U; index < NETWORK_PCM_FRAME_BYTES; index += 2U) {
+            int16_t sample;
+            unsigned int magnitude;
+
+            memcpy(&sample, buffer + index, sizeof(sample));
+            magnitude = sample < 0 ? (unsigned int)(-(int32_t)sample)
+                                   : (unsigned int)sample;
+            sum_magnitude += (uint64_t)magnitude;
+            if (magnitude != 0U) {
+                ++nonzero_samples;
+            }
+            if (magnitude > peak) {
+                peak = magnitude;
+            }
+        }
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+            log_message("error", "clock_gettime failed: %s", strerror(errno));
+            goto cleanup;
+        }
+        if (now.tv_sec < started.tv_sec ||
+            (now.tv_sec == started.tv_sec && now.tv_nsec < started.tv_nsec)) {
+            log_message("error", "monotonic clock moved backwards");
+            goto cleanup;
+        }
+        elapsed_usec = ((int64_t)now.tv_sec - (int64_t)started.tv_sec) *
+                       1000000LL;
+        elapsed_usec += ((int64_t)now.tv_nsec - (int64_t)started.tv_nsec) /
+                        1000LL;
+        if (elapsed_usec >= NETWORK_PROBE_DURATION_USEC) {
+            break;
+        }
+        usleep(NETWORK_PCM_FRAME_USEC);
+    }
+    if (should_stop()) {
+        log_message("info", "direct PCM probe interrupted during capture");
+        goto cleanup;
+    }
+    log_message("info", "direct downlink capture: frames=%lu peak=%u "
+                "nonzero_samples=%lu mean_abs=%llu",
+                frames, peak, nonzero_samples,
+                frames == 0UL ? 0ULL :
+                (unsigned long long)(sum_magnitude /
+                    ((uint64_t)frames * (uint64_t)NETWORK_PCM_FRAME_SAMPLES)));
+
+    log_message("info", "writing three 1 kHz uplink beeps: 500 ms on, "
+                "500 ms off, peak=20000");
+    while (tone_sample < PCM_RATE * 3U && !should_stop()) {
+        unsigned int index;
+
+        for (index = 0U; index < NETWORK_PCM_FRAME_SAMPLES; ++index) {
+            int16_t sample = 0;
+
+            if (tone_sample < PCM_RATE * 3U &&
+                tone_sample % PCM_RATE < PCM_RATE / 2U) {
+                sample = tone_cycle[tone_sample % 8U];
+            }
+            memcpy(buffer + index * 2U, &sample, sizeof(sample));
+            ++tone_sample;
+        }
+        if (api->pcm_write(uplink_pcm, buffer, NETWORK_PCM_FRAME_BYTES) != 0) {
+            log_message("error", "direct uplink PCM write failed");
+            goto cleanup;
+        }
+        usleep(NETWORK_PCM_FRAME_USEC);
+    }
+    if (should_stop()) {
+        log_message("info", "direct PCM probe interrupted during tone");
+        goto cleanup;
+    }
+    log_message("info", "direct uplink tone complete: samples=%u frames=%u",
+                tone_sample,
+                (tone_sample + NETWORK_PCM_FRAME_SAMPLES - 1U) /
+                    NETWORK_PCM_FRAME_SAMPLES);
+    result = EXIT_SUCCESS;
+
+cleanup:
+    if (downlink_pcm != NULL && api->pcm_close(downlink_pcm) != 0) {
+        log_message("warn", "could not close direct downlink PCM cleanly");
+        result = EXIT_FAILURE;
+    }
+    if (uplink_pcm != NULL && api->pcm_close(uplink_pcm) != 0) {
+        log_message("warn", "could not close direct uplink PCM cleanly");
+        result = EXIT_FAILURE;
+    }
+    if (route_started && voice_route_stop(api, &route) != EXIT_SUCCESS) {
+        log_message("warn", "could not stop direct voice route cleanly");
+        result = EXIT_FAILURE;
+    }
+    if (usb_audio_changed) {
+        if (set_voice_audio_enabled(original_usb_audio) != 0) {
+            log_message("warn", "could not restore USB UAC state");
+            result = EXIT_FAILURE;
+        } else if (verbose) {
+            log_message("info", "restored USB UAC state to %d",
+                        original_usb_audio);
+        }
     }
     return result;
 }
@@ -1233,7 +1464,6 @@ static int setup_network_session(struct network_session *session,
 {
     struct sockaddr_in local;
     int enabled = 1;
-    int flags;
 
     memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
@@ -1272,8 +1502,7 @@ static int setup_network_session(struct network_session *session,
         return -1;
     }
 #endif
-    flags = fcntl(session->socket_fd, F_GETFL, 0);
-    if (flags < 0 || fcntl(session->socket_fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+    if (ioctl(session->socket_fd, FIONBIO, &enabled) != 0) {
         log_message("error", "could not make UDP socket nonblocking: %s",
                     strerror(errno));
         return -1;
@@ -1843,6 +2072,7 @@ static void print_usage(const char *program)
             "Usage: %s [--check] [--verbose] [--tty PATH] [--library PATH] "
             "[--playback-device NAME] [--capture-device NAME] [--no-mixers] "
             "[--voice-route-session] [--probe-network-pcm] "
+            "[--probe-direct-pcm] "
             "[--network-session --listen-address IPv4 --peer-address IPv4 "
             "--audio-port PORT --peer-port PORT --token-file PATH --interface NAME "
             "--session-id ID]\n",
@@ -1861,6 +2091,7 @@ int main(int argc, char **argv)
     int check_only = 0;
     int voice_route_session = 0;
     int probe_network_pcm = 0;
+    int probe_direct_pcm = 0;
     struct network_options network_options;
     int index;
     int thread_error;
@@ -1885,6 +2116,8 @@ int main(int argc, char **argv)
             voice_route_session = 1;
         } else if (strcmp(argv[index], "--probe-network-pcm") == 0) {
             probe_network_pcm = 1;
+        } else if (strcmp(argv[index], "--probe-direct-pcm") == 0) {
+            probe_direct_pcm = 1;
         } else if (strcmp(argv[index], "--network-session") == 0) {
             network_options.enabled = 1;
         } else if (strcmp(argv[index], "--verbose") == 0) {
@@ -1962,13 +2195,17 @@ int main(int argc, char **argv)
     }
     if ((check_only && voice_route_session) ||
         (check_only && probe_network_pcm) ||
+        (check_only && probe_direct_pcm) ||
         (check_only && network_options.enabled) ||
         (voice_route_session && probe_network_pcm) ||
+        (voice_route_session && probe_direct_pcm) ||
         (voice_route_session && network_options.enabled) ||
-        (probe_network_pcm && network_options.enabled)) {
+        (probe_network_pcm && probe_direct_pcm) ||
+        (probe_network_pcm && network_options.enabled) ||
+        (probe_direct_pcm && network_options.enabled)) {
         log_message("error",
                     "--check, --voice-route-session and "
-                    "--probe-network-pcm are mutually exclusive");
+                    "PCM probe/session modes are mutually exclusive");
         return EXIT_FAILURE;
     }
     if (network_options.enabled &&
@@ -1998,6 +2235,11 @@ int main(int argc, char **argv)
     }
     if (probe_network_pcm) {
         result = run_network_pcm_probe(&context.api, context.verbose);
+        unload_vendor_audio(&context.api);
+        return result;
+    }
+    if (probe_direct_pcm) {
+        result = run_direct_pcm_probe(&context.api, context.verbose);
         unload_vendor_audio(&context.api);
         return result;
     }

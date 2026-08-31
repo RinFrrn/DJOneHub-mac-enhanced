@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -48,6 +49,27 @@ func TestShouldPrewarmModuleVoice(t *testing.T) {
 		if shouldPrewarmModuleVoice(state) {
 			t.Fatalf("shouldPrewarmModuleVoice(%q)=true, want false", state)
 		}
+	}
+}
+
+func TestLegacyVoiceCardBlockIsScopedToCall(t *testing.T) {
+	a := &app{}
+	a.setVoiceStatus(false, errLegacyVoiceCardLoaded, "")
+	if a.moduleVoiceRouteCanAttempt() {
+		t.Fatal("legacy voice card failure did not block repeated attempts")
+	}
+
+	a.stopModuleVoiceRoute()
+	if !a.moduleVoiceRouteCanAttempt() {
+		t.Fatal("call teardown did not allow a fresh attempt for the next call")
+	}
+}
+
+func TestTransientVoiceFailureDoesNotBlockCall(t *testing.T) {
+	a := &app{}
+	a.setVoiceStatus(false, errors.New("temporary failure"), "")
+	if !a.moduleVoiceRouteCanAttempt() {
+		t.Fatal("transient failure unexpectedly blocked the whole call")
 	}
 }
 

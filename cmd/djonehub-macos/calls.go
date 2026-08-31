@@ -312,13 +312,14 @@ func (a *app) applyCallPoll(calls []parsedCall, now time.Time) {
 	a.callMu.RLock()
 	swiftAudioHost := a.swiftAudioHost
 	a.callMu.RUnlock()
-	if selected.State == "active" && swiftAudioHost {
+	if selected.State == "active" && swiftAudioHost && a.moduleVoiceRouteCanAttempt() {
 		if err := a.ensureModuleVoiceRoute(); err != nil {
 			log.Printf("module voice route start for native MaVo host failed: %v", err)
 		} else {
 			log.Printf("module voice route ready for native MaVo audio host")
 		}
-	} else if selected.State == "active" && a.audio != nil && !a.audioManualSet && !a.audio.isRunning() {
+	} else if selected.State == "active" && a.audio != nil && !a.audioManualSet &&
+		!a.audio.isRunning() && a.moduleVoiceRouteCanAttempt() {
 		if err := a.ensureModuleVoiceRoute(); err != nil {
 			log.Printf("module voice route start after active CLCC failed: %v", err)
 		} else if err := a.audio.start(); err != nil {
@@ -367,7 +368,7 @@ func (a *app) prewarmModuleVoiceRoute(reason string) {
 	}
 
 	a.moduleVoiceMu.Lock()
-	if a.moduleVoiceReady || a.moduleVoiceWarming {
+	if a.moduleVoiceReady || a.moduleVoiceWarming || a.moduleVoiceBlocked {
 		a.moduleVoiceMu.Unlock()
 		return
 	}

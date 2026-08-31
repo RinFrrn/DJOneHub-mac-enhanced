@@ -122,6 +122,7 @@ type app struct {
 	moduleVoiceMu             sync.Mutex
 	moduleVoiceOpMu           sync.Mutex
 	moduleVoiceReady          bool
+	moduleVoiceBlocked        bool
 	moduleVoiceLast           time.Time
 	moduleVoiceErr            string
 	moduleVoiceDetail         string

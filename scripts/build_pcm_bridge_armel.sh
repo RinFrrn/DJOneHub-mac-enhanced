@@ -137,7 +137,10 @@ build_local()
     audit_report="$OUT_DIR/mavo-pcm-bridge.armv7.audit.txt"
     checksum_file="$OUT_DIR/mavo-pcm-bridge.armv7.sha256"
 
-    common_flags="-std=c11 -O2 -g -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon -fno-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 -ffile-prefix-map=$PROJECT_DIR=/usr/src/mavo -fdebug-prefix-map=$PROJECT_DIR=/usr/src/mavo -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes -Wundef -Werror"
+    # Keep the original 32-bit off_t/time ABI. Newer cross-libc headers can
+    # otherwise redirect fcntl to the GLIBC_2.28 symbol, which is unavailable
+    # on the QDC507 module's glibc 2.22 runtime.
+    common_flags="-std=c11 -O2 -g -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon -fno-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 -U_TIME_BITS -U_FILE_OFFSET_BITS -ffile-prefix-map=$PROJECT_DIR=/usr/src/mavo -fdebug-prefix-map=$PROJECT_DIR=/usr/src/mavo -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes -Wundef -Werror"
     # liblog.so.0 in the target rootfs has an intentional reverse reference to
     # main.  Export that one symbol, but keep every bridge helper static.
     linker_flags="-no-pie -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed,--build-id=sha1,--export-dynamic-symbol=main"
