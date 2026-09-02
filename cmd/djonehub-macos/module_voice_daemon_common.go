@@ -13,26 +13,33 @@ import (
 )
 
 const (
-	voiceDaemonExpectedSHA256 = "476a45967a2285876b57582c66847c17c350c484a7b0486d5ef7d61ef69db5ef"
-	voiceDaemonRemotePath     = "/tmp/djonehub-voice-daemon.armv7"
-	voiceDaemonRemoteKeyPath  = "/tmp/djonehub-control.key"
-	voiceDaemonRemotePIDPath  = "/tmp/djonehub-voice-daemon.pid"
-	voiceDaemonRemoteLogPath  = "/tmp/djonehub-voice-daemon.log"
-	voiceDaemonAddress        = "192.168.225.1:45750"
-	voiceTestRemoteDir        = "/usrdata/djonehub/voice-test"
-	voiceTestRemoteBinary     = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
-	voiceTestRemoteKey        = voiceTestRemoteDir + "/pairing.key"
-	voiceTestRemoteScript     = voiceTestRemoteDir + "/start-once.sh"
-	voiceTestLegacyOnceMarker = voiceTestRemoteDir + "/run-once"
-	voiceTestRemoteOnceMarker = voiceTestRemoteDir + "/run-status-once"
+	voiceDaemonExpectedSHA256    = "476a45967a2285876b57582c66847c17c350c484a7b0486d5ef7d61ef69db5ef"
+	voiceUplinkExpectedSHA256    = "35457f1ea639138919551dc0569b7c5380b6c06e3a8541c82081819814fb1a90"
+	voiceTestAPRv3ExpectedSHA256 = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
+	voiceTestVoiceExpectedSHA256 = "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
+	voiceDaemonRemotePath        = "/tmp/djonehub-voice-daemon.armv7"
+	voiceDaemonRemoteKeyPath     = "/tmp/djonehub-control.key"
+	voiceDaemonRemotePIDPath     = "/tmp/djonehub-voice-daemon.pid"
+	voiceDaemonRemoteLogPath     = "/tmp/djonehub-voice-daemon.log"
+	voiceDaemonAddress           = "192.168.225.1:45750"
+	voiceTestRemoteDir           = "/usrdata/djonehub/voice-test"
+	voiceTestRemoteBinary        = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
+	voiceTestRemoteUplink        = voiceTestRemoteDir + "/mavo-pcm-bridge.armv7"
+	voiceTestRemoteAPRv3         = voiceTestRemoteDir + "/qdc507_aprv3.ko"
+	voiceTestRemoteVoice         = voiceTestRemoteDir + "/qdc507_voice.ko"
+	voiceTestRemoteKey           = voiceTestRemoteDir + "/pairing.key"
+	voiceTestRemoteScript        = voiceTestRemoteDir + "/start-once.sh"
+	voiceTestLegacyOnceMarker    = voiceTestRemoteDir + "/run-once"
+	voiceTestRemoteOnceMarker    = voiceTestRemoteDir + "/run-status-once"
 	voiceTestRemoteSessionMarker = voiceTestRemoteDir + "/run-control-session"
-	voiceTestRemoteState      = voiceTestRemoteDir + "/last-start.state"
-	voiceTestRemoteLog        = voiceTestRemoteDir + "/last-start.log"
-	voiceTestInitLink         = "/etc/rc5.d/S99djonehub-voice-test"
-	voiceTestPIDFile          = "/run/djonehub-voice-test.pid"
-	voiceTestStatusPurpose    = "development-status-only"
-	voiceTestSessionPurpose   = "development-control-session"
-	voiceTestPairingValidity  = time.Hour
+	voiceTestRemoteState         = voiceTestRemoteDir + "/last-start.state"
+	voiceTestRemoteLog           = voiceTestRemoteDir + "/last-start.log"
+	voiceTestInitLink            = "/etc/rc5.d/S99djonehub-voice-test"
+	voiceTestPIDFile             = "/run/djonehub-voice-test.pid"
+	voiceTestUplinkPIDFile       = "/run/djonehub-uplink-test.pid"
+	voiceTestStatusPurpose       = "development-status-only"
+	voiceTestSessionPurpose      = "development-control-session"
+	voiceTestPairingValidity     = 30 * 24 * time.Hour
 
 	voiceControlMagic        = 0x444a4f48
 	voiceControlVersion      = 1
@@ -225,26 +232,120 @@ func voiceDaemonReplyFrameForTest(key, nonce []byte, requestID uint64, payload [
 const voiceTestStartScript = `#!/bin/sh
 base=/usrdata/djonehub/voice-test
 binary="$base/djonehub-voice-daemon.armv7"
+uplink="$base/mavo-pcm-bridge.armv7"
+aprv3="$base/qdc507_aprv3.ko"
+voice="$base/qdc507_voice.ko"
 key="$base/pairing.key"
 once_marker="$base/run-status-once"
 session_marker="$base/run-control-session"
 state="$base/last-start.state"
 log="$base/last-start.log"
+previous_state="$base/previous-start.state"
+previous_log="$base/previous-start.log"
 pidfile=/run/djonehub-voice-test.pid
+uplink_pidfile=/run/djonehub-uplink-test.pid
+calibration_pidfile=/run/mavo-alsaucm.pid
+calibration_log=/run/mavo-alsaucm.log
+
+sound_devices_ready() {
+    test -c /dev/snd/controlC0 &&
+        test -c /dev/snd/pcmC0D4p &&
+        test -c /dev/snd/pcmC0D4c &&
+        test -c /dev/snd/pcmC0D5p &&
+        test -c /dev/snd/pcmC0D6c &&
+        grep -Fq 'mdm9607-tomtom-i2s-snd-card' /proc/asound/cards
+}
+
+prepare_voice_runtime() {
+    if ! sound_devices_ready; then
+        if grep -q '^qdc507_voice ' /proc/modules 2>/dev/null; then
+            printf '%s\n' 'qdc507_voice is loaded without the required ALSA devices'
+            return 1
+        fi
+        grep -q '^qdc507_aprv3 ' /proc/modules 2>/dev/null || insmod "$aprv3" || return 1
+        grep -q '^qdc507_voice ' /proc/modules 2>/dev/null || insmod "$voice" || return 1
+        ready_attempt=0
+        while test "$ready_attempt" -lt 100; do
+            sound_devices_ready && break
+            ready_attempt=$((ready_attempt + 1))
+            sleep 0.2
+        done
+    fi
+    sound_devices_ready || return 1
+
+    calibration_owned=0
+    if test -s "$calibration_pidfile"; then
+        read calibration_pid calibration_start < "$calibration_pidfile" || true
+        current_start=$(cut -d ' ' -f 22 "/proc/$calibration_pid/stat" 2>/dev/null)
+        calibration_argv0=$(tr '\000' '\n' < "/proc/$calibration_pid/cmdline" 2>/dev/null | sed -n '1p')
+        test "$current_start" = "$calibration_start" &&
+            test "$calibration_argv0" = /usr/bin/alsaucm_test && calibration_owned=1
+    fi
+    if test "$calibration_owned" -eq 0; then
+        rm -f /run/alsaucm_test "$calibration_pidfile" "$calibration_log"
+        nohup /usr/bin/alsaucm_test </dev/null >>"$calibration_log" 2>&1 &
+        calibration_pid=$!
+        calibration_start=$(cut -d ' ' -f 22 "/proc/$calibration_pid/stat" 2>/dev/null)
+        printf '%s %s\n' "$calibration_pid" "$calibration_start" >"$calibration_pidfile"
+        fifo_attempt=0
+        while test "$fifo_attempt" -lt 50 && test ! -p /run/alsaucm_test; do
+            kill -0 "$calibration_pid" 2>/dev/null || return 1
+            fifo_attempt=$((fifo_attempt + 1))
+            sleep 0.1
+        done
+        test -p /run/alsaucm_test || return 1
+    fi
+    if ! grep -q 'ACDB -> Sent VocProc Cal!' "$calibration_log" 2>/dev/null; then
+        printf 'open snd_soc_msm_9x07_Tomtom_I2S\n' > /run/alsaucm_test
+        printf 'set _verb VoLTE\n' > /run/alsaucm_test
+        printf 'set _enadev Auxpcm Rx\n' > /run/alsaucm_test
+        printf 'set _enadev Auxpcm Tx\n' > /run/alsaucm_test
+        acdb_attempt=0
+        while test "$acdb_attempt" -lt 100; do
+            grep -q 'ACDB -> Sent VocProc Cal!' "$calibration_log" 2>/dev/null && break
+            acdb_attempt=$((acdb_attempt + 1))
+            sleep 0.1
+        done
+    fi
+    grep -q 'ACDB -> Sent VocProc Cal!' "$calibration_log" 2>/dev/null
+}
+
+if test "$1" = --prepare-only; then
+    prepare_voice_runtime || exit 1
+    printf '%s\n' 'voice runtime ready: ALSA devices and VoLTE ACDB calibrated'
+    exit 0
+fi
 
 if test -f "$once_marker"; then
     mode=status-once
     daemon_args="--once --status-only"
+    start_uplink=0
+    retain_session=0
 elif test -f "$session_marker"; then
     mode=control-session
     daemon_args=
+    start_uplink=1
+    retain_session=1
 else
     exit 0
 fi
-rm -f "$once_marker" "$session_marker"
-printf 'marker-consumed:%s\n' "$mode" >"$state"
+test ! -f "$state" || cp -f "$state" "$previous_state"
+test ! -s "$log" || mv -f "$log" "$previous_log"
+if test "$retain_session" = 1; then
+    rm -f "$once_marker"
+    printf 'session-persistent:%s\n' "$mode" >"$state"
+else
+    rm -f "$once_marker" "$session_marker"
+    printf 'marker-consumed:%s\n' "$mode" >"$state"
+fi
 : >"$log"
 sync
+
+remove_ephemeral_key() {
+    if test "$retain_session" = 0; then
+        rm -f "$key"
+    fi
+}
 
 (
     attempt=0
@@ -252,39 +353,82 @@ sync
         if ip addr show 2>/dev/null | grep -q 'inet 192\.168\.225\.1/'; then
             printf 'daemon-starting\n' >"$state"
             chmod 600 "$key" || exit 1
+            if test "$start_uplink" = 1; then
+                if ! prepare_voice_runtime; then
+                    printf 'voice-runtime-failed\n' >"$state"
+                    printf '%s\n' 'voice runtime preparation failed'
+                    test ! -f "$calibration_log" || tail -n 80 "$calibration_log"
+                    dmesg | tail -n 80
+                    remove_ephemeral_key
+                    sync
+                    exit 1
+                fi
+                printf '%s\n' 'voice runtime ready: ALSA devices and VoLTE ACDB calibrated'
+            fi
+            uplink_pid=
+            uplink_owned() {
+                test -n "$uplink_pid" && test -d "/proc/$uplink_pid" &&
+                    test "$(tr '\000' '\n' < "/proc/$uplink_pid/cmdline" 2>/dev/null | sed -n '1p')" = "$uplink"
+            }
+            if test "$start_uplink" = 1; then
+                LD_LIBRARY_PATH=/usr/lib "$uplink" --uplink-listener \
+                    --listen-address 192.168.225.1 --audio-port 45751 \
+                    --token-file "$key" --interface bridge0 >>"$log" 2>&1 &
+                uplink_pid=$!
+                printf '%s\n' "$uplink_pid" >"$uplink_pidfile"
+            fi
             LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" >>"$log" 2>&1 &
             daemon_pid=$!
             printf '%s\n' "$daemon_pid" >"$pidfile"
             ready=0
             check=0
             while test "$check" -lt 50; do
-                if grep -F 'authenticated control listening on 192.168.225.1:45750' "$log" >/dev/null 2>&1; then
+                uplink_ready=1
+                if test "$start_uplink" = 1; then
+                    uplink_ready=0
+                    grep -F 'authenticated uplink listener ready on 192.168.225.1:45751' "$log" >/dev/null 2>&1 && uplink_ready=1
+                fi
+                if test "$uplink_ready" = 1 && grep -F 'authenticated control listening on 192.168.225.1:45750' "$log" >/dev/null 2>&1; then
                     ready=1
                     break
                 fi
                 kill -0 "$daemon_pid" 2>/dev/null || break
+                if test "$start_uplink" = 1; then
+                    kill -0 "$uplink_pid" 2>/dev/null || break
+                fi
                 check=$((check + 1))
                 sleep 0.1
             done
-            rm -f "$key"
+            remove_ephemeral_key
             sync
             if test "$ready" = 1; then
                 printf 'listener-ready\n' >"$state"
                 wait "$daemon_pid"
                 result=$?
+                if test -n "$uplink_pid"; then
+                    if uplink_owned; then
+                        kill -TERM "$uplink_pid" 2>/dev/null || true
+                    fi
+                    wait "$uplink_pid" 2>/dev/null || true
+                    rm -f "$uplink_pidfile"
+                fi
                 printf 'daemon-exit:%s\n' "$result" >"$state"
                 rm -f "$pidfile"
                 exit "$result"
             fi
             printf 'daemon-start-failed\n' >"$state"
             kill -TERM "$daemon_pid" 2>/dev/null || true
+            if uplink_owned; then
+                kill -TERM "$uplink_pid" 2>/dev/null || true
+            fi
+            rm -f "$uplink_pidfile"
             rm -f "$pidfile"
             exit 1
         fi
         attempt=$((attempt + 1))
         sleep 1
     done
-    rm -f "$key"
+    remove_ephemeral_key
     printf 'address-timeout\n' >"$state"
     ip addr show 2>/dev/null || true
     exit 1

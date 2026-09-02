@@ -17,12 +17,14 @@ final class VoiceControlModel: ObservableObject {
 
     private var client: VoiceControlClient?
     private var keyStore: PairingKeyStore?
+    private var mediaPairingKey: Data?
     private var requestTask: Task<Void, Never>?
     private var requestWatchdogTask: Task<Void, Never>?
     private var requestGeneration = 0
 
     var isConfigured: Bool { client != nil }
     var canControlCalls: Bool { client != nil && access == .controlSession }
+    var hasActiveCall: Bool { calls.contains { $0.state == 0x03 } }
 
     init(client: VoiceControlClient? = nil) {
         self.client = client
@@ -44,11 +46,13 @@ final class VoiceControlModel: ObservableObject {
         moduleIdentifier = nil
         do {
             client = try VoiceControlClient(pairingKey: pairingKey)
+            mediaPairingKey = pairingKey
             access = .controlSession
             stateText = "已配置（内存）"
             detailText = ""
         } catch {
             client = nil
+            mediaPairingKey = nil
             access = nil
             stateText = "pairing key 无效"
             detailText = error.localizedDescription
@@ -162,6 +166,7 @@ final class VoiceControlModel: ObservableObject {
         requestTask = nil
         requestWatchdogTask = nil
         client = nil
+        mediaPairingKey = nil
         keyStore = nil
         moduleIdentifier = nil
         access = nil
@@ -178,6 +183,7 @@ final class VoiceControlModel: ObservableObject {
     private func selectPairing(moduleIdentifier: String, credential: StoredPairingCredential) throws {
         let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
         client = try VoiceControlClient(pairingKey: credential.key)
+        mediaPairingKey = credential.key
         self.keyStore = keyStore
         self.moduleIdentifier = moduleIdentifier
         access = credential.access
@@ -185,6 +191,11 @@ final class VoiceControlModel: ObservableObject {
             ? "控制会话 · \(Self.shortIdentifier(moduleIdentifier))"
             : "STATUS 配对 · \(Self.shortIdentifier(moduleIdentifier))"
         detailText = ""
+    }
+
+    func pairingKeyForUplinkProbe() -> Data? {
+        guard access == .controlSession else { return nil }
+        return mediaPairingKey
     }
 
     private static func shortIdentifier(_ identifier: String) -> String {
@@ -272,7 +283,7 @@ final class VoiceControlModel: ObservableObject {
         }
         requestWatchdogTask?.cancel()
         requestWatchdogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(12))
+            try? await Task.sleep(for: .seconds(24))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self,
@@ -282,7 +293,7 @@ final class VoiceControlModel: ObservableObject {
                 self.requestTask = nil
                 self.isBusy = false
                 self.stateText = "控制请求超时"
-                self.detailText = "模块控制端口未在 12 秒内响应；请检查 iPhone USB 网卡和模块供电"
+                self.detailText = "模块控制端口未在 24 秒内响应；请检查 iPhone USB 网卡和模块供电"
             }
         }
         requestTask = Task { [weak self] in
@@ -348,7 +359,9 @@ actor VoiceControlClient {
     struct Configuration: Sendable {
         var host = "192.168.225.1"
         var port: UInt16 = 45750
-        var connectTimeout: Duration = .seconds(5)
+        var connectTimeout: Duration = .seconds(20)
+        var connectAttemptTimeout: Duration = .seconds(1)
+        var connectRetryDelay: Duration = .milliseconds(500)
         var ioTimeout: Duration = .seconds(5)
     }
 
@@ -425,19 +438,10 @@ actor VoiceControlClient {
             throw ClientError.invalidPort
         }
 
-        let parameters = NWParameters.tcp
-        parameters.requiredInterfaceType = .wiredEthernet
-        let connection = NWConnection(
-            host: NWEndpoint.Host(configuration.host),
-            port: port,
-            using: parameters
-        )
+        let connection = try await connectWhenReady(port: port)
         defer { connection.cancel() }
 
         return try await withTaskCancellationHandler {
-            try await withTimeout(configuration.connectTimeout, onTimeout: { connection.cancel() }) {
-                try await connection.startAndWaitUntilReady()
-            }
             try Task.checkCancellation()
 
             let hello = try await withTimeout(configuration.ioTimeout, onTimeout: { connection.cancel() }) {
@@ -488,6 +492,42 @@ actor VoiceControlClient {
         } onCancel: {
             connection.cancel()
         }
+    }
+
+    /// The module's ECM interface appears before its cold-boot voice runtime
+    /// has loaded the QDC507 drivers and started the authenticated listener.
+    /// Retry only TCP establishment; once a HELLO is received, operations such
+    /// as DIAL are never replayed automatically.
+    private func connectWhenReady(port: NWEndpoint.Port) async throws -> NWConnection {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: configuration.connectTimeout)
+        var lastError: Error = ClientError.timeout
+
+        while clock.now < deadline {
+            try Task.checkCancellation()
+            let parameters = NWParameters.tcp
+            parameters.requiredInterfaceType = .wiredEthernet
+            let connection = NWConnection(
+                host: NWEndpoint.Host(configuration.host),
+                port: port,
+                using: parameters
+            )
+            do {
+                try await withTimeout(
+                    configuration.connectAttemptTimeout,
+                    onTimeout: { connection.cancel() }
+                ) {
+                    try await connection.startAndWaitUntilReady()
+                }
+                return connection
+            } catch {
+                connection.cancel()
+                lastError = error
+            }
+            guard clock.now < deadline else { break }
+            try await Task.sleep(for: configuration.connectRetryDelay)
+        }
+        throw lastError
     }
 
     private func withTimeout<T: Sendable>(

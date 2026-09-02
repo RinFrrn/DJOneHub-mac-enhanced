@@ -13,6 +13,8 @@
 		A10000000000000000000004 /* VoiceControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* VoiceControlProtocol.swift */; };
 		A10000000000000000000005 /* VoiceControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* VoiceControlClient.swift */; };
 		A10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
+		A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
+		A10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* UplinkPCMProbeModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +27,8 @@
 		A20000000000000000000007 /* VoiceControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlProtocol.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* VoiceControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlClient.swift; sourceTree = "<group>"; };
 		A20000000000000000000009 /* PairingKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKeyStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* UplinkAudioProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkAudioProtocol.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* UplinkPCMProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkPCMProbeModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,6 +75,8 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000003 /* AudioProbeModel.swift */,
+				A20000000000000000000010 /* UplinkAudioProtocol.swift */,
+				A20000000000000000000011 /* UplinkPCMProbeModel.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -167,6 +173,8 @@
 				A10000000000000000000004 /* VoiceControlProtocol.swift in Sources */,
 				A10000000000000000000005 /* VoiceControlClient.swift in Sources */,
 				A10000000000000000000006 /* PairingKeyStore.swift in Sources */,
+				A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
+				A10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -107,7 +108,7 @@ func TestDevelopmentPairingBundleMatchesIOSContract(t *testing.T) {
 		t.Fatalf("unexpected bundle: %#v", bundle)
 	}
 	if bundle.CreatedAt != now.Format(time.RFC3339) ||
-		bundle.ExpiresAt != now.Add(time.Hour).Format(time.RFC3339) {
+		bundle.ExpiresAt != now.Add(voiceTestPairingValidity).Format(time.RFC3339) {
 		t.Fatalf("unexpected validity: %#v", bundle)
 	}
 }
@@ -146,10 +147,41 @@ func TestVoiceTestStartScriptSeparatesReadOnlyAndControlModes(t *testing.T) {
 		"run-control-session",
 		"daemon_args=\"--once --status-only\"",
 		"mode=control-session",
-		"rm -f \"$once_marker\" \"$session_marker\"",
+		"start_uplink=0",
+		"start_uplink=1",
+		"--uplink-listener",
+		"--audio-port 45751",
+		"qdc507_aprv3.ko",
+		"qdc507_voice.ko",
+		"/dev/snd/controlC0",
+		"/dev/snd/pcmC0D5p",
+		"/usr/bin/alsaucm_test",
+		"ACDB -> Sent VocProc Cal!",
+		"--prepare-only",
+		"voice runtime ready: ALSA devices and VoLTE ACDB calibrated",
+		"retain_session=0",
+		"retain_session=1",
+		"printf 'session-persistent:%s\\n' \"$mode\"",
+		"remove_ephemeral_key",
+		"previous-start.state",
+		"previous-start.log",
 	} {
 		if !strings.Contains(voiceTestStartScript, required) {
 			t.Fatalf("start script missing %q", required)
 		}
+	}
+	if strings.Contains(voiceTestStartScript, "--network-session") {
+		t.Fatal("start script must not enable the unverified bidirectional PCM mode")
+	}
+	if !strings.Contains(voiceTestStartScript, `if test "$retain_session" = 0; then`) {
+		t.Fatal("ephemeral key removal is not guarded from persistent control sessions")
+	}
+}
+
+func TestVoiceTestStartScriptHasValidShellSyntax(t *testing.T) {
+	command := exec.Command("/bin/sh", "-n")
+	command.Stdin = strings.NewReader(voiceTestStartScript)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("start script shell syntax: %v: %s", err, output)
 	}
 }

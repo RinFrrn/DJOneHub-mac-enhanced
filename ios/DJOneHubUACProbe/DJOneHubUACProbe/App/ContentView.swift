@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var probe: AudioProbeModel
     @EnvironmentObject private var networkProbe: ModuleNetworkProbe
     @EnvironmentObject private var voiceControl: VoiceControlModel
+    @EnvironmentObject private var uplinkProbe: UplinkPCMProbeModel
     @State private var isConfirmingDial = false
 
     var body: some View {
@@ -13,6 +14,7 @@ struct ContentView: View {
                 statusSection
                 networkSection
                 voiceControlSection
+                uplinkPCMSection
                 routeSection
                 controlsSection
                 logSection
@@ -59,6 +61,54 @@ struct ContentView: View {
                 voiceControl.dial()
             }
             Button("取消", role: .cancel) {}
+        }
+        .onChange(of: voiceControl.hasActiveCall) { _, isActive in
+            if !isActive, uplinkProbe.isRunning {
+                uplinkProbe.stop()
+            }
+        }
+    }
+
+    private var uplinkPCMSection: some View {
+        Section("ECM 蜂窝上行 PCM（DSP InCall 实测）") {
+            LabeledContent("状态", value: uplinkProbe.stateText)
+            LabeledContent("格式", value: uplinkProbe.inputFormatText)
+            LabeledContent("已发送", value: "\(uplinkProbe.sentFrames) 帧")
+            ProgressView(value: uplinkProbe.inputLevel)
+
+            Button(
+                uplinkProbe.isRunning
+                    ? (uplinkProbe.isTestTone ? "停止 1 kHz 测试音" : "停止 iPhone 麦克风上行")
+                    : "开始 iPhone 麦克风上行"
+            ) {
+                if uplinkProbe.isRunning {
+                    uplinkProbe.stop()
+                } else if let key = voiceControl.pairingKeyForUplinkProbe() {
+                    uplinkProbe.start(pairingKey: key)
+                }
+            }
+            .disabled(
+                (!uplinkProbe.isRunning && (!voiceControl.canControlCalls || !voiceControl.hasActiveCall))
+            )
+
+            Button("发送 1 kHz 固定测试音") {
+                if let key = voiceControl.pairingKeyForUplinkProbe() {
+                    uplinkProbe.startTestTone(pairingKey: key)
+                }
+            }
+            .disabled(
+                uplinkProbe.isRunning || !voiceControl.canControlCalls || !voiceControl.hasActiveCall
+            )
+
+            if !uplinkProbe.detailText.isEmpty {
+                Text(uplinkProbe.detailText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("仅验证 iPhone 内置麦克风 → ECM/UDP → 模块 Media1/Incall_Music → modem voice DSP → 蜂窝对端。音频为 8000 Hz、单声道、signed 16-bit little-endian，每帧 256 字节（16 ms）；不读写 UAC PCM，不接 CallKit。请先让 STATUS 显示“通话中”。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 

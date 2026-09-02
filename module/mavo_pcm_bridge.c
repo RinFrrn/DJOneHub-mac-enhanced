@@ -53,10 +53,15 @@
 #define VOICE_DOWNLINK_MIXER "AFE_PCM_RX_Voice Mixer VoLTE"
 #define VOICE_UPLINK_MIXER "VoLTE_Tx Mixer AFE_PCM_TX_VoLTE"
 #define VOICE_AUDIO_ENABLE_PATH "/sys/class/android_usb/f_audio/audio_enable"
-#define NETWORK_UPLINK_PCM_DEVICE "hw:0,5"
+#define NETWORK_UPLINK_PCM_DEVICE "hw:0,0"
 #define NETWORK_DOWNLINK_PCM_DEVICE "hw:0,6"
 #define NETWORK_PCM_FRAME_BYTES 256U
 #define NETWORK_PCM_FRAME_SAMPLES (NETWORK_PCM_FRAME_BYTES / 2U)
+#define NETWORK_UPLINK_DEVICE_RATE 48000U
+#define NETWORK_UPLINK_RATE_MULTIPLIER \
+    (NETWORK_UPLINK_DEVICE_RATE / PCM_RATE)
+#define NETWORK_UPLINK_DEVICE_FRAME_BYTES \
+    (NETWORK_PCM_FRAME_BYTES * NETWORK_UPLINK_RATE_MULTIPLIER)
 #define NETWORK_PCM_FRAME_USEC \
     ((NETWORK_PCM_FRAME_SAMPLES * 1000000U) / PCM_RATE)
 #define NETWORK_PROBE_DURATION_USEC 3000000U
@@ -72,6 +77,7 @@
 #define NETWORK_AUDIO_PORT 45751U
 #define NETWORK_SESSION_TIMEOUT_USEC 3000000LL
 #define NETWORK_POLL_USEC NETWORK_PCM_FRAME_USEC
+#define UPLINK_JITTER_CAPACITY 16U
 
 #define IDLE_RETRY_USEC 20000U
 #define STARTUP_RETRY_USEC 200000U
@@ -80,6 +86,7 @@
 #define SHUTDOWN_GRACE_USEC 3000000U
 #define CANCEL_GRACE_USEC 1000000U
 
+#define MIXER_UPLINK_AFE "AFE_PCM_RX Audio Mixer MultiMedia1"
 #define MIXER_UPLINK "Incall_Music Audio Mixer MultiMedia1"
 #define MIXER_DOWNLINK "MultiMedia1 Mixer VOC_REC_DL"
 
@@ -594,6 +601,24 @@ static int set_voice_mixer(struct vendor_audio *api, const char *name,
     return 0;
 }
 
+static void disable_legacy_voice_mixer(struct vendor_audio *api,
+                                       const char *name, int *changed)
+{
+    *changed = 0;
+    if (api->set_mixer(name, 1, "0") == 0) {
+        /*
+         * The vendor setter uses a false return both when an optional legacy
+         * path is already disabled and when that path is unavailable.  Those
+         * states need no rollback and must not prevent the AFE voice route
+         * from being selected.  Enabling the AFE paths remains mandatory.
+         */
+        log_message("warn", "legacy mixer %s already disabled or unavailable; "
+                    "continuing", name);
+        return;
+    }
+    *changed = 1;
+}
+
 static int set_voice_audio_enabled(int enabled)
 {
     const char *value = enabled != 0 ? "1\n" : "0\n";
@@ -678,6 +703,68 @@ struct voice_route_state {
     int usb_audio_enabled;
 };
 
+struct voice_session_anchor {
+    void *playback;
+    void *capture;
+};
+
+static int voice_session_anchor_stop(struct vendor_audio *api,
+                                     struct voice_session_anchor *anchor)
+{
+    int result = EXIT_SUCCESS;
+
+    if (anchor->playback != NULL) {
+        if (api->pcm_close(anchor->playback) != 0) {
+            log_message("warn", "could not close VoLTE playback anchor");
+            result = EXIT_FAILURE;
+        }
+        anchor->playback = NULL;
+    }
+    if (anchor->capture != NULL) {
+        if (api->pcm_close(anchor->capture) != 0) {
+            log_message("warn", "could not close VoLTE capture anchor");
+            result = EXIT_FAILURE;
+        }
+        anchor->capture = NULL;
+    }
+    return result;
+}
+
+static int voice_session_anchor_start(struct vendor_audio *api,
+                                      struct voice_session_anchor *anchor)
+{
+    memset(anchor, 0, sizeof(*anchor));
+    if (set_voice_mixer(api, VOICE_LEGACY_DOWNLINK_MIXER, "1") != 0) {
+        log_message("error", "could not enable VoLTE SEC_AUX downlink route");
+        return EXIT_FAILURE;
+    }
+    if (set_voice_mixer(api, VOICE_LEGACY_UPLINK_MIXER, "1") != 0) {
+        log_message("error", "could not enable VoLTE SEC_AUX uplink route");
+        return EXIT_FAILURE;
+    }
+    anchor->capture = api->pcm_open(
+        VOICE_PCM_DEVICE, VOICE_CAPTURE_FLAGS, PCM_RATE, PCM_CHANNELS,
+        PCM_FORMAT_S16_LE, VOICE_HOSTLESS);
+    if (anchor->capture == NULL) {
+        log_message("error", "could not open VoLTE capture session anchor");
+        goto failed;
+    }
+    anchor->playback = api->pcm_open(
+        VOICE_PCM_DEVICE, VOICE_PLAYBACK_FLAGS, PCM_RATE, PCM_CHANNELS,
+        PCM_FORMAT_S16_LE, VOICE_HOSTLESS);
+    if (anchor->playback == NULL) {
+        log_message("error", "could not open VoLTE playback session anchor");
+        goto failed;
+    }
+    log_message("info", "VoLTE hostless session anchor active on %s; "
+                "existing SEC_AUX mixers preserved", VOICE_PCM_DEVICE);
+    return EXIT_SUCCESS;
+
+failed:
+    (void)voice_session_anchor_stop(api, anchor);
+    return EXIT_FAILURE;
+}
+
 static int voice_route_stop(struct vendor_audio *api,
                             struct voice_route_state *state);
 
@@ -686,17 +773,13 @@ static int voice_route_start(struct vendor_audio *api, int enable_usb_audio,
 {
     memset(state, 0, sizeof(*state));
 
-    if (set_voice_mixer(api, VOICE_LEGACY_DOWNLINK_MIXER, "0") != 0) {
-        goto failed;
-    }
-    state->legacy_downlink_disabled = 1;
+    disable_legacy_voice_mixer(api, VOICE_LEGACY_DOWNLINK_MIXER,
+                               &state->legacy_downlink_disabled);
     if (should_stop()) {
         goto failed;
     }
-    if (set_voice_mixer(api, VOICE_LEGACY_UPLINK_MIXER, "0") != 0) {
-        goto failed;
-    }
-    state->legacy_uplink_disabled = 1;
+    disable_legacy_voice_mixer(api, VOICE_LEGACY_UPLINK_MIXER,
+                               &state->legacy_uplink_disabled);
     if (should_stop()) {
         goto failed;
     }
@@ -1133,6 +1216,7 @@ cleanup:
 
 struct network_options {
     int enabled;
+    int uplink_listener;
     const char *listen_address;
     const char *peer_address;
     const char *token_file;
@@ -1155,6 +1239,14 @@ struct network_session {
     int64_t last_rx_usec;
     volatile int failed;
     int verbose;
+};
+
+struct uplink_jitter_buffer {
+    unsigned char frames[UPLINK_JITTER_CAPACITY][NETWORK_PCM_FRAME_BYTES];
+    uint32_t sequences[UPLINK_JITTER_CAPACITY];
+    unsigned int head;
+    unsigned int count;
+    uint64_t dropped;
 };
 
 static void store_u16_be(unsigned char *data, uint16_t value)
@@ -1300,6 +1392,52 @@ static int valid_audio_packet(const struct network_session *session,
                       digest, NETWORK_PACKET_TAG_BYTES)) {
         return 0;
     }
+    *sequence = packet_sequence;
+    memcpy(payload, packet + NETWORK_PACKET_HEADER_BYTES,
+           NETWORK_PCM_FRAME_BYTES);
+    return 1;
+}
+
+static int valid_initial_uplink_packet(
+    const unsigned char key[32], const unsigned char *packet, size_t length,
+    const struct sockaddr_in *source, const struct in_addr *local_address,
+    uint32_t *session_id, uint32_t *sequence,
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+{
+    unsigned char digest[32];
+    uint32_t packet_sequence;
+    uint32_t packet_session;
+    uint32_t source_host;
+    uint32_t local_host;
+
+    if (length != NETWORK_PACKET_BYTES || source->sin_family != AF_INET ||
+        source->sin_port == 0U || load_u32_be(packet) != NETWORK_PACKET_MAGIC ||
+        packet[4] != NETWORK_PACKET_VERSION ||
+        packet[5] != NETWORK_DIRECTION_UPLINK ||
+        load_u16_be(packet + 6U) != NETWORK_PCM_FRAME_BYTES) {
+        return 0;
+    }
+    source_host = ntohl(source->sin_addr.s_addr);
+    local_host = ntohl(local_address->s_addr);
+    if ((source_host & 0xffffff00U) != (local_host & 0xffffff00U) ||
+        source_host == local_host) {
+        return 0;
+    }
+    packet_session = load_u32_be(packet + 8U);
+    packet_sequence = load_u32_be(packet + 12U);
+    if (packet_session == 0U || packet_sequence == 0U ||
+        load_u32_be(packet + 16U) !=
+            packet_sequence * NETWORK_PCM_FRAME_SAMPLES) {
+        return 0;
+    }
+    hmac_sha256(key, 32U, packet,
+                NETWORK_PACKET_HEADER_BYTES + NETWORK_PCM_FRAME_BYTES, digest);
+    if (!secure_equal(packet + NETWORK_PACKET_HEADER_BYTES +
+                          NETWORK_PCM_FRAME_BYTES,
+                      digest, NETWORK_PACKET_TAG_BYTES)) {
+        return 0;
+    }
+    *session_id = packet_session;
     *sequence = packet_sequence;
     memcpy(payload, packet + NETWORK_PACKET_HEADER_BYTES,
            NETWORK_PCM_FRAME_BYTES);
@@ -1459,8 +1597,9 @@ static int parse_ipv4(const char *text, struct in_addr *address)
     return 0;
 }
 
-static int setup_network_session(struct network_session *session,
-                                 const struct network_options *options)
+static int setup_bound_network_socket(struct network_session *session,
+                                      const struct network_options *options,
+                                      struct in_addr *local_address)
 {
     struct sockaddr_in local;
     int enabled = 1;
@@ -1468,12 +1607,9 @@ static int setup_network_session(struct network_session *session,
     memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
     local.sin_port = htons((uint16_t)options->port);
-    if (parse_ipv4(options->listen_address, &local.sin_addr) != 0 ||
-        parse_ipv4(options->peer_address, &session->peer.sin_addr) != 0) {
+    if (parse_ipv4(options->listen_address, &local.sin_addr) != 0) {
         return -1;
     }
-    session->peer.sin_family = AF_INET;
-    session->peer.sin_port = htons((uint16_t)options->peer_port);
     session->socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (session->socket_fd < 0) {
         log_message("error", "UDP socket failed: %s", strerror(errno));
@@ -1507,6 +1643,22 @@ static int setup_network_session(struct network_session *session,
                     strerror(errno));
         return -1;
     }
+    *local_address = local.sin_addr;
+    return 0;
+}
+
+static int setup_network_session(struct network_session *session,
+                                 const struct network_options *options)
+{
+    struct in_addr local_address;
+
+    if (setup_bound_network_socket(session, options, &local_address) != 0 ||
+        parse_ipv4(options->peer_address, &session->peer.sin_addr) != 0) {
+        return -1;
+    }
+    (void)local_address;
+    session->peer.sin_family = AF_INET;
+    session->peer.sin_port = htons((uint16_t)options->peer_port);
     session->uplink_pcm = session->api->pcm_open("hw:0,5", PCM_PLAYBACK_FLAGS,
                                                  PCM_RATE, PCM_CHANNELS,
                                                  PCM_FORMAT_S16_LE, PCM_HOSTLESS);
@@ -1610,6 +1762,546 @@ cleanup:
     if (voice_route_stop(api, &route) != EXIT_SUCCESS) {
         result = EXIT_FAILURE;
     }
+    return result;
+}
+
+static int wait_for_initial_uplink_packet(
+    struct network_session *session, const struct in_addr *local_address,
+    uint32_t rejected_session_id, struct sockaddr_in *source,
+    uint32_t *session_id, uint32_t *sequence,
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+{
+    unsigned char packet[NETWORK_PACKET_BYTES];
+    struct pollfd descriptor;
+
+    descriptor.fd = session->socket_fd;
+    descriptor.events = POLLIN;
+    while (!should_stop()) {
+        socklen_t source_length = sizeof(*source);
+        ssize_t received;
+        int poll_result;
+
+        descriptor.revents = 0;
+        poll_result = poll(&descriptor, 1U, 500);
+        if (poll_result < 0 && errno == EINTR) {
+            continue;
+        }
+        if (poll_result < 0) {
+            log_message("error", "uplink listener poll failed: %s",
+                        strerror(errno));
+            return -1;
+        }
+        if (poll_result == 0) {
+            continue;
+        }
+        if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            log_message("error", "uplink listener socket closed");
+            return -1;
+        }
+        if ((descriptor.revents & POLLIN) == 0) {
+            continue;
+        }
+        memset(source, 0, sizeof(*source));
+        received = recvfrom(session->socket_fd, packet, sizeof(packet), 0,
+                            (struct sockaddr *)source, &source_length);
+        if (received < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+            log_message("error", "uplink listener receive failed: %s",
+                        strerror(errno));
+            return -1;
+        }
+        if (source_length == sizeof(*source) &&
+            valid_initial_uplink_packet(session->key, packet,
+                                        (size_t)received, source,
+                                        local_address, session_id, sequence,
+                                        payload) &&
+            *session_id != rejected_session_id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void enqueue_uplink_frame(
+    struct uplink_jitter_buffer *buffer,
+    const unsigned char payload[NETWORK_PCM_FRAME_BYTES], uint32_t sequence)
+{
+    unsigned int tail;
+
+    if (buffer->count == UPLINK_JITTER_CAPACITY) {
+        buffer->head = (buffer->head + 1U) % UPLINK_JITTER_CAPACITY;
+        buffer->count -= 1U;
+        buffer->dropped += 1U;
+    }
+    tail = (buffer->head + buffer->count) % UPLINK_JITTER_CAPACITY;
+    memcpy(buffer->frames[tail], payload, NETWORK_PCM_FRAME_BYTES);
+    buffer->sequences[tail] = sequence;
+    buffer->count += 1U;
+}
+
+static int dequeue_uplink_frame(
+    struct uplink_jitter_buffer *buffer,
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES], uint32_t *sequence)
+{
+    if (buffer->count == 0U) {
+        return 0;
+    }
+    memcpy(payload, buffer->frames[buffer->head], NETWORK_PCM_FRAME_BYTES);
+    *sequence = buffer->sequences[buffer->head];
+    buffer->head = (buffer->head + 1U) % UPLINK_JITTER_CAPACITY;
+    buffer->count -= 1U;
+    return 1;
+}
+
+static int drain_uplink_packets(
+    struct network_session *session, struct uplink_jitter_buffer *buffer)
+{
+    unsigned char packet[NETWORK_PACKET_BYTES];
+
+    for (;;) {
+        unsigned char candidate[NETWORK_PCM_FRAME_BYTES];
+        struct sockaddr_in source;
+        socklen_t source_length = sizeof(source);
+        uint32_t sequence;
+        ssize_t received;
+
+        memset(&source, 0, sizeof(source));
+        received = recvfrom(session->socket_fd, packet, sizeof(packet), 0,
+                            (struct sockaddr *)&source, &source_length);
+        if (received < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                return 0;
+            }
+            log_message("error", "uplink media receive failed: %s",
+                        strerror(errno));
+            return -1;
+        }
+        if (source_length != sizeof(source) ||
+            !valid_audio_packet(session, packet, (size_t)received, &source,
+                                &sequence, candidate) ||
+            (int32_t)(sequence - session->rx_sequence) <= 0) {
+            continue;
+        }
+        session->rx_sequence = sequence;
+        enqueue_uplink_frame(buffer, candidate, sequence);
+        session->last_rx_usec = monotonic_usec();
+        if (session->last_rx_usec < 0LL) {
+            log_message("error", "uplink media clock failed");
+            return -1;
+        }
+    }
+}
+
+static unsigned int pcm_s16le_peak(
+    const unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+{
+    unsigned int peak = 0U;
+    size_t index;
+
+    for (index = 0U; index < NETWORK_PCM_FRAME_BYTES; index += 2U) {
+        int sample = (int)(int16_t)((uint16_t)payload[index] |
+                                    ((uint16_t)payload[index + 1U] << 8U));
+        unsigned int magnitude =
+            (unsigned int)(sample < 0 ? -sample : sample);
+
+        if (magnitude > peak) {
+            peak = magnitude;
+        }
+    }
+    return peak;
+}
+
+static int valid_uplink_pcm_buffer_length(unsigned int length)
+{
+    return length >= 2U && length <= NETWORK_UPLINK_DEVICE_FRAME_BYTES &&
+           (length & 1U) == 0U &&
+           NETWORK_UPLINK_DEVICE_FRAME_BYTES % length == 0U;
+}
+
+static int write_uplink_network_frame(
+    struct vendor_audio *api, void *pcm, unsigned int pcm_buffer_length,
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+{
+    unsigned char device_payload[NETWORK_UPLINK_DEVICE_FRAME_BYTES];
+    unsigned int input_sample;
+    unsigned int offset;
+
+    for (input_sample = 0U; input_sample < NETWORK_PCM_FRAME_SAMPLES;
+         ++input_sample) {
+        unsigned int copy;
+
+        for (copy = 0U; copy < NETWORK_UPLINK_RATE_MULTIPLIER; ++copy) {
+            unsigned int output_sample =
+                input_sample * NETWORK_UPLINK_RATE_MULTIPLIER + copy;
+
+            device_payload[output_sample * 2U] = payload[input_sample * 2U];
+            device_payload[output_sample * 2U + 1U] =
+                payload[input_sample * 2U + 1U];
+        }
+    }
+    for (offset = 0U; offset < NETWORK_UPLINK_DEVICE_FRAME_BYTES;
+         offset += pcm_buffer_length) {
+        int write_result =
+            api->pcm_write(pcm, device_payload + offset, pcm_buffer_length);
+
+        if (write_result != 0) {
+            int write_errno = errno;
+
+            log_message("error", "Media1 PCM chunk write failed: "
+                        "offset=%u length=%u result=%d errno=%d (%s)",
+                        offset, pcm_buffer_length, write_result, write_errno,
+                        strerror(write_errno));
+            return write_result;
+        }
+    }
+    return 0;
+}
+
+static int run_incall_music_tone_probe(struct vendor_audio *api)
+{
+    static const int16_t tone_cycle[8] = {
+        0, 5793, 8192, 5793, 0, -5793, -8192, -5793
+    };
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES];
+    struct voice_session_anchor anchor;
+    void *uplink_pcm = NULL;
+    unsigned int pcm_buffer_length = 0U;
+    unsigned int frame;
+    unsigned int sample_index = 0U;
+    int original_usb_audio = 0;
+    int usb_audio_changed = 0;
+    int mixer_enabled = 0;
+    int anchor_started = 0;
+    int result = EXIT_FAILURE;
+
+    if (install_signal_handlers() != 0 ||
+        get_voice_audio_enabled(&original_usb_audio) != 0) {
+        goto cleanup;
+    }
+    if (original_usb_audio != 0) {
+        if (set_voice_audio_enabled(0) != 0) {
+            goto cleanup;
+        }
+        usb_audio_changed = 1;
+    }
+    if (voice_session_anchor_start(api, &anchor) != EXIT_SUCCESS) {
+        goto cleanup;
+    }
+    anchor_started = 1;
+    log_message("info", "local in-call tone: preserving active VoLTE "
+                "SEC_AUX route; Media1=48000/mono/S16_LE via Incall_Music");
+    if (set_voice_mixer(api, MIXER_UPLINK, "1") != 0) {
+        goto cleanup;
+    }
+    mixer_enabled = 1;
+    uplink_pcm = api->pcm_open(
+        NETWORK_UPLINK_PCM_DEVICE, PCM_PLAYBACK_FLAGS,
+        NETWORK_UPLINK_DEVICE_RATE, PCM_CHANNELS, PCM_FORMAT_S16_LE,
+        PCM_HOSTLESS);
+    if (uplink_pcm == NULL) {
+        log_message("error", "local in-call tone could not open %s",
+                    NETWORK_UPLINK_PCM_DEVICE);
+        goto cleanup;
+    }
+    pcm_buffer_length = api->pcm_buffer_len(uplink_pcm);
+    if (!valid_uplink_pcm_buffer_length(pcm_buffer_length)) {
+        log_message("error", "local in-call tone got invalid PCM buffer %u",
+                    pcm_buffer_length);
+        goto cleanup;
+    }
+    log_message("info", "local in-call tone started: 1 kHz, peak=8192, "
+                "duration=10s, pcm_buffer=%u", pcm_buffer_length);
+    for (frame = 0U; frame < 625U && !should_stop(); ++frame) {
+        unsigned int sample;
+
+        for (sample = 0U; sample < NETWORK_PCM_FRAME_SAMPLES; ++sample) {
+            int16_t value = 0;
+
+            if (sample_index % PCM_RATE < PCM_RATE / 2U) {
+                value = tone_cycle[sample_index % 8U];
+            }
+            memcpy(payload + sample * 2U, &value, sizeof(value));
+            ++sample_index;
+        }
+        if (write_uplink_network_frame(api, uplink_pcm, pcm_buffer_length,
+                                       payload) != 0) {
+            goto cleanup;
+        }
+        if ((frame + 1U) % 125U == 0U) {
+            log_message("info", "local in-call tone progress: frames=%u/625",
+                        frame + 1U);
+        }
+        usleep(NETWORK_PCM_FRAME_USEC);
+    }
+    if (should_stop()) {
+        log_message("warn", "local in-call tone interrupted at frame %u",
+                    frame);
+        goto cleanup;
+    }
+    log_message("info", "local in-call tone complete: frames=625");
+    result = EXIT_SUCCESS;
+
+cleanup:
+    if (uplink_pcm != NULL && api->pcm_close(uplink_pcm) != 0) {
+        log_message("warn", "local in-call tone PCM close failed");
+        result = EXIT_FAILURE;
+    }
+    if (mixer_enabled && set_voice_mixer(api, MIXER_UPLINK, "0") != 0) {
+        result = EXIT_FAILURE;
+    }
+    if (anchor_started &&
+        voice_session_anchor_stop(api, &anchor) != EXIT_SUCCESS) {
+        result = EXIT_FAILURE;
+    }
+    if (usb_audio_changed && set_voice_audio_enabled(original_usb_audio) != 0) {
+        result = EXIT_FAILURE;
+    }
+    return result;
+}
+
+static int run_uplink_media_session(
+    struct network_session *session, const struct sockaddr_in *source,
+    uint32_t session_id, uint32_t sequence,
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+{
+    unsigned char silence[NETWORK_PCM_FRAME_BYTES];
+    struct voice_session_anchor anchor;
+    struct uplink_jitter_buffer jitter;
+    int64_t next_frame_usec;
+    void *uplink_pcm = NULL;
+    int original_usb_audio = 0;
+    int observed_usb_audio = 0;
+    int usb_audio_changed = 0;
+    int incall_mixer_enabled = 0;
+    int anchor_started = 0;
+    int payload_ready = 0;
+    unsigned int uplink_pcm_buffer_length = 0U;
+    uint32_t played_sequence = sequence;
+    uint64_t written_frames = 0U;
+    uint64_t audio_frames = 0U;
+    unsigned int maximum_peak = 0U;
+    int result = EXIT_FAILURE;
+
+    memset(silence, 0, sizeof(silence));
+    memset(&jitter, 0, sizeof(jitter));
+    session->peer = *source;
+    session->session_id = session_id;
+    session->rx_sequence = sequence;
+    enqueue_uplink_frame(&jitter, payload, sequence);
+
+    if (get_voice_audio_enabled(&original_usb_audio) != 0) {
+        goto cleanup;
+    }
+    if (original_usb_audio != 0) {
+        if (set_voice_audio_enabled(0) != 0) {
+            goto cleanup;
+        }
+        usb_audio_changed = 1;
+    }
+    if (get_voice_audio_enabled(&observed_usb_audio) != 0 ||
+        observed_usb_audio != 0) {
+        log_message("error", "uplink listener USB UAC bypass verification failed");
+        goto cleanup;
+    }
+    if (voice_session_anchor_start(session->api, &anchor) != EXIT_SUCCESS) {
+        goto cleanup;
+    }
+    anchor_started = 1;
+    log_message("info", "preserving active VoLTE SEC_AUX route and routing "
+                "Media1 directly to VOICE_PLAYBACK_TX via Incall_Music");
+    if (set_voice_mixer(session->api, MIXER_UPLINK, "1") != 0) {
+        goto cleanup;
+    }
+    incall_mixer_enabled = 1;
+    uplink_pcm = session->api->pcm_open(
+        NETWORK_UPLINK_PCM_DEVICE, PCM_PLAYBACK_FLAGS,
+        NETWORK_UPLINK_DEVICE_RATE, PCM_CHANNELS, PCM_FORMAT_S16_LE,
+        PCM_HOSTLESS);
+    if (uplink_pcm == NULL) {
+        log_message("error", "uplink listener could not open %s",
+                    NETWORK_UPLINK_PCM_DEVICE);
+        goto cleanup;
+    }
+    uplink_pcm_buffer_length = session->api->pcm_buffer_len(uplink_pcm);
+    if (!valid_uplink_pcm_buffer_length(uplink_pcm_buffer_length)) {
+        log_message("error", "uplink listener got invalid %s buffer length %u",
+                    NETWORK_UPLINK_PCM_DEVICE, uplink_pcm_buffer_length);
+        goto cleanup;
+    }
+    session->uplink_pcm = uplink_pcm;
+    session->last_rx_usec = monotonic_usec();
+    next_frame_usec = session->last_rx_usec;
+    if (session->last_rx_usec < 0LL) {
+        log_message("error", "uplink media clock failed");
+        goto cleanup;
+    }
+    if (drain_uplink_packets(session, &jitter) != 0) {
+        goto cleanup;
+    }
+    log_message("info", "authenticated uplink session active: peer=%s:%u "
+                "session=%u network=8000/mono/S16_LE frame=256 "
+                "Media1=48000/mono/S16_LE Incall_Music pcm_buffer=%u "
+                "chunks=%u jitter=%u/%u",
+                inet_ntoa(source->sin_addr),
+                (unsigned int)ntohs(source->sin_port), session_id,
+                uplink_pcm_buffer_length,
+                NETWORK_UPLINK_DEVICE_FRAME_BYTES /
+                    uplink_pcm_buffer_length,
+                jitter.count, UPLINK_JITTER_CAPACITY);
+
+    while (!should_stop()) {
+        int64_t current_usec = monotonic_usec();
+
+        if (current_usec < 0LL) {
+            log_message("error", "uplink media clock failed");
+            goto cleanup;
+        }
+        if (current_usec < next_frame_usec) {
+            usleep((unsigned int)(next_frame_usec - current_usec));
+        } else if (current_usec - next_frame_usec >
+                   (int64_t)NETWORK_PCM_FRAME_USEC) {
+            next_frame_usec = current_usec;
+        }
+        if (drain_uplink_packets(session, &jitter) != 0) {
+            goto cleanup;
+        }
+        payload_ready = dequeue_uplink_frame(
+            &jitter, payload, &played_sequence);
+        current_usec = monotonic_usec();
+        if (current_usec < 0LL) {
+            log_message("error", "uplink media clock failed");
+            goto cleanup;
+        }
+        if (current_usec - session->last_rx_usec >
+            NETWORK_SESSION_TIMEOUT_USEC) {
+            log_message("info", "uplink session idle timeout; returning to listener");
+            result = EXIT_SUCCESS;
+            goto cleanup;
+        }
+        if (write_uplink_network_frame(
+                session->api, uplink_pcm, uplink_pcm_buffer_length,
+                payload_ready ? payload : silence) != 0) {
+            log_message("error", "uplink listener Media1 PCM write failed");
+            goto cleanup;
+        }
+        written_frames += 1U;
+        if (payload_ready) {
+            unsigned int peak = pcm_s16le_peak(payload);
+
+            audio_frames += 1U;
+            if (peak > maximum_peak) {
+                maximum_peak = peak;
+            }
+            if (audio_frames == 1U) {
+                log_message("info", "uplink first Media1 frame: sequence=%u "
+                            "peak=%u/32768", played_sequence, peak);
+            }
+        }
+        if (written_frames % 500U == 0U) {
+            log_message("info", "uplink Media1 progress: written=%llu "
+                        "audio=%llu silence=%llu last_sequence=%u "
+                        "max_peak=%u/32768 jitter=%u/%u overflow=%llu",
+                        (unsigned long long)written_frames,
+                        (unsigned long long)audio_frames,
+                        (unsigned long long)(written_frames - audio_frames),
+                        played_sequence, maximum_peak, jitter.count,
+                        UPLINK_JITTER_CAPACITY,
+                        (unsigned long long)jitter.dropped);
+        }
+        next_frame_usec += (int64_t)NETWORK_PCM_FRAME_USEC;
+    }
+    result = EXIT_SUCCESS;
+
+cleanup:
+    if (written_frames != 0U) {
+        log_message("info", "uplink Media1 final: written=%llu audio=%llu "
+                    "silence=%llu last_sequence=%u max_peak=%u/32768 "
+                    "jitter=%u/%u overflow=%llu",
+                    (unsigned long long)written_frames,
+                    (unsigned long long)audio_frames,
+                    (unsigned long long)(written_frames - audio_frames),
+                    played_sequence, maximum_peak, jitter.count,
+                    UPLINK_JITTER_CAPACITY,
+                    (unsigned long long)jitter.dropped);
+    }
+    session->uplink_pcm = NULL;
+    if (uplink_pcm != NULL && session->api->pcm_close(uplink_pcm) != 0) {
+        log_message("warn", "could not close uplink listener PCM cleanly");
+        result = EXIT_FAILURE;
+    }
+    if (incall_mixer_enabled &&
+        set_voice_mixer(session->api, MIXER_UPLINK, "0") != 0) {
+        result = EXIT_FAILURE;
+    }
+    if (anchor_started &&
+        voice_session_anchor_stop(session->api, &anchor) != EXIT_SUCCESS) {
+        result = EXIT_FAILURE;
+    }
+    if (usb_audio_changed && set_voice_audio_enabled(original_usb_audio) != 0) {
+        log_message("warn", "could not restore USB UAC state after uplink session");
+        result = EXIT_FAILURE;
+    }
+    memset(&session->peer, 0, sizeof(session->peer));
+    session->session_id = 0U;
+    session->rx_sequence = 0U;
+    return result;
+}
+
+static int run_uplink_listener(struct vendor_audio *api,
+                               const struct network_options *options,
+                               int verbose)
+{
+    struct network_session session;
+    struct in_addr local_address;
+    uint32_t last_session_id = 0U;
+    int result = EXIT_FAILURE;
+
+    memset(&session, 0, sizeof(session));
+    session.api = api;
+    session.socket_fd = -1;
+    session.verbose = verbose;
+    if (load_pairing_key(options->token_file, session.key) != 0 ||
+        install_signal_handlers() != 0 ||
+        setup_bound_network_socket(&session, options, &local_address) != 0) {
+        goto cleanup;
+    }
+    log_message("info", "authenticated uplink listener ready on %s:%u via %s; "
+                "PCM remains closed until a valid packet arrives",
+                options->listen_address, options->port,
+                options->interface_name);
+    while (!should_stop()) {
+        struct sockaddr_in source;
+        unsigned char payload[NETWORK_PCM_FRAME_BYTES];
+        uint32_t session_id;
+        uint32_t sequence;
+        int wait_result = wait_for_initial_uplink_packet(
+            &session, &local_address, last_session_id, &source, &session_id,
+            &sequence, payload);
+
+        if (wait_result < 0) {
+            goto cleanup;
+        }
+        if (wait_result == 0) {
+            break;
+        }
+        if (run_uplink_media_session(&session, &source, session_id, sequence,
+                                     payload) != EXIT_SUCCESS) {
+            goto cleanup;
+        }
+        last_session_id = session_id;
+    }
+    result = EXIT_SUCCESS;
+
+cleanup:
+    if (session.socket_fd >= 0) {
+        (void)close(session.socket_fd);
+    }
+    memset(session.key, 0, sizeof(session.key));
     return result;
 }
 
@@ -2072,7 +2764,9 @@ static void print_usage(const char *program)
             "Usage: %s [--check] [--verbose] [--tty PATH] [--library PATH] "
             "[--playback-device NAME] [--capture-device NAME] [--no-mixers] "
             "[--voice-route-session] [--probe-network-pcm] "
-            "[--probe-direct-pcm] "
+            "[--probe-direct-pcm] [--probe-incall-music-tone] "
+            "[--uplink-listener --listen-address IPv4 --audio-port PORT "
+            "--token-file PATH --interface NAME] "
             "[--network-session --listen-address IPv4 --peer-address IPv4 "
             "--audio-port PORT --peer-port PORT --token-file PATH --interface NAME "
             "--session-id ID]\n",
@@ -2092,6 +2786,7 @@ int main(int argc, char **argv)
     int voice_route_session = 0;
     int probe_network_pcm = 0;
     int probe_direct_pcm = 0;
+    int probe_incall_music_tone = 0;
     struct network_options network_options;
     int index;
     int thread_error;
@@ -2118,8 +2813,12 @@ int main(int argc, char **argv)
             probe_network_pcm = 1;
         } else if (strcmp(argv[index], "--probe-direct-pcm") == 0) {
             probe_direct_pcm = 1;
+        } else if (strcmp(argv[index], "--probe-incall-music-tone") == 0) {
+            probe_incall_music_tone = 1;
         } else if (strcmp(argv[index], "--network-session") == 0) {
             network_options.enabled = 1;
+        } else if (strcmp(argv[index], "--uplink-listener") == 0) {
+            network_options.uplink_listener = 1;
         } else if (strcmp(argv[index], "--verbose") == 0) {
             context.verbose = 1;
         } else if (strcmp(argv[index], "--tty") == 0 && index + 1 < argc) {
@@ -2196,13 +2895,24 @@ int main(int argc, char **argv)
     if ((check_only && voice_route_session) ||
         (check_only && probe_network_pcm) ||
         (check_only && probe_direct_pcm) ||
+        (check_only && probe_incall_music_tone) ||
         (check_only && network_options.enabled) ||
+        (check_only && network_options.uplink_listener) ||
         (voice_route_session && probe_network_pcm) ||
         (voice_route_session && probe_direct_pcm) ||
+        (voice_route_session && probe_incall_music_tone) ||
         (voice_route_session && network_options.enabled) ||
+        (voice_route_session && network_options.uplink_listener) ||
         (probe_network_pcm && probe_direct_pcm) ||
+        (probe_network_pcm && probe_incall_music_tone) ||
         (probe_network_pcm && network_options.enabled) ||
-        (probe_direct_pcm && network_options.enabled)) {
+        (probe_network_pcm && network_options.uplink_listener) ||
+        (probe_direct_pcm && network_options.enabled) ||
+        (probe_direct_pcm && network_options.uplink_listener) ||
+        (probe_direct_pcm && probe_incall_music_tone) ||
+        (probe_incall_music_tone && network_options.enabled) ||
+        (probe_incall_music_tone && network_options.uplink_listener) ||
+        (network_options.enabled && network_options.uplink_listener)) {
         log_message("error",
                     "--check, --voice-route-session and "
                     "PCM probe/session modes are mutually exclusive");
@@ -2216,6 +2926,13 @@ int main(int argc, char **argv)
         log_message("error", "network session requires --peer-address, "
                     "--token-file, --interface, nonzero --session-id, "
                     "and mixers");
+        return EXIT_FAILURE;
+    }
+    if (network_options.uplink_listener &&
+        (network_options.token_file == NULL ||
+         network_options.interface_name == NULL || !context.use_mixers)) {
+        log_message("error", "uplink listener requires --token-file, "
+                    "--interface, and mixers");
         return EXIT_FAILURE;
     }
 
@@ -2243,8 +2960,19 @@ int main(int argc, char **argv)
         unload_vendor_audio(&context.api);
         return result;
     }
+    if (probe_incall_music_tone) {
+        result = run_incall_music_tone_probe(&context.api);
+        unload_vendor_audio(&context.api);
+        return result;
+    }
     if (network_options.enabled) {
         result = run_network_session(&context.api, &network_options,
+                                     context.verbose);
+        unload_vendor_audio(&context.api);
+        return result;
+    }
+    if (network_options.uplink_listener) {
+        result = run_uplink_listener(&context.api, &network_options,
                                      context.verbose);
         unload_vendor_audio(&context.api);
         return result;

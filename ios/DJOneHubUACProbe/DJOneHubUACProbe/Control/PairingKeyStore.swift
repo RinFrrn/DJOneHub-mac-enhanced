@@ -212,7 +212,7 @@ struct DevelopmentPairingBundle: Decodable, Sendable {
     static let controlSessionPurpose = "development-control-session"
     static let host = "192.168.225.1"
     static let port: UInt16 = 45_750
-    static let maximumValidity: TimeInterval = 60 * 60
+    static let maximumValidity: TimeInterval = 30 * 24 * 60 * 60
     static let maximumClockSkew: TimeInterval = 5 * 60
 
     let version: Int

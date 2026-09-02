@@ -127,6 +127,7 @@ type app struct {
 	moduleVoiceErr            string
 	moduleVoiceDetail         string
 	moduleVoiceWarming        bool
+	moduleVoiceTestBypass     bool
 	moduleVoiceStopTimer      *time.Timer
 	moduleVoiceStopGeneration uint64
 

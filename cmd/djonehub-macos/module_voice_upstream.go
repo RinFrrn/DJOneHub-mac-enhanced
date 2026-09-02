@@ -93,6 +93,10 @@ func (a *app) ensureModuleVoiceRoute() error {
 // callers (background prepare + dial/answer) never duplicate the full prep.
 func (a *app) ensureModuleVoiceRouteLocked() error {
 	a.moduleVoiceMu.Lock()
+	if a.moduleVoiceTestBypass {
+		a.moduleVoiceMu.Unlock()
+		return errors.New("开发 PCM Bridge 已启用，跳过 USB UAC 语音路由")
+	}
 	if a.moduleVoiceReady {
 		a.moduleVoiceMu.Unlock()
 		return nil
@@ -146,7 +150,7 @@ func (a *app) ensureModuleVoiceRouteBudgeted(budget time.Duration) error {
 func (a *app) moduleVoiceRouteCanAttempt() bool {
 	a.moduleVoiceMu.Lock()
 	defer a.moduleVoiceMu.Unlock()
-	return !a.moduleVoiceBlocked
+	return !a.moduleVoiceBlocked && !a.moduleVoiceTestBypass
 }
 
 // stopModuleVoiceRoute tears down the module-side voice route after a call.

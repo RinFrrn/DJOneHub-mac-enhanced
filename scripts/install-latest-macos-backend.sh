@@ -79,7 +79,8 @@ if [ -n "${latest_arm_dir}" ]; then
     djonehubd.armv7 \
     djonehub-qmi-probe.armv7 \
     djonehub-qmi-voice-control.armv7 \
-    djonehub-voice-daemon.armv7
+    djonehub-voice-daemon.armv7 \
+    mavo-pcm-bridge.armv7
   do
     source_file="${latest_arm_dir}/${name}"
     source_checksum="${source_file}.sha256"

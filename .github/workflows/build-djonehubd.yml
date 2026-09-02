@@ -22,7 +22,9 @@ on:
       - "module/djonehub_voice_codec_test.c"
       - "module/djonehub_voice_policy.c"
       - "module/djonehub_voice_policy.h"
+      - "module/mavo_pcm_bridge.c"
       - "scripts/build_djonehubd_armel.sh"
+      - "scripts/build_pcm_bridge_armel.sh"
       - ".github/workflows/build-djonehubd.yml"
 
 permissions:
@@ -220,6 +222,11 @@ jobs:
           voice_daemon_scope=fixed status/dial/answer/end only; no shell, AT passthrough, or arbitrary QMI
           voice_daemon_deployment=development one-shot boot arming only; production persistence is not approved
           EOF
+
+      - name: Build authenticated uplink PCM bridge
+        run: |
+          set -euxo pipefail
+          ./scripts/build_pcm_bridge_armel.sh --container
 
       - name: Upload sentinel artifact
         uses: actions/upload-artifact@v4

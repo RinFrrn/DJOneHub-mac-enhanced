@@ -368,7 +368,8 @@ func (a *app) prewarmModuleVoiceRoute(reason string) {
 	}
 
 	a.moduleVoiceMu.Lock()
-	if a.moduleVoiceReady || a.moduleVoiceWarming || a.moduleVoiceBlocked {
+	if a.moduleVoiceReady || a.moduleVoiceWarming || a.moduleVoiceBlocked ||
+		a.moduleVoiceTestBypass {
 		a.moduleVoiceMu.Unlock()
 		return
 	}

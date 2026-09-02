@@ -5,7 +5,8 @@ QDC507 模块现有 `f_audio` USB gadget 是否会被 iOS 同时选为音频输�
 
 探针 UI 不使用 ADB、libusb、DriverKit 或 ExternalAccessory；现有 UAC 页面仍只负责
 音频/ECM 诊断。项目现在额外包含一个基于 `Network.framework` + `CryptoKit` 的认证电话
-控制客户端库，用于连接模块 `192.168.225.1:45750`，但没有把它描述成 iOS 双向媒体实现。
+控制客户端库，用于连接模块 `192.168.225.1:45750`。此外还有一个严格限定为上行的
+PCM 探针：iPhone 内置麦克风通过 ECM/UDP 送到模块 D5；它不是双向媒体实现。
 
 UAC 探针通过 `AVAudioSession`：
 
@@ -77,6 +78,16 @@ xcrun swiftc \
 ```
 
 预期输出：`VoiceControlProtocolOfflineTest: PASS`。
+
+上行媒体包离线向量测试：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Audio/UplinkAudioProtocol.swift \
+  ios/DJOneHubUACProbe/Tests/UplinkAudioProtocolOfflineTest.swift \
+  -o /tmp/djonehub-uplink-protocol-test
+/tmp/djonehub-uplink-protocol-test
+```
 
 开发测试配对包解析测试：
 
@@ -176,6 +187,18 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-session \
 daemon 只在当前模块供电周期内存活，断电后不会自行恢复。原 STATUS 模式则以
 `--once --status-only` 启动，模块端会拒绝任何变更通话状态的命令，不能靠修改 App
 绕过。两类短期凭据在 Keychain 中带不同权限，新包导入后会清除旧的开发凭据。
+
+控制会话现在还会启动一个独立的认证 UDP 上行监听器 `192.168.225.1:45751`。监听器空闲时
+不打开 PCM；首个来自 USB ECM `/24` 的合法 HMAC 包确定 peer 和随机 session ID 后，才
+确认 UAC 为关闭状态、启动 D4 voice route，并且只打开 `hw:0,5` playback。iPhone 发送
+8000 Hz、单声道、signed S16_LE，128 samples / 256 bytes / 16 ms 的帧；模块按固定 16 ms
+节拍写 D5。连续 3 秒没有合法包时会关闭 D5、停止 D4 route、恢复进入会话前的 UAC 状态，
+然后回到只监听 UDP 的空闲状态。该模式不会打开或读取 D6，也没有 TCP 音频、下行、后台
+音频或 CallKit。
+
+真机最小验证顺序：先用 STATUS 确认界面显示“通话中”，再点“开始 iPhone 麦克风上行”，
+从 iPhone 旁说一段包含计数词的短句，让蜂窝对端确认内容；停止后等待至少 3 秒再挂断。
+如果界面帧数持续增加而对端无声，应先收集模块 `last-start.log`，不要切回 UAC 或启用 D6。
 
 接回 Mac 后查看状态或完整卸载：
 
