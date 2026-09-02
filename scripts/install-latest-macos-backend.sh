@@ -80,7 +80,8 @@ if [ -n "${latest_arm_dir}" ]; then
     djonehub-qmi-probe.armv7 \
     djonehub-qmi-voice-control.armv7 \
     djonehub-voice-daemon.armv7 \
-    mavo-pcm-bridge.armv7
+    mavo-pcm-bridge.armv7 \
+    qdc507_incall_card.new.ko
   do
     source_file="${latest_arm_dir}/${name}"
     source_checksum="${source_file}.sha256"
@@ -134,7 +135,8 @@ while [ "${attempt}" -lt 60 ]; do
   if curl -fsS --max-time 2 http://127.0.0.1:7575/api/health >/dev/null 2>&1; then
     if [ -d "${staged_artifacts}" ]; then
       mkdir -p "${ARTIFACT_DIR}"
-      for staged in "${staged_artifacts}"/*.armv7; do
+      for staged in "${staged_artifacts}"/*.armv7 "${staged_artifacts}"/*.ko; do
+        [ -f "${staged}" ] || continue
         install -m 700 "${staged}" "${ARTIFACT_DIR}/$(basename -- "${staged}").new"
         mv -f "${ARTIFACT_DIR}/$(basename -- "${staged}").new" "${ARTIFACT_DIR}/$(basename -- "${staged}")"
       done

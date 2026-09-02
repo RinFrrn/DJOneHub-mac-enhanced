@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -81,6 +82,22 @@ func TestValidateVoiceDaemonArtifactRejectsUnpinnedBinary(t *testing.T) {
 	}
 }
 
+func TestPinnedVoiceIncallCardArtifact(t *testing.T) {
+	data, err := os.ReadFile("../../outputs/module/qdc507_incall_card.new.ko")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateVoiceIncallCardArtifact(data); err != nil {
+		t.Fatalf("pinned in-call card rejected: %v", err)
+	}
+	mutated := append([]byte(nil), data...)
+	mutated[len(mutated)-1] ^= 1
+	if err := validateVoiceIncallCardArtifact(mutated); err == nil ||
+		!strings.Contains(err.Error(), "SHA-256 不匹配") {
+		t.Fatalf("mutated in-call card rejection = %v", err)
+	}
+}
+
 func TestVoiceDaemonHeaderUsesNetworkOrder(t *testing.T) {
 	header := voiceControlHeader(voiceControlFrameRequest, voiceControlOpStatus, 7, 0x0102030405060708)
 	if binary.BigEndian.Uint16(header[8:10]) != 7 || binary.BigEndian.Uint64(header[12:20]) != 0x0102030405060708 {
@@ -153,6 +170,11 @@ func TestVoiceTestStartScriptSeparatesReadOnlyAndControlModes(t *testing.T) {
 		"--audio-port 45751",
 		"qdc507_aprv3.ko",
 		"qdc507_voice.ko",
+		"qdc507_incall_card.ko",
+		"prepare-incall-card.sh",
+		"qdc507-incall-card",
+		"Voice Downlink Capture",
+		"Voice Farend Playback",
 		"/dev/snd/controlC0",
 		"/dev/snd/pcmC0D5p",
 		"/usr/bin/alsaucm_test",
@@ -171,7 +193,7 @@ func TestVoiceTestStartScriptSeparatesReadOnlyAndControlModes(t *testing.T) {
 		}
 	}
 	if strings.Contains(voiceTestStartScript, "--network-session") {
-		t.Fatal("start script must not enable the unverified bidirectional PCM mode")
+		t.Fatal("start script must use the authenticated listener session owner")
 	}
 	if !strings.Contains(voiceTestStartScript, `if test "$retain_session" = 0; then`) {
 		t.Fatal("ephemeral key removal is not guarded from persistent control sessions")
@@ -179,9 +201,31 @@ func TestVoiceTestStartScriptSeparatesReadOnlyAndControlModes(t *testing.T) {
 }
 
 func TestVoiceTestStartScriptHasValidShellSyntax(t *testing.T) {
-	command := exec.Command("/bin/sh", "-n")
-	command.Stdin = strings.NewReader(voiceTestStartScript)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start script shell syntax: %v: %s", err, output)
+	for name, script := range map[string]string{
+		"start":        voiceTestStartScript,
+		"prepare-card": voiceTestPrepareIncallCardScript,
+	} {
+		command := exec.Command("/bin/sh", "-n")
+		command.Stdin = strings.NewReader(script)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("%s script shell syntax: %v: %s", name, err, output)
+		}
+	}
+}
+
+func TestPrepareIncallCardScriptHasFailSafeRollback(t *testing.T) {
+	for _, required := range []string{
+		"driver_override",
+		"qdc507-voice-card",
+		"qdc507-incall-card",
+		"restore_stock_card",
+		"--restore-stock",
+		"rmmod qdc507_incall_card",
+		"Voice Downlink Capture",
+		"Voice Farend Playback",
+	} {
+		if !strings.Contains(voiceTestPrepareIncallCardScript, required) {
+			t.Fatalf("prepare-card script missing %q", required)
+		}
 	}
 }

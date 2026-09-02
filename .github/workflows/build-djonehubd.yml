@@ -23,8 +23,12 @@ on:
       - "module/djonehub_voice_policy.c"
       - "module/djonehub_voice_policy.h"
       - "module/mavo_pcm_bridge.c"
+      - "module/qdc507_incall_card.c"
+      - "outputs/module/qdc507_incall_card.new.ko"
+      - "outputs/module/qdc507_incall_card.new.ko.sha256"
       - "scripts/build_djonehubd_armel.sh"
       - "scripts/build_pcm_bridge_armel.sh"
+      - "scripts/build_qdc507_incall_card.sh"
       - ".github/workflows/build-djonehubd.yml"
 
 permissions:
@@ -227,6 +231,17 @@ jobs:
         run: |
           set -euxo pipefail
           ./scripts/build_pcm_bridge_armel.sh --container
+
+      - name: Verify pinned QDC507 in-call card
+        run: |
+          set -euxo pipefail
+          (cd outputs/module && sha256sum -c qdc507_incall_card.new.ko.sha256)
+          readelf --file-header outputs/module/qdc507_incall_card.new.ko
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Class:.*ELF32')" -eq 1
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Data:.*little endian')" -eq 1
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Type:.*REL')" -eq 1
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Machine:.*ARM')" -eq 1
+          strings outputs/module/qdc507_incall_card.new.ko | grep -F 'vermagic=3.18.44 preempt mod_unload ARMv7 p2v8'
 
       - name: Upload sentinel artifact
         uses: actions/upload-artifact@v4

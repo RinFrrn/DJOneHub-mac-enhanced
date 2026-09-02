@@ -3,6 +3,43 @@
 本目录记录当前阶段的实验性实现，源码位于仓库 `module/`，来源为 MaVo
 提交 `0443dfdaf8aec086fd76ba2ee9152fd908114524`。
 
+> **2026-09-02 状态更新：** 本文后半部分关于 D5/D6、原始 D0 和“尚未完成双向
+> 媒体”的记录是保留用于追溯的早期结论。当前采用定制 QDC507 ASoC machine card，
+> 通过标准 Qualcomm `INCALL_RECORD_RX` / `VOICE_PLAYBACK_TX` backend 把 Media1
+> 接入通话 DSP；不再把 D5/D6 当作电话媒体端点。
+
+## 当前已通过真机验收的路线
+
+- 模块加载固定哈希 `qdc507_incall_card.ko`，在保留 SEC_AUX VoLTE hostless anchor
+  的同时增加 `Voice Downlink Capture` 与 `Voice Farend Playback` backend。
+- 上行已实测：iPhone 内置麦克风 → USB ECM → HMAC UDP → Media1 playback →
+  `Incall_Music Audio Mixer MultiMedia1` → modem voice DSP → 蜂窝对端；对端可清晰听到。
+- 下行已实测：modem voice DSP → `VOC_REC_DL` → Media1 capture → HMAC UDP →
+  iPhone `AVAudioPlayerNode` → 内置扬声器；iPhone 可清晰听到对端。
+- 网络格式固定为 8000 Hz、单声道、signed S16 little-endian，128 samples / 256 bytes /
+  16 ms。模块 Media1 端为 48000 Hz、单声道、S16_LE；上行当前用 6 倍重复升采样，
+  下行当前每 6 个样本抽取一个，足以验证路径，后续仍应换成带滤波的重采样器。
+- iPhone/iPad 模式把 `AT+QCFG="usbcfg"` 的 UAC 位关闭，仅保留 USB 网络、AT、短信
+  等接口。真机确认普通系统音频不再被模块抢占，同时 ECM 双向通话仍正常。通话媒体
+  因而真正绕过 UAC，而不是仅在会话期间暂停 gadget PCM。
+- iOS 收发帧、下行峰值、本地扬声器检查音和强制扬声器路由均已真机验证。连接着 UAC
+  的诊断模式下必须显式 `overrideOutputAudioPort(.speaker)`；正式移动模式因不枚举 UAC，
+  平时系统音频无需 App 持有 Audio Session。
+- 已把定制声卡源码、固定 SHA-256、Bullseye binutils 2.35.2 可复现链接脚本、声卡切换/
+  原厂回滚脚本，以及 macOS 后端的推送、校验、状态和卸载逻辑纳入仓库。重新部署
+  control session 时不会再用旧 `start-once.sh` 覆盖已验证声卡准备流程。
+
+当前固定产物：
+
+| 文件 | SHA-256 |
+|---|---|
+| `qdc507_incall_card.new.ko` | `dfabcecff905b97ed46f755f4667e7c2635799e00524a10a8ed9d546bd1feea7` |
+| `mavo-pcm-bridge.armv7` | `e8b8b9b227b1c716e7889930c61686cc68cf2f69c8699772d3f5eaeff2887b51` |
+
+剩余工作属于产品化而不是路径可行性验证：用带滤波的 48 kHz/8 kHz 重采样替换抽取/
+重复、完善下行欠载后的重新缓冲、把 development pairing 和通话自动启停收敛成正式
+生命周期，并完成重新部署后的冷启动回归。
+
 ## 已完成
 
 - 增加可编译的 iOS 17+ SwiftUI 真机探针 `ios/DJOneHubUACProbe`。它只使用

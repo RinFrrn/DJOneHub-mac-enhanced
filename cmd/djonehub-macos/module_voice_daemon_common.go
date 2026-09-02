@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -13,33 +14,36 @@ import (
 )
 
 const (
-	voiceDaemonExpectedSHA256    = "476a45967a2285876b57582c66847c17c350c484a7b0486d5ef7d61ef69db5ef"
-	voiceUplinkExpectedSHA256    = "e8b8b9b227b1c716e7889930c61686cc68cf2f69c8699772d3f5eaeff2887b51"
-	voiceTestAPRv3ExpectedSHA256 = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
-	voiceTestVoiceExpectedSHA256 = "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
-	voiceDaemonRemotePath        = "/tmp/djonehub-voice-daemon.armv7"
-	voiceDaemonRemoteKeyPath     = "/tmp/djonehub-control.key"
-	voiceDaemonRemotePIDPath     = "/tmp/djonehub-voice-daemon.pid"
-	voiceDaemonRemoteLogPath     = "/tmp/djonehub-voice-daemon.log"
-	voiceDaemonAddress           = "192.168.225.1:45750"
-	voiceTestRemoteDir           = "/usrdata/djonehub/voice-test"
-	voiceTestRemoteBinary        = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
-	voiceTestRemoteUplink        = voiceTestRemoteDir + "/mavo-pcm-bridge.armv7"
-	voiceTestRemoteAPRv3         = voiceTestRemoteDir + "/qdc507_aprv3.ko"
-	voiceTestRemoteVoice         = voiceTestRemoteDir + "/qdc507_voice.ko"
-	voiceTestRemoteKey           = voiceTestRemoteDir + "/pairing.key"
-	voiceTestRemoteScript        = voiceTestRemoteDir + "/start-once.sh"
-	voiceTestLegacyOnceMarker    = voiceTestRemoteDir + "/run-once"
-	voiceTestRemoteOnceMarker    = voiceTestRemoteDir + "/run-status-once"
-	voiceTestRemoteSessionMarker = voiceTestRemoteDir + "/run-control-session"
-	voiceTestRemoteState         = voiceTestRemoteDir + "/last-start.state"
-	voiceTestRemoteLog           = voiceTestRemoteDir + "/last-start.log"
-	voiceTestInitLink            = "/etc/rc5.d/S99djonehub-voice-test"
-	voiceTestPIDFile             = "/run/djonehub-voice-test.pid"
-	voiceTestUplinkPIDFile       = "/run/djonehub-uplink-test.pid"
-	voiceTestStatusPurpose       = "development-status-only"
-	voiceTestSessionPurpose      = "development-control-session"
-	voiceTestPairingValidity     = 30 * 24 * time.Hour
+	voiceDaemonExpectedSHA256         = "476a45967a2285876b57582c66847c17c350c484a7b0486d5ef7d61ef69db5ef"
+	voiceUplinkExpectedSHA256         = "e8b8b9b227b1c716e7889930c61686cc68cf2f69c8699772d3f5eaeff2887b51"
+	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
+	voiceTestVoiceExpectedSHA256      = "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
+	voiceTestIncallCardExpectedSHA256 = "dfabcecff905b97ed46f755f4667e7c2635799e00524a10a8ed9d546bd1feea7"
+	voiceDaemonRemotePath             = "/tmp/djonehub-voice-daemon.armv7"
+	voiceDaemonRemoteKeyPath          = "/tmp/djonehub-control.key"
+	voiceDaemonRemotePIDPath          = "/tmp/djonehub-voice-daemon.pid"
+	voiceDaemonRemoteLogPath          = "/tmp/djonehub-voice-daemon.log"
+	voiceDaemonAddress                = "192.168.225.1:45750"
+	voiceTestRemoteDir                = "/usrdata/djonehub/voice-test"
+	voiceTestRemoteBinary             = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
+	voiceTestRemoteUplink             = voiceTestRemoteDir + "/mavo-pcm-bridge.armv7"
+	voiceTestRemoteAPRv3              = voiceTestRemoteDir + "/qdc507_aprv3.ko"
+	voiceTestRemoteVoice              = voiceTestRemoteDir + "/qdc507_voice.ko"
+	voiceTestRemoteIncallCard         = voiceTestRemoteDir + "/qdc507_incall_card.ko"
+	voiceTestRemotePrepareCard        = voiceTestRemoteDir + "/prepare-incall-card.sh"
+	voiceTestRemoteKey                = voiceTestRemoteDir + "/pairing.key"
+	voiceTestRemoteScript             = voiceTestRemoteDir + "/start-once.sh"
+	voiceTestLegacyOnceMarker         = voiceTestRemoteDir + "/run-once"
+	voiceTestRemoteOnceMarker         = voiceTestRemoteDir + "/run-status-once"
+	voiceTestRemoteSessionMarker      = voiceTestRemoteDir + "/run-control-session"
+	voiceTestRemoteState              = voiceTestRemoteDir + "/last-start.state"
+	voiceTestRemoteLog                = voiceTestRemoteDir + "/last-start.log"
+	voiceTestInitLink                 = "/etc/rc5.d/S99djonehub-voice-test"
+	voiceTestPIDFile                  = "/run/djonehub-voice-test.pid"
+	voiceTestUplinkPIDFile            = "/run/djonehub-uplink-test.pid"
+	voiceTestStatusPurpose            = "development-status-only"
+	voiceTestSessionPurpose           = "development-control-session"
+	voiceTestPairingValidity          = 30 * 24 * time.Hour
 
 	voiceControlMagic        = 0x444a4f48
 	voiceControlVersion      = 1
@@ -52,6 +56,9 @@ const (
 	voiceControlTagBytes     = 32
 	voiceControlMaxPayload   = 81
 )
+
+//go:embed module_prepare_incall_card.sh
+var voiceTestPrepareIncallCardScript string
 
 type developmentPairingBundle struct {
 	Version          int    `json:"version"`
@@ -126,6 +133,23 @@ func validateVoiceDaemonArtifact(data []byte) error {
 	actual := hex.EncodeToString(sum[:])
 	if actual != voiceDaemonExpectedSHA256 {
 		return fmt.Errorf("QMI Voice daemon SHA-256 不匹配：需要 %s，实际 %s", voiceDaemonExpectedSHA256, actual)
+	}
+	return nil
+}
+
+func validateVoiceIncallCardArtifact(data []byte) error {
+	if len(data) < 52 || len(data) > 1024*1024 {
+		return fmt.Errorf("QDC507 in-call card 文件大小无效：%d bytes", len(data))
+	}
+	if string(data[:4]) != "\x7fELF" || data[4] != 1 || data[5] != 1 ||
+		binary.LittleEndian.Uint16(data[16:18]) != 1 ||
+		binary.LittleEndian.Uint16(data[18:20]) != 40 {
+		return errors.New("QDC507 in-call card 必须是 ARM ELF32 little-endian relocatable module")
+	}
+	sum := sha256.Sum256(data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != voiceTestIncallCardExpectedSHA256 {
+		return fmt.Errorf("QDC507 in-call card SHA-256 不匹配：需要 %s，实际 %s", voiceTestIncallCardExpectedSHA256, actual)
 	}
 	return nil
 }
@@ -235,6 +259,8 @@ binary="$base/djonehub-voice-daemon.armv7"
 uplink="$base/mavo-pcm-bridge.armv7"
 aprv3="$base/qdc507_aprv3.ko"
 voice="$base/qdc507_voice.ko"
+incall_card="$base/qdc507_incall_card.ko"
+prepare_card="$base/prepare-incall-card.sh"
 key="$base/pairing.key"
 once_marker="$base/run-status-once"
 session_marker="$base/run-control-session"
@@ -253,24 +279,15 @@ sound_devices_ready() {
         test -c /dev/snd/pcmC0D4c &&
         test -c /dev/snd/pcmC0D5p &&
         test -c /dev/snd/pcmC0D6c &&
-        grep -Fq 'mdm9607-tomtom-i2s-snd-card' /proc/asound/cards
+        readlink /sys/class/sound/card0/device/driver 2>/dev/null |
+        grep -Fq '/qdc507-incall-card' &&
+        grep -Fq '(Voice Downlink Capture)' /proc/asound/pcm 2>/dev/null &&
+        grep -Fq '(Voice Farend Playback)' /proc/asound/pcm 2>/dev/null
 }
 
 prepare_voice_runtime() {
-    if ! sound_devices_ready; then
-        if grep -q '^qdc507_voice ' /proc/modules 2>/dev/null; then
-            printf '%s\n' 'qdc507_voice is loaded without the required ALSA devices'
-            return 1
-        fi
-        grep -q '^qdc507_aprv3 ' /proc/modules 2>/dev/null || insmod "$aprv3" || return 1
-        grep -q '^qdc507_voice ' /proc/modules 2>/dev/null || insmod "$voice" || return 1
-        ready_attempt=0
-        while test "$ready_attempt" -lt 100; do
-            sound_devices_ready && break
-            ready_attempt=$((ready_attempt + 1))
-            sleep 0.2
-        done
-    fi
+    test -r "$incall_card" && test -x "$prepare_card" || return 1
+    "$prepare_card" || return 1
     sound_devices_ready || return 1
 
     calibration_owned=0

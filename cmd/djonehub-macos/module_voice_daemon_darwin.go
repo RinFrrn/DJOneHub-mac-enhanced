@@ -27,12 +27,13 @@ type voiceDaemonStatusRequest struct {
 }
 
 type voiceTestArmRequest struct {
-	Confirm            bool   `json:"confirm"`
-	ConfirmOperation   string `json:"confirm_operation"`
-	ArtifactPath       string `json:"artifact_path"`
-	UplinkArtifactPath string `json:"uplink_artifact_path"`
-	PairingBundlePath  string `json:"pairing_bundle_path"`
-	RotatePairing      bool   `json:"rotate_pairing"`
+	Confirm                bool   `json:"confirm"`
+	ConfirmOperation       string `json:"confirm_operation"`
+	ArtifactPath           string `json:"artifact_path"`
+	UplinkArtifactPath     string `json:"uplink_artifact_path"`
+	IncallCardArtifactPath string `json:"incall_card_artifact_path"`
+	PairingBundlePath      string `json:"pairing_bundle_path"`
+	RotatePairing          bool   `json:"rotate_pairing"`
 }
 
 type voiceTestArmMode struct {
@@ -356,6 +357,35 @@ func loadVoiceUplinkArtifact(path string) ([]byte, string, error) {
 	return data, absPath, nil
 }
 
+func defaultVoiceIncallCardArtifactPath() string {
+	return defaultPinnedQMIArtifactPath("qdc507_incall_card.new.ko", validateVoiceIncallCardArtifact)
+}
+
+func loadVoiceIncallCardArtifact(path string) ([]byte, string, error) {
+	if strings.TrimSpace(path) == "" {
+		path = defaultVoiceIncallCardArtifactPath()
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("无法解析 QDC507 in-call card 路径: %w", err)
+	}
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("无法读取 QDC507 in-call card: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, "", errors.New("QDC507 in-call card 必须是普通文件，不能是符号链接")
+	}
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取 QDC507 in-call card 失败: %w", err)
+	}
+	if err := validateVoiceIncallCardArtifact(data); err != nil {
+		return nil, "", err
+	}
+	return data, absPath, nil
+}
+
 func stopTemporaryVoiceDaemon(adb *adbClient) error {
 	command := "if test -s '" + voiceDaemonRemotePIDPath + "'; then " +
 		"read pid < '" + voiceDaemonRemotePIDPath + "' || true; " +
@@ -597,6 +627,8 @@ func (a *app) voiceTestStatusAPI(w http.ResponseWriter, _ *http.Request) {
 			"printf 'uplink_binary=%s\\n' \"$(test -x '"+voiceTestRemoteUplink+"' && echo yes || echo no)\"; "+
 			"printf 'aprv3_binary=%s\\n' \"$(test -f '"+voiceTestRemoteAPRv3+"' && echo yes || echo no)\"; "+
 			"printf 'voice_binary=%s\\n' \"$(test -f '"+voiceTestRemoteVoice+"' && echo yes || echo no)\"; "+
+			"printf 'incall_card_binary=%s\\n' \"$(test -f '"+voiceTestRemoteIncallCard+"' && echo yes || echo no)\"; "+
+			"printf 'incall_prepare=%s\\n' \"$(test -x '"+voiceTestRemotePrepareCard+"' && echo yes || echo no)\"; "+
 			"printf 'uplink_process=%s\\n' \"$(test -s '"+voiceTestUplinkPIDFile+"' && read pid < '"+voiceTestUplinkPIDFile+"' && test -d \"/proc/$pid\" && echo running || echo stopped)\"; "+
 			"printf 'key=%s\\n' \"$(test -f '"+voiceTestRemoteKey+"' && echo present || echo absent)\"; "+
 			"printf 'status_marker=%s\\n' \"$(test -f '"+voiceTestRemoteOnceMarker+"' && echo armed || echo absent)\"; "+
@@ -606,7 +638,7 @@ func (a *app) voiceTestStatusAPI(w http.ResponseWriter, _ *http.Request) {
 			"printf 'previous_state=%s\\n' \"$(test -f '"+voiceTestRemoteDir+"/previous-start.state' && cat '"+voiceTestRemoteDir+"/previous-start.state' || echo absent)\"; "+
 			"echo 'media_log_begin'; test ! -f '"+voiceTestRemoteLog+"' || grep -E 'mavo-pcm-bridge|authenticated uplink' '"+voiceTestRemoteLog+"' || true; echo 'media_log_end'; "+
 			"echo 'previous_media_log_begin'; test ! -f '"+voiceTestRemoteDir+"/previous-start.log' || tail -n 400 '"+voiceTestRemoteDir+"/previous-start.log'; echo 'previous_media_log_end'; "+
-			"echo 'voice_runtime_begin'; grep -E '^qdc507_(aprv3|voice) ' /proc/modules 2>/dev/null || true; cat /proc/asound/cards 2>/dev/null || true; ls -l /dev/snd/controlC0 /dev/snd/pcmC0D4p /dev/snd/pcmC0D4c /dev/snd/pcmC0D5p /dev/snd/pcmC0D6c 2>&1 || true; test ! -f /run/mavo-alsaucm.log || tail -n 30 /run/mavo-alsaucm.log; echo 'voice_runtime_end'; "+
+			"echo 'voice_runtime_begin'; grep -E '^qdc507_(aprv3|voice|incall_card) ' /proc/modules 2>/dev/null || true; readlink /sys/class/sound/card0/device/driver 2>/dev/null || true; cat /proc/asound/cards 2>/dev/null || true; cat /proc/asound/pcm 2>/dev/null || true; ls -l /dev/snd/controlC0 /dev/snd/pcmC0D4p /dev/snd/pcmC0D4c /dev/snd/pcmC0D5p /dev/snd/pcmC0D6c 2>&1 || true; test ! -f /run/mavo-alsaucm.log || tail -n 30 /run/mavo-alsaucm.log; echo 'voice_runtime_end'; "+
 			"echo 'voice_mixer_begin'; command -v tinymix >/dev/null 2>&1 && tinymix 2>/dev/null | grep -E 'SEC_AUX_PCM_RX_Voice Mixer VoLTE|VoLTE_Tx Mixer SEC_AUX_PCM_TX_VoLTE|AFE_PCM_RX_Voice Mixer VoLTE|VoLTE_Tx Mixer AFE_PCM_TX_VoLTE|AFE_PCM_RX Audio Mixer MultiMedia1|Incall_Music Audio Mixer MultiMedia1' || true; echo 'voice_mixer_end'; "+
 			"echo 'pcm0_begin'; for f in /proc/asound/card0/pcm0p/sub0/status /proc/asound/card0/pcm0p/sub0/hw_params /proc/asound/card0/pcm0p/sub0/sw_params; do echo \"[$f]\"; cat \"$f\" 2>&1 || true; done; echo 'pcm0_end'; "+
 			"echo 'dapm_on_begin'; grep -H 'On' /sys/kernel/debug/asoc/*/dapm/* 2>/dev/null || true; echo 'dapm_on_end'; "+
@@ -646,7 +678,9 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 	var uplinkData []byte
 	var aprv3Data []byte
 	var voiceData []byte
+	var incallCardData []byte
 	var uplinkArtifactPath string
+	var incallCardArtifactPath string
 	if mode.purpose == voiceTestSessionPurpose {
 		uplinkData, uplinkArtifactPath, err = loadVoiceUplinkArtifact(request.UplinkArtifactPath)
 		if err != nil {
@@ -661,6 +695,11 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		voiceData, err = readUpstreamVoiceRuntimeFile("qdc507_voice.ko")
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "缺少固定版本 qdc507_voice.ko: "+err.Error())
+			return
+		}
+		incallCardData, incallCardArtifactPath, err = loadVoiceIncallCardArtifact(request.IncallCardArtifactPath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -756,6 +795,14 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 			writeError(w, http.StatusBadGateway, "推送 qdc507_voice.ko 失败: "+err.Error())
 			return
 		}
+		if err := adb.pushContext(r.Context(), incallCardData, voiceTestRemoteIncallCard, 0o100600, 30*time.Second); err != nil {
+			writeError(w, http.StatusBadGateway, "推送 QDC507 in-call card 失败: "+err.Error())
+			return
+		}
+		if err := adb.pushContext(r.Context(), []byte(voiceTestPrepareIncallCardScript), voiceTestRemotePrepareCard, 0o100700, 15*time.Second); err != nil {
+			writeError(w, http.StatusBadGateway, "推送 in-call card 准备脚本失败: "+err.Error())
+			return
+		}
 	}
 	if err := adb.pushContext(r.Context(), key, voiceTestRemoteKey, 0o100600, 15*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "推送测试 pairing key 失败: "+err.Error())
@@ -770,10 +817,13 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		"test \"$(wc -c < '" + voiceTestRemoteKey + "')\" = 32"
 	if len(uplinkData) != 0 {
 		verify += " && chmod 700 '" + voiceTestRemoteUplink + "' && " +
+			"chmod 700 '" + voiceTestRemotePrepareCard + "' && " +
 			"chmod 600 '" + voiceTestRemoteAPRv3 + "' '" + voiceTestRemoteVoice + "' && " +
+			"chmod 600 '" + voiceTestRemoteIncallCard + "' && " +
 			"test \"$(sha256sum '" + voiceTestRemoteUplink + "' | awk '{print $1}')\" = '" + voiceUplinkExpectedSHA256 + "' && " +
 			"test \"$(sha256sum '" + voiceTestRemoteAPRv3 + "' | awk '{print $1}')\" = '" + voiceTestAPRv3ExpectedSHA256 + "' && " +
-			"test \"$(sha256sum '" + voiceTestRemoteVoice + "' | awk '{print $1}')\" = '" + voiceTestVoiceExpectedSHA256 + "'"
+			"test \"$(sha256sum '" + voiceTestRemoteVoice + "' | awk '{print $1}')\" = '" + voiceTestVoiceExpectedSHA256 + "' && " +
+			"test \"$(sha256sum '" + voiceTestRemoteIncallCard + "' | awk '{print $1}')\" = '" + voiceTestIncallCardExpectedSHA256 + "'"
 	}
 	if err := sentinelShell(adb, verify, 12*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "模块端测试文件校验失败: "+err.Error())
@@ -787,7 +837,7 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		}
 		if err := sentinelShell(adb, "'"+voiceTestRemoteScript+"' --prepare-only", 45*time.Second); err != nil {
 			diagnostic, _, _ := adb.shellChecked(
-				"cat /proc/asound/cards 2>/dev/null || true; ls -l /dev/snd 2>&1 || true; "+
+				"readlink /sys/class/sound/card0/device/driver 2>/dev/null || true; cat /proc/asound/cards 2>/dev/null || true; cat /proc/asound/pcm 2>/dev/null || true; ls -l /dev/snd 2>&1 || true; "+
 					"test ! -f /run/mavo-alsaucm.log || tail -n 80 /run/mavo-alsaucm.log; dmesg | tail -n 80",
 				12*time.Second,
 			)
@@ -853,6 +903,9 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 	if uplinkArtifactPath != "" {
 		w.Header().Set("X-DJOneHub-Uplink-Artifact-Path", uplinkArtifactPath)
 	}
+	if incallCardArtifactPath != "" {
+		w.Header().Set("X-DJOneHub-Incall-Card-Artifact-Path", incallCardArtifactPath)
+	}
 	w.Header().Set("X-DJOneHub-Module-Identifier", identifier)
 	if stablePairingPath != "" {
 		w.Header().Set("X-DJOneHub-Stable-Pairing", stablePairingPath)
@@ -899,8 +952,9 @@ func (a *app) voiceTestUninstallAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "停止 PCM 上行监听失败: "+err.Error())
 		return
 	}
-	cleanup := "rm -f '" + voiceTestLegacyOnceMarker + "' '" + voiceTestRemoteOnceMarker + "' '" + voiceTestRemoteSessionMarker + "' '" + voiceTestRemoteState + "' '" + voiceTestRemoteLog + "' '" +
-		voiceTestRemoteScript + "' '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteUplink + "' '" + voiceTestRemoteAPRv3 + "' '" + voiceTestRemoteVoice + "' '" + voiceTestRemoteKey + "' '" + voiceTestPIDFile + "' '" + voiceTestUplinkPIDFile + "'; " +
+	cleanup := "if test -x '" + voiceTestRemotePrepareCard + "'; then '" + voiceTestRemotePrepareCard + "' --restore-stock || exit 1; fi; " +
+		"rm -f '" + voiceTestLegacyOnceMarker + "' '" + voiceTestRemoteOnceMarker + "' '" + voiceTestRemoteSessionMarker + "' '" + voiceTestRemoteState + "' '" + voiceTestRemoteLog + "' '" +
+		voiceTestRemoteScript + "' '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteUplink + "' '" + voiceTestRemoteAPRv3 + "' '" + voiceTestRemoteVoice + "' '" + voiceTestRemoteIncallCard + "' '" + voiceTestRemotePrepareCard + "' '" + voiceTestRemoteKey + "' '" + voiceTestPIDFile + "' '" + voiceTestUplinkPIDFile + "'; " +
 		"rmdir '" + voiceTestRemoteDir + "' 2>/dev/null || true; sync"
 	if err := sentinelShell(adb, cleanup, 10*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "清理 iOS STATUS 测试失败: "+err.Error())
