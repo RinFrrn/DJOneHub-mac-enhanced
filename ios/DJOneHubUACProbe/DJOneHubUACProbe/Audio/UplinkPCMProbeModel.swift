@@ -58,7 +58,7 @@ final class UplinkPCMProbeModel: ObservableObject {
         isRunning = false
         isTestTone = false
         stateText = "已停止"
-        detailText = "模块侧将在 3 秒无包后关闭 D5 并恢复原 UAC 状态"
+        detailText = "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
         inputLevel = 0
         downlinkLevel = 0
     }
@@ -427,7 +427,7 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
                 self.queue.async {
                     switch state {
                     case .ready:
-                        self.onState("上行发送中")
+                        self.onState("双向 PCM 传输中")
                         self.receiveDownlinkLocked(connection)
                     case .failed(let error):
                         self.failLocked("UDP 连接失败：\(error.localizedDescription)")

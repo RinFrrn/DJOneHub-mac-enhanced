@@ -1,4 +1,15 @@
-# DJOneHub UAC Probe
+# DJOneHub iOS 工程
+
+本工程现在包含两个 target：
+
+- `DJOneHub`：正在实施的正式前台通话 App，自动轮询电话状态，并在通话进入
+  conversation 后自动启停 ECM 双向 PCM。
+- `DJOneHubUACProbe`：保留用于 USB Audio、ECM、控制协议和媒体链路诊断的实验工具。
+
+正式 App 的架构、阶段范围和验收门槛见
+[`docs/ios-app-technical-design.md`](../../docs/ios-app-technical-design.md)。
+
+## UAC Probe
 
 这是一个只使用 Apple 公共 API 的 iPhone/iPad 真机探针，用于回答一个具体问题：
 QDC507 模块现有 `f_audio` USB gadget 是否会被 iOS 同时选为音频输入和输出。

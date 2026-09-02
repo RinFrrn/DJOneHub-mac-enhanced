@@ -15,6 +15,15 @@
 		A10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
 		A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
 		A10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* UplinkPCMProbeModel.swift */; };
+		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
+		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
+		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
+		B10000000000000000000004 /* VoiceControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* VoiceControlProtocol.swift */; };
+		B10000000000000000000005 /* VoiceControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* VoiceControlClient.swift */; };
+		B10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
+		B10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
+		B10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* UplinkPCMProbeModel.swift */; };
+		B10000000000000000000009 /* ProductCallPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* ProductCallPhase.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,10 +38,23 @@
 		A20000000000000000000009 /* PairingKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKeyStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* UplinkAudioProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkAudioProtocol.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* UplinkPCMProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkPCMProbeModel.swift; sourceTree = "<group>"; };
+		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000005 /* DJOneHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DJOneHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000006 /* ProductCallPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCallPhase.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +68,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* DJOneHubUACProbe */,
+				B40000000000000000000001 /* DJOneHub */,
 				A20000000000000000000006 /* README.md */,
 				A40000000000000000000005 /* Products */,
 			);
@@ -85,6 +108,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000005 /* DJOneHubUACProbe.app */,
+				B20000000000000000000005 /* DJOneHub.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -97,6 +121,18 @@
 				A20000000000000000000009 /* PairingKeyStore.swift */,
 			);
 			path = Control;
+			sourceTree = "<group>";
+		};
+		B40000000000000000000001 /* DJOneHub */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* DJOneHubApp.swift */,
+				B20000000000000000000002 /* DJOneHubRootView.swift */,
+				B20000000000000000000003 /* CallLifecycleCoordinator.swift */,
+				B20000000000000000000006 /* ProductCallPhase.swift */,
+				B20000000000000000000004 /* Info.plist */,
+			);
+			path = DJOneHub;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -119,6 +155,23 @@
 			productReference = A20000000000000000000005 /* DJOneHubUACProbe.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B50000000000000000000001 /* DJOneHub */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B60000000000000000000001 /* Build configuration list for PBXNativeTarget "DJOneHub" */;
+			buildPhases = (
+				B70000000000000000000001 /* Sources */,
+				B30000000000000000000001 /* Frameworks */,
+				B70000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DJOneHub;
+			productName = DJOneHub;
+			productReference = B20000000000000000000005 /* DJOneHub.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -130,6 +183,9 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					B50000000000000000000001 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -148,12 +204,20 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* DJOneHubUACProbe */,
+				B50000000000000000000001 /* DJOneHub */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A70000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B70000000000000000000002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -175,6 +239,22 @@
 				A10000000000000000000006 /* PairingKeyStore.swift in Sources */,
 				A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
 				A10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* DJOneHubApp.swift in Sources */,
+				B10000000000000000000002 /* DJOneHubRootView.swift in Sources */,
+				B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */,
+				B10000000000000000000009 /* ProductCallPhase.swift in Sources */,
+				B10000000000000000000004 /* VoiceControlProtocol.swift in Sources */,
+				B10000000000000000000005 /* VoiceControlClient.swift in Sources */,
+				B10000000000000000000006 /* PairingKeyStore.swift in Sources */,
+				B10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
+				B10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -262,6 +342,46 @@
 			};
 			name = Release;
 		};
+		B90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DJOneHub/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
+				PRODUCT_NAME = DJOneHub;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DJOneHub/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
+				PRODUCT_NAME = DJOneHub;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -279,6 +399,15 @@
 			buildConfigurations = (
 				A90000000000000000000003 /* Debug */,
 				A90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B60000000000000000000001 /* Build configuration list for PBXNativeTarget "DJOneHub" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B90000000000000000000001 /* Debug */,
+				B90000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
