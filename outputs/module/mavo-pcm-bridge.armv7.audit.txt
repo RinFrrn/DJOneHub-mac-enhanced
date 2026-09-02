@@ -1,5 +1,5 @@
 source=/src/module/mavo_pcm_bridge.c
-source_sha256=96de9a010f7b5c9452f0488c175f119d93b513c401f9526be4aaf34ca0e1eefc
+source_sha256=58dee9f21cad9fa8346a2d1c4da9d03280b5e465b57eba55202c6dc73880d6ce
 compiler=10.2.1
 binutils=2.35.2
 target=ARMv7 EABI5 soft-float (arm-linux-gnueabi)
@@ -15,7 +15,7 @@ ELF Header:
   Type:                              EXEC (Executable file)
   Machine:                           ARM
   Version:                           0x1
-  Entry point address:               0x13228
+  Entry point address:               0x1323c
   Start of program headers:          52 (bytes into file)
   Start of section headers:          41316 (bytes into file)
   Flags:                             0x5000200, Version5 EABI, soft-float ABI
@@ -44,27 +44,27 @@ File Attributes
   Tag_ABI_enum_size: int
   Tag_CPU_unaligned_access: v6
 
-Version symbols section '.gnu.version' contains 62 entries:
- Addr: 0x0000000000010a40  Offset: 0x000a40  Link: 5 (.dynsym)
+Version symbols section '.gnu.version' contains 64 entries:
+ Addr: 0x0000000000010a78  Offset: 0x000a78  Link: 5 (.dynsym)
   000:   0 (*local*)       0 (*local*)       0 (*local*)       0 (*local*)    
-  004:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)     3 (GLIBC_2.4)  
-  008:   2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     4 (GLIBC_2.4)  
-  00c:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     6 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  010:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  014:   2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     6 (GLIBC_2.4)  
-  018:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  01c:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  020:   3 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
+  004:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)  
+  008:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
+  00c:   4 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     6 (GLIBC_2.4)  
+  010:   2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)  
+  014:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
+  018:   6 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)  
+  01c:   2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
+  020:   2 (GLIBC_2.4)     3 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
   024:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  028:   1 (*global*)      2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  02c:   6 (GLIBC_2.4)     3 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  030:   2 (GLIBC_2.4)     6 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  034:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     5 (GLIBC_2.17)    2 (GLIBC_2.4)  
-  038:   3 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
-  03c:   3 (GLIBC_2.4)     3 (GLIBC_2.4)  
+  028:   2 (GLIBC_2.4)     1 (*global*)      2 (GLIBC_2.4)     3 (GLIBC_2.4)  
+  02c:   2 (GLIBC_2.4)     6 (GLIBC_2.4)     3 (GLIBC_2.4)     3 (GLIBC_2.4)  
+  030:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     6 (GLIBC_2.4)     2 (GLIBC_2.4)  
+  034:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)     5 (GLIBC_2.17) 
+  038:   2 (GLIBC_2.4)     3 (GLIBC_2.4)     2 (GLIBC_2.4)     2 (GLIBC_2.4)  
+  03c:   2 (GLIBC_2.4)     2 (GLIBC_2.4)     3 (GLIBC_2.4)     3 (GLIBC_2.4)  
 
 Version needs section '.gnu.version_r' contains 4 entries:
- Addr: 0x0000000000010abc  Offset: 0x000abc  Link: 6 (.dynstr)
+ Addr: 0x0000000000010af8  Offset: 0x000af8  Link: 6 (.dynstr)
   000000: Version: 1  File: libdl.so.2  Cnt: 1
   0x0010:   Name: GLIBC_2.4  Flags: none  Version: 6
   0x0020: Version: 1  File: ld-linux.so.3  Cnt: 1

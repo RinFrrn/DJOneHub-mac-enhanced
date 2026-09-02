@@ -22,6 +22,32 @@ struct UplinkAudioProtocolOfflineTest {
         )
         precondition(packet.suffix(16) == Data(expectedTag.prefix(16)))
 
+        var downlink = Data(packet.prefix(276))
+        downlink[5] = UplinkAudioProtocol.directionDownlink
+        let downlinkTag = HMAC<SHA256>.authenticationCode(
+            for: downlink,
+            using: SymmetricKey(data: key)
+        )
+        downlink.append(contentsOf: downlinkTag.prefix(16))
+        let decoded = try UplinkAudioProtocol.decodeDownlink(
+            downlink,
+            pairingKey: key,
+            sessionID: 0x01020304
+        )
+        precondition(decoded.sequence == 0x05060708)
+        precondition(decoded.pcm == pcm)
+
+        downlink[20] ^= 0xff
+        do {
+            _ = try UplinkAudioProtocol.decodeDownlink(
+                downlink,
+                pairingKey: key,
+                sessionID: 0x01020304
+            )
+            preconditionFailure("tampered downlink accepted")
+        } catch UplinkAudioProtocol.ProtocolError.invalidDownlinkPacket {
+        }
+
         for invalid in [Data(), Data(repeating: 0, count: 31), Data(repeating: 0, count: 33)] {
             do {
                 _ = try UplinkAudioProtocol.encodeUplink(

@@ -55,6 +55,7 @@
 #define VOICE_AUDIO_ENABLE_PATH "/sys/class/android_usb/f_audio/audio_enable"
 #define NETWORK_UPLINK_PCM_DEVICE "hw:0,0"
 #define NETWORK_DOWNLINK_PCM_DEVICE "hw:0,6"
+#define INCALL_DOWNLINK_PCM_DEVICE "hw:0,0"
 #define NETWORK_PCM_FRAME_BYTES 256U
 #define NETWORK_PCM_FRAME_SAMPLES (NETWORK_PCM_FRAME_BYTES / 2U)
 #define NETWORK_UPLINK_DEVICE_RATE 48000U
@@ -1237,6 +1238,12 @@ struct network_session {
     uint32_t tx_sequence;
     uint32_t rx_sequence;
     int64_t last_rx_usec;
+    unsigned int downlink_pcm_buffer_length;
+    unsigned char *downlink_resample_buffer;
+    size_t downlink_resample_capacity;
+    size_t downlink_resample_available;
+    volatile int media_stop;
+    volatile int downlink_failed;
     volatile int failed;
     int verbose;
 };
@@ -1923,6 +1930,11 @@ static int valid_uplink_pcm_buffer_length(unsigned int length)
            NETWORK_UPLINK_DEVICE_FRAME_BYTES % length == 0U;
 }
 
+static int valid_downlink_pcm_buffer_length(unsigned int length)
+{
+    return length >= 2U && length <= 65536U && (length & 1U) == 0U;
+}
+
 static int write_uplink_network_frame(
     struct vendor_audio *api, void *pcm, unsigned int pcm_buffer_length,
     unsigned char payload[NETWORK_PCM_FRAME_BYTES])
@@ -1960,6 +1972,146 @@ static int write_uplink_network_frame(
         }
     }
     return 0;
+}
+
+static int read_downlink_network_frame(
+    struct network_session *session,
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+{
+    unsigned int output_sample;
+    size_t remaining;
+
+    while (session->downlink_resample_available <
+           NETWORK_UPLINK_DEVICE_FRAME_BYTES) {
+        size_t offset = session->downlink_resample_available;
+        int read_result;
+
+        if (session->downlink_resample_capacity - offset <
+            session->downlink_pcm_buffer_length) {
+            log_message("error", "Media1 downlink resample buffer overflow");
+            return -1;
+        }
+        read_result = session->api->pcm_read(
+            session->downlink_pcm,
+            session->downlink_resample_buffer + offset,
+            session->downlink_pcm_buffer_length);
+
+        if (read_result != 0) {
+            int read_errno = errno;
+
+            log_message("error", "Media1 downlink PCM chunk read failed: "
+                        "offset=%u length=%u result=%d errno=%d (%s)",
+                        (unsigned int)offset,
+                        session->downlink_pcm_buffer_length,
+                        read_result, read_errno,
+                        strerror(read_errno));
+            return read_result;
+        }
+        session->downlink_resample_available +=
+            session->downlink_pcm_buffer_length;
+    }
+    for (output_sample = 0U; output_sample < NETWORK_PCM_FRAME_SAMPLES;
+         ++output_sample) {
+        unsigned int input_sample =
+            output_sample * NETWORK_UPLINK_RATE_MULTIPLIER;
+
+        payload[output_sample * 2U] =
+            session->downlink_resample_buffer[input_sample * 2U];
+        payload[output_sample * 2U + 1U] =
+            session->downlink_resample_buffer[input_sample * 2U + 1U];
+    }
+    remaining = session->downlink_resample_available -
+        NETWORK_UPLINK_DEVICE_FRAME_BYTES;
+    if (remaining != 0U) {
+        memmove(session->downlink_resample_buffer,
+                session->downlink_resample_buffer +
+                    NETWORK_UPLINK_DEVICE_FRAME_BYTES,
+                remaining);
+    }
+    session->downlink_resample_available = remaining;
+    return 0;
+}
+
+static void *incall_downlink_thread(void *opaque)
+{
+    struct network_session *session = opaque;
+    unsigned char payload[NETWORK_PCM_FRAME_BYTES];
+    unsigned char packet[NETWORK_PACKET_BYTES];
+    int64_t next_send_usec = monotonic_usec();
+    uint64_t frames = 0U;
+    uint64_t network_drops = 0U;
+    unsigned int maximum_peak = 0U;
+
+    if (next_send_usec < 0LL) {
+        session->downlink_failed = 1;
+        return NULL;
+    }
+    while (!should_stop() && !session->media_stop) {
+        int64_t current_usec;
+        unsigned int peak;
+        ssize_t sent;
+
+        if (read_downlink_network_frame(session, payload) != 0) {
+            session->downlink_failed = 1;
+            break;
+        }
+        current_usec = monotonic_usec();
+        if (current_usec < 0LL) {
+            session->downlink_failed = 1;
+            break;
+        }
+        if (current_usec < next_send_usec) {
+            usleep((unsigned int)(next_send_usec - current_usec));
+        } else if (current_usec - next_send_usec >
+                   (int64_t)NETWORK_PCM_FRAME_USEC) {
+            next_send_usec = current_usec;
+        }
+        session->tx_sequence += 1U;
+        if (session->tx_sequence == 0U) {
+            session->tx_sequence = 1U;
+        }
+        make_audio_packet(session, NETWORK_DIRECTION_DOWNLINK,
+                          session->tx_sequence, payload, packet);
+        do {
+            sent = sendto(session->socket_fd, packet, sizeof(packet), 0,
+                          (const struct sockaddr *)&session->peer,
+                          sizeof(session->peer));
+        } while (sent < 0 && errno == EINTR && !should_stop());
+        if (sent < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                network_drops += 1U;
+            } else {
+                log_message("error", "in-call downlink UDP send failed: %s",
+                            strerror(errno));
+                session->downlink_failed = 1;
+                break;
+            }
+        } else if ((size_t)sent != sizeof(packet)) {
+            log_message("error", "short in-call downlink UDP packet");
+            session->downlink_failed = 1;
+            break;
+        }
+        frames += 1U;
+        peak = pcm_s16le_peak(payload);
+        if (peak > maximum_peak) {
+            maximum_peak = peak;
+        }
+        if (frames == 1U || frames % 500U == 0U) {
+            log_message("info", "downlink Media1 progress: frames=%llu "
+                        "sequence=%u peak=%u/32768 max_peak=%u/32768 "
+                        "network_drops=%llu",
+                        (unsigned long long)frames, session->tx_sequence,
+                        peak, maximum_peak,
+                        (unsigned long long)network_drops);
+        }
+        next_send_usec += (int64_t)NETWORK_PCM_FRAME_USEC;
+        (void)pthread_testcancel();
+    }
+    log_message("info", "downlink Media1 final: frames=%llu max_peak=%u/32768 "
+                "network_drops=%llu",
+                (unsigned long long)frames, maximum_peak,
+                (unsigned long long)network_drops);
+    return NULL;
 }
 
 static int run_incall_music_tone_probe(struct vendor_audio *api)
@@ -2078,10 +2230,13 @@ static int run_uplink_media_session(
     int observed_usb_audio = 0;
     int usb_audio_changed = 0;
     int incall_mixer_enabled = 0;
+    int downlink_mixer_enabled = 0;
     int anchor_started = 0;
+    int downlink_started = 0;
     int payload_ready = 0;
     unsigned int uplink_pcm_buffer_length = 0U;
     uint32_t played_sequence = sequence;
+    pthread_t downlink_thread_id;
     uint64_t written_frames = 0U;
     uint64_t audio_frames = 0U;
     unsigned int maximum_peak = 0U;
@@ -2092,6 +2247,9 @@ static int run_uplink_media_session(
     session->peer = *source;
     session->session_id = session_id;
     session->rx_sequence = sequence;
+    session->tx_sequence = 0U;
+    session->media_stop = 0;
+    session->downlink_failed = 0;
     enqueue_uplink_frame(&jitter, payload, sequence);
 
     if (get_voice_audio_enabled(&original_usb_audio) != 0) {
@@ -2134,6 +2292,44 @@ static int run_uplink_media_session(
         goto cleanup;
     }
     session->uplink_pcm = uplink_pcm;
+    if (set_voice_mixer(session->api, MIXER_DOWNLINK, "1") != 0) {
+        goto cleanup;
+    }
+    downlink_mixer_enabled = 1;
+    session->downlink_pcm = session->api->pcm_open(
+        INCALL_DOWNLINK_PCM_DEVICE, PCM_CAPTURE_FLAGS,
+        NETWORK_UPLINK_DEVICE_RATE, PCM_CHANNELS, PCM_FORMAT_S16_LE,
+        PCM_HOSTLESS);
+    if (session->downlink_pcm == NULL) {
+        log_message("error", "downlink listener could not open %s",
+                    INCALL_DOWNLINK_PCM_DEVICE);
+        goto cleanup;
+    }
+    session->downlink_pcm_buffer_length =
+        session->api->pcm_buffer_len(session->downlink_pcm);
+    if (!valid_downlink_pcm_buffer_length(
+            session->downlink_pcm_buffer_length)) {
+        log_message("error", "downlink listener got invalid %s buffer length %u",
+                    INCALL_DOWNLINK_PCM_DEVICE,
+                    session->downlink_pcm_buffer_length);
+        goto cleanup;
+    }
+    session->downlink_resample_capacity =
+        NETWORK_UPLINK_DEVICE_FRAME_BYTES +
+        session->downlink_pcm_buffer_length;
+    session->downlink_resample_buffer =
+        malloc(session->downlink_resample_capacity);
+    if (session->downlink_resample_buffer == NULL) {
+        log_message("error", "could not allocate downlink resample buffer");
+        goto cleanup;
+    }
+    session->downlink_resample_available = 0U;
+    if (pthread_create(&downlink_thread_id, NULL, incall_downlink_thread,
+                       session) != 0) {
+        log_message("error", "could not start in-call downlink worker");
+        goto cleanup;
+    }
+    downlink_started = 1;
     session->last_rx_usec = monotonic_usec();
     next_frame_usec = session->last_rx_usec;
     if (session->last_rx_usec < 0LL) {
@@ -2146,19 +2342,25 @@ static int run_uplink_media_session(
     log_message("info", "authenticated uplink session active: peer=%s:%u "
                 "session=%u network=8000/mono/S16_LE frame=256 "
                 "Media1=48000/mono/S16_LE Incall_Music pcm_buffer=%u "
-                "chunks=%u jitter=%u/%u",
+                "chunks=%u jitter=%u/%u downlink=%s/%u",
                 inet_ntoa(source->sin_addr),
                 (unsigned int)ntohs(source->sin_port), session_id,
                 uplink_pcm_buffer_length,
                 NETWORK_UPLINK_DEVICE_FRAME_BYTES /
                     uplink_pcm_buffer_length,
-                jitter.count, UPLINK_JITTER_CAPACITY);
+                jitter.count, UPLINK_JITTER_CAPACITY,
+                INCALL_DOWNLINK_PCM_DEVICE,
+                session->downlink_pcm_buffer_length);
 
     while (!should_stop()) {
         int64_t current_usec = monotonic_usec();
 
         if (current_usec < 0LL) {
             log_message("error", "uplink media clock failed");
+            goto cleanup;
+        }
+        if (session->downlink_failed) {
+            log_message("error", "in-call downlink worker failed");
             goto cleanup;
         }
         if (current_usec < next_frame_usec) {
@@ -2229,6 +2431,23 @@ cleanup:
                     UPLINK_JITTER_CAPACITY,
                     (unsigned long long)jitter.dropped);
     }
+    session->media_stop = 1;
+    if (downlink_started) {
+        (void)pthread_cancel(downlink_thread_id);
+        (void)pthread_join(downlink_thread_id, NULL);
+        downlink_started = 0;
+    }
+    if (session->downlink_pcm != NULL) {
+        if (session->api->pcm_close(session->downlink_pcm) != 0) {
+            log_message("warn", "could not close downlink listener PCM cleanly");
+            result = EXIT_FAILURE;
+        }
+        session->downlink_pcm = NULL;
+    }
+    free(session->downlink_resample_buffer);
+    session->downlink_resample_buffer = NULL;
+    session->downlink_resample_capacity = 0U;
+    session->downlink_resample_available = 0U;
     session->uplink_pcm = NULL;
     if (uplink_pcm != NULL && session->api->pcm_close(uplink_pcm) != 0) {
         log_message("warn", "could not close uplink listener PCM cleanly");
@@ -2236,6 +2455,10 @@ cleanup:
     }
     if (incall_mixer_enabled &&
         set_voice_mixer(session->api, MIXER_UPLINK, "0") != 0) {
+        result = EXIT_FAILURE;
+    }
+    if (downlink_mixer_enabled &&
+        set_voice_mixer(session->api, MIXER_DOWNLINK, "0") != 0) {
         result = EXIT_FAILURE;
     }
     if (anchor_started &&

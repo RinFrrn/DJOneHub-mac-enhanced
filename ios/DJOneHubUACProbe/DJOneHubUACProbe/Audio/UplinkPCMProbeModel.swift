@@ -9,13 +9,16 @@ final class UplinkPCMProbeModel: ObservableObject {
     @Published private(set) var stateText = "停止"
     @Published private(set) var detailText = ""
     @Published private(set) var sentFrames: UInt64 = 0
+    @Published private(set) var receivedFrames: UInt64 = 0
     @Published private(set) var inputLevel: Double = 0
+    @Published private(set) var downlinkLevel: Double = 0
     @Published private(set) var inputFormatText = "—"
 
     private let session = AVAudioSession.sharedInstance()
     private var engine: AVAudioEngine?
     private var converter: AVAudioConverter?
     private var pipeline: UplinkPacketPipeline?
+    private var downlinkPlayer: DownlinkPCMPlayer?
 
     func start(pairingKey: Data) {
         guard !isRunning else { return }
@@ -44,16 +47,20 @@ final class UplinkPCMProbeModel: ObservableObject {
         let input = engine?.inputNode
         input?.removeTap(onBus: 0)
         engine?.stop()
+        downlinkPlayer?.stop()
         pipeline?.stop()
         pipeline = nil
         converter = nil
+        downlinkPlayer = nil
         engine = nil
+        try? session.overrideOutputAudioPort(.none)
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         isRunning = false
         isTestTone = false
         stateText = "已停止"
         detailText = "模块侧将在 3 秒无包后关闭 D5 并恢复原 UAC 状态"
         inputLevel = 0
+        downlinkLevel = 0
     }
 
     func startTestTone(pairingKey: Data) {
@@ -70,7 +77,9 @@ final class UplinkPCMProbeModel: ObservableObject {
         let pipeline = makePipeline(pairingKey: pairingKey, sessionID: sessionID)
         self.pipeline = pipeline
         sentFrames = 0
+        receivedFrames = 0
         inputLevel = 0.25
+        downlinkLevel = 0
         inputFormatText = "1000 Hz 固定音 → 8000 Hz / 1 ch / S16_LE"
         stateText = "连接模块 UDP…"
         detailText = "固定峰值 8192/32768；用于隔离麦克风采集问题"
@@ -82,15 +91,26 @@ final class UplinkPCMProbeModel: ObservableObject {
 
     private func startAuthorized(pairingKey: Data) {
         do {
-            try session.setCategory(.record, mode: .measurement, options: [])
+            try session.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.defaultToSpeaker]
+            )
             try session.setPreferredSampleRate(48_000)
             try session.setPreferredIOBufferDuration(0.016)
             try session.setActive(true)
             if let builtInMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
                 try session.setPreferredInput(builtInMic)
             }
+            // A connected QDC507 also advertises a USB Audio playback sink.
+            // defaultToSpeaker does not override that external route, so force
+            // the receiver side of this ECM bridge back to the iPhone speaker.
+            try session.overrideOutputAudioPort(.speaker)
             guard session.currentRoute.inputs.contains(where: { $0.portType == .builtInMic }) else {
                 throw ProbeError.builtInMicrophoneNotSelected
+            }
+            guard session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }) else {
+                throw ProbeError.builtInSpeakerNotSelected
             }
 
             let engine = AVAudioEngine()
@@ -112,7 +132,15 @@ final class UplinkPCMProbeModel: ObservableObject {
             while sessionID == 0 {
                 sessionID = UInt32.random(in: 1 ... UInt32.max)
             }
-            let pipeline = makePipeline(pairingKey: pairingKey, sessionID: sessionID)
+            let player = AVAudioPlayerNode()
+            let downlinkPlayer = DownlinkPCMPlayer(player: player, format: outputFormat)
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
+            let pipeline = makePipeline(
+                pairingKey: pairingKey,
+                sessionID: sessionID,
+                downlinkPlayer: downlinkPlayer
+            )
 
             input.installTap(onBus: 0, bufferSize: 768, format: inputFormat) { buffer, _ in
                 do {
@@ -130,15 +158,18 @@ final class UplinkPCMProbeModel: ObservableObject {
             self.engine = engine
             self.converter = converter
             self.pipeline = pipeline
+            self.downlinkPlayer = downlinkPlayer
             sentFrames = 0
+            receivedFrames = 0
             inputLevel = 0
+            downlinkLevel = 0
             inputFormatText = String(
                 format: "%.0f Hz / %u ch → 8000 Hz / 1 ch / S16_LE",
                 inputFormat.sampleRate,
                 inputFormat.channelCount
             )
             stateText = "连接模块 UDP…"
-            detailText = "只发送上行；不打开 USB Audio，不读取 D6"
+            detailText = "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
             isTestTone = false
             isRunning = true
             pipeline.start()
@@ -146,7 +177,10 @@ final class UplinkPCMProbeModel: ObservableObject {
             pipeline?.stop()
             pipeline = nil
             converter = nil
+            downlinkPlayer?.stop()
+            downlinkPlayer = nil
             engine = nil
+            try? session.overrideOutputAudioPort(.none)
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             isRunning = false
             stateText = "无法启动 PCM 上行"
@@ -154,7 +188,11 @@ final class UplinkPCMProbeModel: ObservableObject {
         }
     }
 
-    private func makePipeline(pairingKey: Data, sessionID: UInt32) -> UplinkPacketPipeline {
+    private func makePipeline(
+        pairingKey: Data,
+        sessionID: UInt32,
+        downlinkPlayer: DownlinkPCMPlayer? = nil
+    ) -> UplinkPacketPipeline {
         UplinkPacketPipeline(
             pairingKey: pairingKey,
             sessionID: sessionID,
@@ -171,6 +209,15 @@ final class UplinkPCMProbeModel: ObservableObject {
                     self.inputLevel = peak
                 }
             },
+            onDownlink: { [weak self] pcm, frames in
+                let peak = Self.normalizedPCM16Peak(pcm)
+                downlinkPlayer?.enqueue(pcm)
+                Task { @MainActor in
+                    guard let self, self.isRunning else { return }
+                    self.receivedFrames = frames
+                    self.downlinkLevel = peak
+                }
+            },
             onError: { [weak self] error in
                 Task { @MainActor in
                     guard let self else { return }
@@ -180,6 +227,23 @@ final class UplinkPCMProbeModel: ObservableObject {
                 }
             }
         )
+    }
+
+    func playDownlinkDiagnosticTone() {
+        guard isRunning, !isTestTone, let downlinkPlayer else { return }
+        downlinkPlayer.enqueueDiagnosticTone()
+    }
+
+    nonisolated private static func normalizedPCM16Peak(_ pcm: Data) -> Double {
+        guard pcm.count >= MemoryLayout<Int16>.size else { return 0 }
+        var peak: Int32 = 0
+        pcm.withUnsafeBytes { bytes in
+            let samples = bytes.bindMemory(to: Int16.self)
+            for sample in samples {
+                peak = max(peak, abs(Int32(Int16(littleEndian: sample))))
+            }
+        }
+        return min(1, Double(peak) / Double(Int16.max))
     }
 
     private static func convert(
@@ -221,6 +285,7 @@ final class UplinkPCMProbeModel: ObservableObject {
 
     private enum ProbeError: Error, LocalizedError {
         case builtInMicrophoneNotSelected
+        case builtInSpeakerNotSelected
         case inputFormatUnavailable
         case converterUnavailable
         case outputBufferUnavailable
@@ -229,11 +294,89 @@ final class UplinkPCMProbeModel: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .builtInMicrophoneNotSelected: return "iOS 没有采用内置麦克风，已拒绝发送以避免回声环路"
+            case .builtInSpeakerNotSelected: return "iOS 仍将下行送往模块 USB Audio，未切换到 iPhone 扬声器"
             case .inputFormatUnavailable: return "无法读取麦克风 PCM 格式"
             case .converterUnavailable: return "无法创建 8 kHz S16_LE 转换器"
             case .outputBufferUnavailable: return "无法分配 8 kHz PCM 缓冲区"
             case .conversionFailed: return "AVAudioConverter 返回错误"
             }
+        }
+    }
+}
+
+private final class DownlinkPCMPlayer: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "DJOneHub.DownlinkPCM")
+    private let player: AVAudioPlayerNode
+    private let format: AVAudioFormat
+    private var bufferedFrames = 0
+    private var started = false
+    private var stopped = false
+
+    init(player: AVAudioPlayerNode, format: AVAudioFormat) {
+        self.player = player
+        self.format = format
+    }
+
+    func enqueue(_ pcm: Data) {
+        queue.async { [self] in
+            scheduleLocked(pcm)
+        }
+    }
+
+    func enqueueDiagnosticTone() {
+        queue.async { [self] in
+            guard !stopped else { return }
+            var sampleIndex = 0
+            for _ in 0 ..< 32 {
+                var samples = [Int16](
+                    repeating: 0,
+                    count: Int(UplinkAudioProtocol.samplesPerFrame)
+                )
+                for index in samples.indices {
+                    let phase = 2 * Double.pi * 700 * Double(sampleIndex) / 8_000
+                    samples[index] = Int16(sin(phase) * 8_192)
+                    sampleIndex += 1
+                }
+                scheduleLocked(samples.withUnsafeBytes { Data($0) })
+            }
+        }
+    }
+
+    private func scheduleLocked(_ pcm: Data) {
+        guard !stopped,
+              pcm.count == UplinkAudioProtocol.pcmBytes,
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: format,
+                  frameCapacity: AVAudioFrameCount(UplinkAudioProtocol.samplesPerFrame)
+              ) else { return }
+            buffer.frameLength = AVAudioFrameCount(UplinkAudioProtocol.samplesPerFrame)
+            guard let destination = buffer.mutableAudioBufferList.pointee.mBuffers.mData else {
+                return
+            }
+            pcm.withUnsafeBytes { source in
+                guard let sourceAddress = source.baseAddress else { return }
+                memcpy(destination, sourceAddress, pcm.count)
+            }
+            bufferedFrames += 1
+            player.scheduleBuffer(buffer) { [weak self] in
+                self?.queue.async {
+                    guard let self else { return }
+                    self.bufferedFrames = max(0, self.bufferedFrames - 1)
+                }
+            }
+            if !started, bufferedFrames >= 4 {
+                player.play()
+                started = true
+            }
+    }
+
+    func stop() {
+        queue.async { [self] in
+            guard !stopped else { return }
+            stopped = true
+            player.stop()
+            bufferedFrames = 0
+            started = false
         }
     }
 }
@@ -244,6 +387,7 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
     private let sessionID: UInt32
     private let onState: @Sendable (String) -> Void
     private let onProgress: @Sendable (UInt64, Double) -> Void
+    private let onDownlink: @Sendable (Data, UInt64) -> Void
     private let onError: @Sendable (String) -> Void
     private var connection: NWConnection?
     private var toneTimer: DispatchSourceTimer?
@@ -251,6 +395,8 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
     private var pendingPCM = Data()
     private var sequence: UInt32 = 0
     private var frames: UInt64 = 0
+    private var downlinkFrames: UInt64 = 0
+    private var lastDownlinkSequence: UInt32 = 0
     private var stopped = false
 
     init(
@@ -258,12 +404,14 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
         sessionID: UInt32,
         onState: @escaping @Sendable (String) -> Void,
         onProgress: @escaping @Sendable (UInt64, Double) -> Void,
+        onDownlink: @escaping @Sendable (Data, UInt64) -> Void,
         onError: @escaping @Sendable (String) -> Void
     ) {
         self.pairingKey = pairingKey
         self.sessionID = sessionID
         self.onState = onState
         self.onProgress = onProgress
+        self.onDownlink = onDownlink
         self.onError = onError
     }
 
@@ -280,6 +428,7 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
                     switch state {
                     case .ready:
                         self.onState("上行发送中")
+                        self.receiveDownlinkLocked(connection)
                     case .failed(let error):
                         self.failLocked("UDP 连接失败：\(error.localizedDescription)")
                     case .cancelled:
@@ -290,6 +439,39 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
                 }
             }
             connection.start(queue: queue)
+        }
+    }
+
+    private func receiveDownlinkLocked(_ connection: NWConnection) {
+        guard !stopped else { return }
+        connection.receiveMessage { [weak self] data, _, _, error in
+            guard let self else { return }
+            self.queue.async {
+                guard !self.stopped else { return }
+                if let error {
+                    self.failLocked("UDP 下行接收失败：\(error.localizedDescription)")
+                    return
+                }
+                if let data, !data.isEmpty {
+                    do {
+                        let frame = try UplinkAudioProtocol.decodeDownlink(
+                            data,
+                            pairingKey: self.pairingKey,
+                            sessionID: self.sessionID
+                        )
+                        if self.lastDownlinkSequence == 0 ||
+                            Int32(bitPattern: frame.sequence &- self.lastDownlinkSequence) > 0 {
+                            self.lastDownlinkSequence = frame.sequence
+                            self.downlinkFrames &+= 1
+                            self.onDownlink(frame.pcm, self.downlinkFrames)
+                        }
+                    } catch {
+                        self.failLocked(error.localizedDescription)
+                        return
+                    }
+                }
+                self.receiveDownlinkLocked(connection)
+            }
         }
     }
 

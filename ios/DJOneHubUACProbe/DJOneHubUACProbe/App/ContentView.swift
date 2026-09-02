@@ -70,16 +70,28 @@ struct ContentView: View {
     }
 
     private var uplinkPCMSection: some View {
-        Section("ECM 蜂窝上行 PCM（DSP InCall 实测）") {
+        Section("ECM 蜂窝双向 PCM（DSP InCall 实测）") {
             LabeledContent("状态", value: uplinkProbe.stateText)
             LabeledContent("格式", value: uplinkProbe.inputFormatText)
             LabeledContent("已发送", value: "\(uplinkProbe.sentFrames) 帧")
+            LabeledContent("已接收", value: "\(uplinkProbe.receivedFrames) 帧")
+            LabeledContent(
+                "下行峰值",
+                value: String(format: "%.0f / 32768", uplinkProbe.downlinkLevel * 32_768)
+            )
+            Text("麦克风上行")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             ProgressView(value: uplinkProbe.inputLevel)
+            Text("蜂窝下行")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ProgressView(value: uplinkProbe.downlinkLevel)
 
             Button(
                 uplinkProbe.isRunning
-                    ? (uplinkProbe.isTestTone ? "停止 1 kHz 测试音" : "停止 iPhone 麦克风上行")
-                    : "开始 iPhone 麦克风上行"
+                    ? (uplinkProbe.isTestTone ? "停止 1 kHz 测试音" : "停止双向通话 PCM")
+                    : "开始双向通话 PCM"
             ) {
                 if uplinkProbe.isRunning {
                     uplinkProbe.stop()
@@ -90,6 +102,11 @@ struct ContentView: View {
             .disabled(
                 (!uplinkProbe.isRunning && (!voiceControl.canControlCalls || !voiceControl.hasActiveCall))
             )
+
+            Button("播放 iPhone 本地扬声器检查音") {
+                uplinkProbe.playDownlinkDiagnosticTone()
+            }
+            .disabled(!uplinkProbe.isRunning || uplinkProbe.isTestTone)
 
             Button("发送 1 kHz 固定测试音") {
                 if let key = voiceControl.pairingKeyForUplinkProbe() {
@@ -106,7 +123,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("仅验证 iPhone 内置麦克风 → ECM/UDP → 模块 Media1/Incall_Music → modem voice DSP → 蜂窝对端。音频为 8000 Hz、单声道、signed 16-bit little-endian，每帧 256 字节（16 ms）；不读写 UAC PCM，不接 CallKit。请先让 STATUS 显示“通话中”。")
+            Text("双向链路：iPhone 内置麦克风 → ECM/UDP → 模块 Media1/Incall_Music → modem voice DSP；modem VOC_REC_DL → Media1 capture → ECM/UDP → iPhone 扬声器。音频为 8000 Hz、单声道、signed 16-bit little-endian，每帧 256 字节（16 ms）；不读写 UAC PCM，不接 CallKit。请先让 STATUS 显示“通话中”。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
