@@ -234,5 +234,6 @@ CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
   指标不包含 PCM 内容或配对密钥，签名版本已安装，等待真机通话数值验收。
 - [x] 将 macOS 已验证的低延迟策略迁移到 ECM PCM：拨号/接听即预热 AudioSession、
   AVAudioEngine 和模块 PCM，预热阶段仅发认证静音；QMI active 后才放行麦克风与下行；
-  建链 STATUS 提升到 250ms，并保留 64ms 下行预缓冲，等待真机首音延迟验收。
+  建链 STATUS 提升到 250ms，并保留 64ms 下行预缓冲；真机来电接听首音延迟已确认基本
+  可以接受，主动拨号及挂断后连续重拨也已通过，旧 UDP session 未影响下一通电话。
 - [ ] 完成 ECM 拔插、锁屏及前后台切换验收。
