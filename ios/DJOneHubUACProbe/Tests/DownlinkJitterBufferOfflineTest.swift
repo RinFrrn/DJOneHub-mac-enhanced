@@ -6,6 +6,7 @@ struct DownlinkJitterBufferOfflineTest {
         testInOrderAndDuplicate()
         testReordering()
         testLossConcealment()
+        testLongLossBurstFastForwards()
         testSequenceWrap()
         testLargeJumpReset()
         testInvalidFrame()
@@ -40,6 +41,22 @@ struct DownlinkJitterBufferOfflineTest {
         precondition(result.frames[0].sequence == 21 && result.frames[0].concealed)
         precondition(result.frames[1].sequence == 22 && result.frames[1].concealed)
         precondition(result.frames[2...] == [frame(23, value: 23), frame(24, value: 24), frame(25, value: 25)][...])
+    }
+
+    private static func testLongLossBurstFastForwards() {
+        var buffer = DownlinkJitterBuffer()
+        _ = buffer.push(sequence: 30, pcm: pcm(30))
+        precondition(buffer.push(sequence: 40, pcm: pcm(40)).frames.isEmpty)
+        precondition(buffer.push(sequence: 41, pcm: pcm(41)).frames.isEmpty)
+        let recovered = buffer.push(sequence: 42, pcm: pcm(42))
+
+        precondition(recovered.reset)
+        precondition(recovered.frames == [
+            frame(40, value: 40),
+            frame(41, value: 41),
+            frame(42, value: 42),
+        ])
+        precondition(buffer.push(sequence: 31, pcm: pcm(31)).dropped)
     }
 
     private static func testSequenceWrap() {

@@ -101,6 +101,17 @@ xcrun swiftc \
 /tmp/djonehub-uplink-protocol-test
 ```
 
+下行播放队列状态机测试覆盖首次预缓冲、欠载后的独立重缓冲阈值、队列上限，以及重置后
+迟到 completion 不得影响新会话：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Audio/DownlinkPlayoutQueueState.swift \
+  ios/DJOneHubUACProbe/Tests/DownlinkPlayoutQueueStateOfflineTest.swift \
+  -o /tmp/djonehub-playout-state-test
+/tmp/djonehub-playout-state-test
+```
+
 开发测试配对包解析测试：
 
 ```sh

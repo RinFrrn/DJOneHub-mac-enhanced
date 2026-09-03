@@ -53,17 +53,13 @@ struct LocalRingbackGenerator {
 }
 
 final class DownlinkPCMPlayer: @unchecked Sendable {
-    private static let startupFrameCount = 4
-    private static let maximumBufferedFrameCount = 16
-
     private let queue = DispatchQueue(label: "DJOneHub.DownlinkPCM")
     private let player: AVAudioPlayerNode
     private let format: AVAudioFormat
     private let onMetrics: @Sendable (DownlinkPlaybackMetrics) -> Void
     private var jitterBuffer = DownlinkJitterBuffer()
     private var metrics = DownlinkPlaybackMetrics()
-    private var bufferedFrames = 0
-    private var started = false
+    private var playoutState = DownlinkPlayoutQueueState()
     private var stopped = false
     private var mediaEnabled: Bool
     private var localRingbackEnabled = false
@@ -105,8 +101,7 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
             mediaEnabled = enabled
             player.stop()
             jitterBuffer.reset()
-            bufferedFrames = 0
-            started = false
+            playoutState.reset()
         }
     }
 
@@ -144,12 +139,6 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
                   pcmFormat: format,
                   frameCapacity: AVAudioFrameCount(UplinkAudioProtocol.samplesPerFrame)
               ) else { return }
-        guard bufferedFrames < Self.maximumBufferedFrameCount else {
-            if countQueueDrop {
-                metrics.recordQueueDrop()
-            }
-            return
-        }
         buffer.frameLength = AVAudioFrameCount(UplinkAudioProtocol.samplesPerFrame)
         guard let destination = buffer.mutableAudioBufferList.pointee.mBuffers.mData else {
             return
@@ -158,22 +147,27 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
             guard let sourceAddress = source.baseAddress else { return }
             memcpy(destination, sourceAddress, pcm.count)
         }
-        bufferedFrames += 1
+        let decision = playoutState.enqueue()
+        guard decision != .drop else {
+            if countQueueDrop {
+                metrics.recordQueueDrop()
+            }
+            return
+        }
+        let generation = playoutState.generation
         player.scheduleBuffer(buffer) { [weak self] in
             self?.queue.async {
                 guard let self else { return }
-                self.bufferedFrames = max(0, self.bufferedFrames - 1)
-                if self.started, self.bufferedFrames == 0 {
+                if self.playoutState.complete(generation: generation) ==
+                    .pauseAndRebuffer {
                     self.player.pause()
-                    self.started = false
                     self.metrics.recordRebuffer()
                     self.publishMetricsLocked()
                 }
             }
         }
-        if !started, bufferedFrames >= Self.startupFrameCount {
+        if decision == .scheduleAndPlay {
             player.play()
-            started = true
         }
     }
 
@@ -187,8 +181,7 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
             stopped = true
             player.stop()
             jitterBuffer.reset()
-            bufferedFrames = 0
-            started = false
+            playoutState.reset()
         }
     }
 }

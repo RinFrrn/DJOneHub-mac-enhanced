@@ -22,6 +22,7 @@ struct DownlinkJitterBuffer {
     struct Configuration {
         var frameBytes = UplinkAudioProtocol.pcmBytes
         var reorderWindow = 3
+        var maximumConcealmentFrames: Int32 = 3
         var maximumSequenceJump: Int32 = 64
     }
 
@@ -32,7 +33,12 @@ struct DownlinkJitterBuffer {
     init(configuration: Configuration = .init()) {
         precondition(configuration.frameBytes > 0)
         precondition(configuration.reorderWindow > 0)
+        precondition(configuration.maximumConcealmentFrames > 0)
         precondition(configuration.maximumSequenceJump > 0)
+        precondition(
+            configuration.maximumSequenceJump >=
+                configuration.maximumConcealmentFrames
+        )
         self.configuration = configuration
     }
 
@@ -74,6 +80,14 @@ struct DownlinkJitterBuffer {
         drainContiguous(into: &output)
         while !pending.isEmpty, pending.count >= configuration.reorderWindow,
               let missing = expectedSequence {
+            if let nearest = nearestPendingSequence(after: missing),
+               Self.forwardDistance(from: missing, to: nearest) >
+                   configuration.maximumConcealmentFrames {
+                expectedSequence = nearest
+                didReset = true
+                drainContiguous(into: &output)
+                continue
+            }
             output.append(
                 DownlinkPlayoutFrame(
                     sequence: missing,
@@ -106,6 +120,17 @@ struct DownlinkJitterBuffer {
             )
             expectedSequence = Self.nextSequence(after: expected)
         }
+    }
+
+    private func nearestPendingSequence(after sequence: UInt32) -> UInt32? {
+        pending.keys.min {
+            Self.forwardDistance(from: sequence, to: $0) <
+                Self.forwardDistance(from: sequence, to: $1)
+        }
+    }
+
+    private static func forwardDistance(from first: UInt32, to second: UInt32) -> Int32 {
+        Int32(bitPattern: second &- first)
     }
 
     private static func nextSequence(after sequence: UInt32) -> UInt32 {
