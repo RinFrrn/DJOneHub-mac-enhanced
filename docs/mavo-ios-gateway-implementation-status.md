@@ -94,7 +94,8 @@ pairing 和通话自动启停收敛成正式
 
 - 模块重采样器通过严格 C11 告警、Address/Undefined Sanitizer、跨帧连续性、分块与连续
   输入一致性、DC 增益、通带及带外抑制测试；ARMv7 bridge 同时通过 GCC 静态分析和既有
-  ELF/glibc 兼容性审计。真机听感与长通话稳定性仍待新固定产物部署后验收。
+  ELF/glibc 兼容性审计。固定产物部署到真实 QDC507 后，iPhone 经 ECM 的双向通话音频正常，
+  首轮真机听感与时序验收通过；长通话稳定性仍待单独验证。
 - 主机严格 C11 语法检查通过（仅保留原有 Apple Clang 的动态 `vsnprintf` 提示）。
 - Clang 静态分析通过，无诊断项。
 - HMAC-SHA256 已知向量通过。
