@@ -57,9 +57,23 @@ enum ProductCallPhase: Equatable {
         }
     }
 
-    var shouldEnableCallMedia: Bool {
+    var shouldEnableUplink: Bool {
         if case .active = self { return true }
         return false
+    }
+
+    var shouldEnableDownlink: Bool {
+        switch self {
+        case .placingCall, .dialing, .answering, .active:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func shouldGenerateLocalRingback(calls: [VoiceCallSnapshot]) -> Bool {
+        guard case .dialing(let callID) = self else { return false }
+        return calls.contains { $0.id == callID && $0.state == 0x05 }
     }
 
     var prefersFastStatusPolling: Bool {
@@ -98,7 +112,10 @@ enum ProductCallPhase: Equatable {
         if let call = calls.first(where: { $0.state == 0x02 || $0.state == 0x07 }) {
             return .incoming(call.id)
         }
-        if let call = calls.first(where: { [UInt8(0x01), 0x04, 0x05].contains($0.state) }) {
+        if calls.contains(where: { $0.state == 0x08 }) {
+            return .ending
+        }
+        if let call = calls.first(where: { [UInt8(0x01), 0x04, 0x05, 0x0A].contains($0.state) }) {
             return .dialing(call.id)
         }
         if isBusy, !shouldPollStatus {

@@ -5,6 +5,9 @@ import Foundation
 final class CallAudioCoordinator: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isMediaEnabled = false
+    @Published private(set) var isUplinkEnabled = false
+    @Published private(set) var isDownlinkEnabled = false
+    @Published private(set) var isLocalRingbackEnabled = false
     @Published private(set) var isTestTone = false
     @Published private(set) var isInterrupted = false
     @Published private(set) var hasActiveRequest = false
@@ -26,7 +29,9 @@ final class CallAudioCoordinator: ObservableObject {
     private var playerNode: AVAudioPlayerNode?
     private var networkFormat: AVAudioFormat?
     private var notificationObservers: [NSObjectProtocol] = []
-    private var desiredMediaEnabled = false
+    private var desiredUplinkEnabled = false
+    private var desiredDownlinkEnabled = false
+    private var desiredLocalRingbackEnabled = false
     private var startGeneration: UInt64 = 0
 
     init() {
@@ -39,7 +44,12 @@ final class CallAudioCoordinator: ObservableObject {
         }
     }
 
-    func start(pairingKey: Data, mediaEnabled: Bool = true) {
+    func start(
+        pairingKey: Data,
+        uplinkEnabled: Bool = true,
+        downlinkEnabled: Bool = true,
+        localRingbackEnabled: Bool = false
+    ) {
         guard !isRunning, !hasActiveRequest, !isInterrupted else { return }
         guard pairingKey.count == 32 else {
             stateText = "无法启动"
@@ -48,8 +58,13 @@ final class CallAudioCoordinator: ObservableObject {
         }
         startGeneration &+= 1
         let generation = startGeneration
-        desiredMediaEnabled = mediaEnabled
+        desiredUplinkEnabled = uplinkEnabled
+        desiredDownlinkEnabled = downlinkEnabled
+        desiredLocalRingbackEnabled = localRingbackEnabled
         isMediaEnabled = false
+        isUplinkEnabled = false
+        isDownlinkEnabled = false
+        isLocalRingbackEnabled = false
         hasActiveRequest = true
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -83,8 +98,10 @@ final class CallAudioCoordinator: ObservableObject {
         playerNode = player
         networkFormat = outputFormat
         pipeline.start()
-        stateText = mediaEnabled ? "请求麦克风权限…" : "正在预热通话音频…"
-        detailText = mediaEnabled ? "" : "麦克风和下行将在通话接通后放行"
+        stateText = uplinkEnabled || downlinkEnabled ? "请求麦克风权限…" : "正在预热通话音频…"
+        detailText = downlinkEnabled && !uplinkEnabled
+            ? "将播放回铃音和运营商提示；麦克风在接通后放行"
+            : ""
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor in
                 guard let self,
@@ -109,19 +126,16 @@ final class CallAudioCoordinator: ObservableObject {
         }
     }
 
-    func setMediaEnabled(_ enabled: Bool) {
+    func setMediaEnabled(uplink: Bool, downlink: Bool, localRingback: Bool) {
         guard !isTestTone else { return }
-        desiredMediaEnabled = enabled
+        desiredUplinkEnabled = uplink
+        desiredDownlinkEnabled = downlink
+        desiredLocalRingbackEnabled = localRingback
         guard isRunning else { return }
-        pipeline?.setMediaEnabled(enabled)
-        downlinkPlayer?.setMediaEnabled(enabled)
-        isMediaEnabled = enabled
-        inputLevel = enabled ? inputLevel : 0
-        downlinkLevel = enabled ? downlinkLevel : 0
-        stateText = enabled ? "双向 PCM 传输中" : "通话音频已预热"
-        detailText = enabled
-            ? "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
-            : "仅发送认证静音保活；麦克风和下行尚未放行"
+        pipeline?.setMediaEnabled(uplink)
+        downlinkPlayer?.setMediaEnabled(downlink)
+        downlinkPlayer?.setLocalRingbackEnabled(localRingback)
+        applyMediaState(uplink: uplink, downlink: downlink)
     }
 
     func stop() {
@@ -130,7 +144,12 @@ final class CallAudioCoordinator: ObservableObject {
         hasActiveRequest = false
         isRunning = false
         isMediaEnabled = false
-        desiredMediaEnabled = false
+        isUplinkEnabled = false
+        isDownlinkEnabled = false
+        isLocalRingbackEnabled = false
+        desiredUplinkEnabled = false
+        desiredDownlinkEnabled = false
+        desiredLocalRingbackEnabled = false
         isTestTone = false
         stateText = "已停止"
         detailText = "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
@@ -164,7 +183,9 @@ final class CallAudioCoordinator: ObservableObject {
             return
         }
         startGeneration &+= 1
-        desiredMediaEnabled = true
+        desiredUplinkEnabled = true
+        desiredDownlinkEnabled = true
+        desiredLocalRingbackEnabled = false
         hasActiveRequest = true
         var sessionID: UInt32 = 0
         while sessionID == 0 {
@@ -183,6 +204,9 @@ final class CallAudioCoordinator: ObservableObject {
         isTestTone = true
         isRunning = true
         isMediaEnabled = true
+        isUplinkEnabled = true
+        isDownlinkEnabled = true
+        isLocalRingbackEnabled = false
         pipeline.start()
         pipeline.startTestTone()
     }
@@ -259,16 +283,15 @@ final class CallAudioCoordinator: ObservableObject {
                 inputFormat.sampleRate,
                 inputFormat.channelCount
             )
-            let mediaEnabled = desiredMediaEnabled
-            stateText = mediaEnabled ? "连接模块 UDP…" : "正在预热模块 PCM…"
-            detailText = mediaEnabled
-                ? "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
-                : "仅发送认证静音保活；麦克风和下行尚未放行"
+            let uplinkEnabled = desiredUplinkEnabled
+            let downlinkEnabled = desiredDownlinkEnabled
+            let localRingbackEnabled = desiredLocalRingbackEnabled
             isTestTone = false
             isRunning = true
-            isMediaEnabled = mediaEnabled
-            pipeline.setMediaEnabled(mediaEnabled)
-            downlinkPlayer.setMediaEnabled(mediaEnabled)
+            pipeline.setMediaEnabled(uplinkEnabled)
+            downlinkPlayer.setMediaEnabled(downlinkEnabled)
+            downlinkPlayer.setLocalRingbackEnabled(localRingbackEnabled)
+            applyMediaState(uplink: uplinkEnabled, downlink: downlinkEnabled)
         } catch {
             pipeline?.stop()
             pipeline = nil
@@ -282,6 +305,9 @@ final class CallAudioCoordinator: ObservableObject {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             isRunning = false
             isMediaEnabled = false
+            isUplinkEnabled = false
+            isDownlinkEnabled = false
+            isLocalRingbackEnabled = false
             hasActiveRequest = false
             stateText = "无法启动 PCM 上行"
             detailText = error.localizedDescription
@@ -301,7 +327,13 @@ final class CallAudioCoordinator: ObservableObject {
             onState: { [weak self] state in
                 Task { @MainActor in
                     guard let self, self.isRunning else { return }
-                    self.stateText = self.desiredMediaEnabled ? state : "通话音频已预热"
+                    if self.desiredUplinkEnabled && self.desiredDownlinkEnabled {
+                        self.stateText = state
+                    } else if self.desiredDownlinkEnabled {
+                        self.stateText = "下行 PCM 传输中"
+                    } else {
+                        self.stateText = "通话音频已预热"
+                    }
                 }
             },
             onProgress: { [weak self] frames, peak in
@@ -315,7 +347,7 @@ final class CallAudioCoordinator: ObservableObject {
                 let peak = Self.normalizedPCM16Peak(pcm)
                 downlinkPlayer?.enqueue(sequence: sequence, pcm: pcm)
                 Task { @MainActor in
-                    guard let self, self.isRunning, self.desiredMediaEnabled else { return }
+                    guard let self, self.isRunning, self.desiredDownlinkEnabled else { return }
                     self.receivedFrames = frames
                     self.downlinkLevel = peak
                 }
@@ -324,7 +356,8 @@ final class CallAudioCoordinator: ObservableObject {
                 Task { @MainActor in
                     guard let self else { return }
                     self.stop()
-                    self.stateText = "PCM 发送失败"
+                    self.recoveryGeneration &+= 1
+                    self.stateText = "PCM 发送失败，准备恢复"
                     self.detailText = error
                 }
             }
@@ -347,6 +380,25 @@ final class CallAudioCoordinator: ObservableObject {
                 }
             }
         )
+    }
+
+    private func applyMediaState(uplink: Bool, downlink: Bool) {
+        isUplinkEnabled = uplink
+        isDownlinkEnabled = downlink
+        isLocalRingbackEnabled = desiredLocalRingbackEnabled && downlink
+        isMediaEnabled = uplink || downlink
+        inputLevel = uplink ? inputLevel : 0
+        downlinkLevel = downlink ? downlinkLevel : 0
+        if uplink && downlink {
+            stateText = "双向 PCM 传输中"
+            detailText = "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
+        } else if downlink {
+            stateText = "下行 PCM 传输中"
+            detailText = "正在播放回铃音和运营商提示；麦克风上行尚未放行"
+        } else {
+            stateText = "通话音频已预热"
+            detailText = "仅发送认证静音保活；麦克风和下行尚未放行"
+        }
     }
 
     func playDownlinkDiagnosticTone() {
@@ -438,6 +490,9 @@ final class CallAudioCoordinator: ObservableObject {
                 tearDownAudio(deactivateSession: false)
                 isRunning = false
                 isMediaEnabled = false
+                isUplinkEnabled = false
+                isDownlinkEnabled = false
+                isLocalRingbackEnabled = false
                 isTestTone = false
                 hasActiveRequest = false
             }
@@ -468,6 +523,9 @@ final class CallAudioCoordinator: ObservableObject {
         tearDownAudio(deactivateSession: false)
         isRunning = false
         isMediaEnabled = false
+        isUplinkEnabled = false
+        isDownlinkEnabled = false
+        isLocalRingbackEnabled = false
         isTestTone = false
         hasActiveRequest = false
         inputLevel = 0

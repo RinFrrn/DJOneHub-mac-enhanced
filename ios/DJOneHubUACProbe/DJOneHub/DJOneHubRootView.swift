@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DJOneHubRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
@@ -21,6 +22,11 @@ struct DJOneHubRootView: View {
         }
         .task {
             lifecycle.start()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                lifecycle.applicationDidBecomeActive()
+            }
         }
         .fileImporter(
             isPresented: $voiceControl.isImportingPairing,
@@ -165,6 +171,7 @@ struct DJOneHubRootView: View {
             LabeledContent("PCM", value: callAudio.stateText)
             LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
             LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
+            LabeledContent("本地回铃", value: callAudio.isLocalRingbackEnabled ? "待命" : "关闭")
             LabeledContent(
                 "链路修复",
                 value: "丢包 \(callAudio.downlinkMetrics.concealedFrames) · 乱序 \(callAudio.downlinkMetrics.reorderedPackets)"
@@ -187,7 +194,7 @@ struct DJOneHubRootView: View {
                 ProgressView(value: callAudio.downlinkLevel)
             }
 
-            Text("拨号或接听时预热，进入通话后放行内置麦克风和 iPhone 扬声器；媒体通过 USB ECM，不经过 USB Audio。")
+            Text("拨号时立即播放回铃音和运营商提示，进入通话后才放行内置麦克风；媒体通过 USB ECM，不经过 USB Audio。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

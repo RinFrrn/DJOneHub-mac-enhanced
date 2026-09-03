@@ -11,8 +11,10 @@ struct ProductCallPhaseOfflineTest {
         expect(.incoming(2), calls: [call(2, state: 0x02)])
         expect(.answering(2), busy: true, calls: [call(2, state: 0x02)], state: "接听中…")
         expect(.dialing(3), calls: [call(3, state: 0x05)])
+        expect(.dialing(3), calls: [call(3, state: 0x0A)])
         expect(.active(4), calls: [call(4, state: 0x03), call(2, state: 0x02)])
         expect(.ending, busy: true, calls: [call(4, state: 0x03)], state: "挂断中…")
+        expect(.ending, calls: [call(4, state: 0x08)])
         expect(
             .recovering("等待 USB ECM 和模块服务重新响应"),
             state: "模块已响应 STATUS"
@@ -38,8 +40,18 @@ struct ProductCallPhaseOfflineTest {
         ] {
             precondition(!phase.shouldPrepareCallAudio, "\(phase) must not prewarm audio")
         }
-        precondition(ProductCallPhase.active(1).shouldEnableCallMedia)
-        precondition(!ProductCallPhase.answering(1).shouldEnableCallMedia)
+        precondition(ProductCallPhase.active(1).shouldEnableUplink)
+        precondition(ProductCallPhase.active(1).shouldEnableDownlink)
+        precondition(!ProductCallPhase.dialing(1).shouldEnableUplink)
+        precondition(ProductCallPhase.dialing(1).shouldEnableDownlink)
+        precondition(ProductCallPhase.dialing(1).shouldGenerateLocalRingback(
+            calls: [call(1, state: 0x05)]
+        ))
+        precondition(!ProductCallPhase.dialing(1).shouldGenerateLocalRingback(
+            calls: [call(1, state: 0x01)]
+        ))
+        precondition(!ProductCallPhase.answering(1).shouldEnableUplink)
+        precondition(ProductCallPhase.answering(1).shouldEnableDownlink)
         precondition(ProductCallPhase.dialing(1).prefersFastStatusPolling)
         precondition(ProductCallPhase.incoming(1).prefersFastStatusPolling)
         precondition(!ProductCallPhase.active(1).prefersFastStatusPolling)

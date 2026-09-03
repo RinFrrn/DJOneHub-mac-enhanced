@@ -226,6 +226,7 @@ final class VoiceControlModel: ObservableObject {
             state: nil,
             success: nil,
             reportFailure: false,
+            updateSnapshotDescriptionOnSuccess: true,
             operation: {
                 try await client.status()
             },
@@ -269,6 +270,7 @@ final class VoiceControlModel: ObservableObject {
         state: String?,
         success: String?,
         reportFailure: Bool = true,
+        updateSnapshotDescriptionOnSuccess: Bool = false,
         operation: @escaping @Sendable () async throws -> VoiceControlResult,
         enablePollingOnSuccess: Bool = false,
         disablePollingOnFailure: Bool = false
@@ -308,9 +310,14 @@ final class VoiceControlModel: ObservableObject {
                     if enablePollingOnSuccess {
                         self.shouldPollStatus = true
                     }
-                    if !cancelled, let success {
-                        self.stateText = success
-                        self.detailText = Self.describe(result)
+                    if !cancelled {
+                        if let success {
+                            self.stateText = success
+                            self.detailText = Self.describe(result)
+                        } else if updateSnapshotDescriptionOnSuccess {
+                            self.stateText = "模块已响应 STATUS"
+                            self.detailText = Self.describe(result)
+                        }
                     }
                     self.requestTask = nil
                 }
@@ -348,8 +355,11 @@ final class VoiceControlModel: ObservableObject {
         case 0x03: return "通话中"
         case 0x04: return "呼叫进展"
         case 0x05: return "振铃"
+        case 0x06: return "保持"
         case 0x07: return "等待"
+        case 0x08: return "正在结束"
         case 0x09: return "结束"
+        case 0x0A: return "呼叫建立"
         default: return "状态 0x\(String(state, radix: 16))"
         }
     }

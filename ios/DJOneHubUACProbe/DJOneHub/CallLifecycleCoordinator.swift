@@ -11,6 +11,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     private var audioStartRequested = false
     private var handledAudioRecoveryGeneration: UInt64
     private var nextStatusAttempt = ContinuousClock.now
+    private var nextAudioStartAttempt = ContinuousClock.now
 
     private let normalStatusPollInterval: Duration = .seconds(1)
     private let setupStatusPollInterval: Duration = .milliseconds(250)
@@ -52,7 +53,17 @@ final class CallLifecycleCoordinator: ObservableObject {
 
     func pairingDidChange() {
         nextStatusAttempt = ContinuousClock.now
+        nextAudioStartAttempt = ContinuousClock.now
         audioStartRequested = false
+        updatePhaseAndAudio()
+    }
+
+    func applicationDidBecomeActive() {
+        nextStatusAttempt = ContinuousClock.now
+        if !callAudio.isRunning, !callAudio.hasActiveRequest {
+            audioStartRequested = false
+            nextAudioStartAttempt = ContinuousClock.now
+        }
         updatePhaseAndAudio()
     }
 
@@ -105,7 +116,10 @@ final class CallLifecycleCoordinator: ObservableObject {
         )
 
         let shouldPrepareAudio = voiceControl.canControlCalls && phase.shouldPrepareCallAudio
-        let shouldEnableMedia = voiceControl.canControlCalls && phase.shouldEnableCallMedia
+        let shouldEnableUplink = voiceControl.canControlCalls && phase.shouldEnableUplink
+        let shouldEnableDownlink = voiceControl.canControlCalls && phase.shouldEnableDownlink
+        let shouldGenerateLocalRingback = voiceControl.canControlCalls
+            && phase.shouldGenerateLocalRingback(calls: voiceControl.calls)
         if handledAudioRecoveryGeneration != callAudio.recoveryGeneration {
             handledAudioRecoveryGeneration = callAudio.recoveryGeneration
             audioStartRequested = false
@@ -116,15 +130,27 @@ final class CallLifecycleCoordinator: ObservableObject {
                 return
             }
             if callAudio.isRunning || callAudio.hasActiveRequest {
-                callAudio.setMediaEnabled(shouldEnableMedia)
+                callAudio.setMediaEnabled(
+                    uplink: shouldEnableUplink,
+                    downlink: shouldEnableDownlink,
+                    localRingback: shouldGenerateLocalRingback
+                )
             } else {
                 guard !audioStartRequested,
+                      ContinuousClock.now >= nextAudioStartAttempt,
                       let key = voiceControl.pairingKeyForUplinkProbe() else { return }
                 audioStartRequested = true
-                callAudio.start(pairingKey: key, mediaEnabled: shouldEnableMedia)
+                nextAudioStartAttempt = ContinuousClock.now.advanced(by: .seconds(1))
+                callAudio.start(
+                    pairingKey: key,
+                    uplinkEnabled: shouldEnableUplink,
+                    downlinkEnabled: shouldEnableDownlink,
+                    localRingbackEnabled: shouldGenerateLocalRingback
+                )
             }
         } else {
             audioStartRequested = false
+            nextAudioStartAttempt = ContinuousClock.now
             if callAudio.isRunning || callAudio.hasActiveRequest {
                 callAudio.stop()
             }
@@ -136,9 +162,16 @@ final class CallLifecycleCoordinator: ObservableObject {
               !callAudio.isInterrupted,
               !callAudio.isRunning,
               !callAudio.hasActiveRequest,
+              ContinuousClock.now >= nextAudioStartAttempt,
               let key = voiceControl.pairingKeyForUplinkProbe() else { return }
         audioStartRequested = true
-        callAudio.start(pairingKey: key, mediaEnabled: false)
+        nextAudioStartAttempt = ContinuousClock.now.advanced(by: .seconds(1))
+        callAudio.start(
+            pairingKey: key,
+            uplinkEnabled: false,
+            downlinkEnabled: false,
+            localRingbackEnabled: false
+        )
     }
 
 }
