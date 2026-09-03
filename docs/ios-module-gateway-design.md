@@ -488,13 +488,15 @@ TCP 控制端口固定为 `192.168.225.1:45750`。候选协议使用紧凑二进
 1. 模块每次 `accept` 后从 `/dev/urandom` 生成 32 字节 challenge，发出 HELLO。
 2. 客户端发送版本、固定操作码、非零 request ID、长度受限 payload，以及覆盖
    `challenge + header + payload` 的完整 HMAC-SHA256。
-3. 模块常量时间校验通过后才执行 STATUS/DIAL/ANSWER/END；每个 TCP 连接只接受一条
+3. 模块常量时间校验通过后才执行 STATUS/DIAL/ANSWER/END/USB_AUDIO；每个 TCP 连接只接受一条
    请求，从而使旧连接的认证帧无法跨连接重放。
 4. 模块以同一 challenge 对结构化结果签名；客户端必须同时核对 tag 与 request ID。
 
 请求头固定 20 字节，保留字段必须为零，payload 最大 81 字节。STATUS payload 为空；
 DIAL 只允许 `+0123456789*#` 且 `+` 只能出现在首位；ANSWER/END payload 是一个非零
-call ID。响应只包含固定状态码、动作结果和最多 8 条定长 call snapshot。当前协议只做
+call ID。USB_AUDIO 的空 payload 表示查询，单字节 `0/1` 表示关闭/开启
+`/sys/class/android_usb/f_audio/audio_enable`；设置前必须以新 QMI STATUS 确认无活动通话，
+且写后读回。STATUS-only 凭据不能执行该操作。响应只包含固定状态码、动作结果和最多 8 条定长 call snapshot。当前协议只做
 身份与完整性认证，不提供内容保密；电话号码不会进入蜂窝公网监听面，但同一 USB 链路
 上的明文可见性需在威胁模型中明确。如需保密，应在协议定稿前升级为具备 AEAD 的握手，
 而不是在 HMAC 帧外临时加可选加密。

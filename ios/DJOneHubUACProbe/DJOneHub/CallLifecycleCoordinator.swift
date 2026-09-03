@@ -93,7 +93,9 @@ final class CallLifecycleCoordinator: ObservableObject {
         guard voiceControl.isConfigured, voiceControl.canControlCalls else { return }
         guard !voiceControl.isBusy else { return }
 
-        if voiceControl.shouldPollStatus, clock.now >= nextStatusAttempt {
+        if !voiceControl.didAttemptUSBAudioQuery {
+            voiceControl.refreshUSBAudioState(reportFailure: false)
+        } else if voiceControl.shouldPollStatus, clock.now >= nextStatusAttempt {
             voiceControl.pollStatus()
             let interval = phase.prefersFastStatusPolling
                 ? setupStatusPollInterval

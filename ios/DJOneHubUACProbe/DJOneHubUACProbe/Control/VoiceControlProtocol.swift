@@ -20,6 +20,7 @@ enum VoiceControlOperation: UInt8, Sendable {
     case dial = 2
     case answer = 3
     case end = 4
+    case usbAudio = 5
 }
 
 enum VoiceControlStatus: UInt8, Sendable {
@@ -169,7 +170,12 @@ enum VoiceControlProtocol {
         return VoiceControlReply(status: status, result: result)
     }
 
-    static func payload(for operation: VoiceControlOperation, phoneNumber: String? = nil, callID: UInt8? = nil) throws -> Data {
+    static func payload(
+        for operation: VoiceControlOperation,
+        phoneNumber: String? = nil,
+        callID: UInt8? = nil,
+        usbAudioEnabled: Bool? = nil
+    ) throws -> Data {
         switch operation {
         case .status:
             return Data()
@@ -193,6 +199,9 @@ enum VoiceControlProtocol {
         case .answer, .end:
             guard let callID, callID != 0 else { throw VoiceControlProtocolError.invalidCallID }
             return Data([callID])
+        case .usbAudio:
+            guard let usbAudioEnabled else { return Data() }
+            return Data([usbAudioEnabled ? 1 : 0])
         }
     }
 
@@ -214,6 +223,10 @@ enum VoiceControlProtocol {
         case .answer, .end:
             guard payload.count == 1, payload[0] != 0 else {
                 throw VoiceControlProtocolError.invalidCallID
+            }
+        case .usbAudio:
+            guard payload.isEmpty || (payload.count == 1 && payload[0] <= 1) else {
+                throw VoiceControlProtocolError.invalidOperation
             }
         }
     }
@@ -241,6 +254,10 @@ enum VoiceControlProtocol {
                 throw VoiceControlProtocolError.invalidSnapshot
             }
             if let call = result.calls.first(where: { $0.id == result.actionCallID }), call.state != 0x09 {
+                throw VoiceControlProtocolError.invalidSnapshot
+            }
+        case .usbAudio:
+            guard result.actionCallID <= 1, result.confirmed else {
                 throw VoiceControlProtocolError.invalidSnapshot
             }
         }

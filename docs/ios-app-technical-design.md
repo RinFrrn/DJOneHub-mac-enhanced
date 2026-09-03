@@ -18,7 +18,8 @@ PCM。正式通话媒体不经过 USB UAC；iPhone/iPad 模式下模块关闭 UA
 
 - 模块地址：`192.168.225.1:45750/TCP`。
 - 每个请求使用新 TCP 连接；服务端先发 32 字节 challenge。
-- 请求和响应使用完整 HMAC-SHA256，支持 `STATUS`、`DIAL`、`ANSWER`、`END`。
+- 请求和响应使用完整 HMAC-SHA256，支持 `STATUS`、`DIAL`、`ANSWER`、`END`，以及
+  固定范围的 `USB_AUDIO` 查询/切换。
 - iOS 使用 `Network.framework`，强制 `.wiredEthernet`，不会误走蜂窝或 Wi-Fi。
 - 32 字节 pairing key 已使用不可同步 Keychain 保存。
 - 当前稳定模块标识为 pairing key 的 SHA-256 前 16 字节十六进制值。
@@ -135,6 +136,8 @@ DJOneHubApp
 - UDP session ID 每次媒体启动随机生成且不能为零。
 - USB 瞬断时停止发送；ECM 恢复后先 STATUS，再根据 conversation 状态决定是否重启媒体。
 - UI 必须区分模块未连接、ECM 未就绪、认证失败、daemon 未监听和 PCM 失败。
+- App 启动后查询模块 `audio_enable` 实际值；用户只能在 QMI 快照无活动通话时切换，
+  模块写入后必须读回确认。该开关不长期占用 iOS `AVAudioSession`。
 
 ## 8. 配对与安全
 
@@ -148,6 +151,9 @@ DJOneHubApp
 ## 9. UI 范围
 
 前台 MVP 包含：
+
+- “系统声音留在 iPhone”开关；打开时模块侧关闭 UAC 数据通道，但 ECM 控制和网络 PCM
+  保持可用。
 
 - 模块连接/认证状态。
 - 拨号输入、拨号确认。

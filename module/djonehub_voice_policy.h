@@ -9,7 +9,8 @@ enum djonehub_voice_operation {
     DJONEHUB_VOICE_STATUS,
     DJONEHUB_VOICE_DIAL,
     DJONEHUB_VOICE_ANSWER,
-    DJONEHUB_VOICE_END
+    DJONEHUB_VOICE_END,
+    DJONEHUB_USB_AUDIO
 };
 
 int djonehub_voice_action_allowed(

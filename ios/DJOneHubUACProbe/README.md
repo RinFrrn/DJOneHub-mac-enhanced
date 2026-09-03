@@ -38,7 +38,7 @@ Apple 当前列出的第二设备只有有线耳麦和 Bluetooth LE/HFP，不包
 
 `DJOneHubUACProbe/Control/VoiceControlProtocol.swift` 和
 `DJOneHubUACProbe/Control/VoiceControlClient.swift` 实现模块现有一次性 voice daemon 的
-固定白名单协议：`STATUS`、`DIAL`、`ANSWER`、`END`。每次 API 调用建立一个新的 TCP
+固定白名单协议：`STATUS`、`DIAL`、`ANSWER`、`END`、`USB_AUDIO`。每次 API 调用建立一个新的 TCP
 连接，只执行一次 HELLO / request / response，然后关闭连接；连接强制使用
 `.wiredEthernet`，避免同网段 Wi-Fi 抢走到模块的路由；不提供任意 AT/QMI 透传。
 
@@ -56,6 +56,7 @@ let snapshot = try await client.status()
 let dialed = try await client.dial("+18005551212")
 let answered = try await client.answer(callID: 1)
 let ended = try await client.end(callID: 1)
+let usbAudio = try await client.usbAudio(enabled: false)
 ```
 
 仓库不包含真实 key，当前探针也不会自行生成或自动持久化 key。生产配对/轮换/撤销流程
@@ -193,11 +194,16 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-session \
   -o "$HOME/Downloads/DJOneHub-CONTROL-pairing.json"
 ```
 
-控制会话允许认证的 `STATUS / DIAL / ANSWER / END`，App 每秒刷新活动 call snapshot，
+控制会话允许认证的 `STATUS / DIAL / ANSWER / END / USB_AUDIO`，App 每秒刷新活动 call snapshot，
 拨号前还会要求一次界面确认。模块启动脚本在 daemon 成功载入 key 后立即删除磁盘 key；
 daemon 只在当前模块供电周期内存活，断电后不会自行恢复。原 STATUS 模式则以
 `--once --status-only` 启动，模块端会拒绝任何变更通话状态的命令，不能靠修改 App
 绕过。两类短期凭据在 Keychain 中带不同权限，新包导入后会清除旧的开发凭据。
+
+正式 App 会显示“系统声音留在 iPhone”开关。它不靠长期占用 `AVAudioSession`，而是经
+认证控制面读写模块固定节点 `/sys/class/android_usb/f_audio/audio_enable`；只允许在无活动
+通话时设置，并在响应前读回确认。关闭后的值会成为下一次网络 PCM 会话的进入值，所以
+通话结束不会再被 bridge 恢复成开启；模块重新上电或切换持久 USB profile 后仍需重新查询。
 
 控制会话现在还会启动一个独立的认证 UDP 上行监听器 `192.168.225.1:45751`。监听器空闲时
 不打开 PCM；首个来自 USB ECM `/24` 的合法 HMAC 包确定 peer 和随机 session ID 后，才

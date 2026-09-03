@@ -4,8 +4,9 @@
  * Authenticated QMI Voice control daemon for the QDC507 USB ECM link.
  *
  * One TCP connection carries exactly one challenge, one authenticated
- * request and one authenticated response.  Only status, dial, answer and end
- * are accepted; no shell, arbitrary AT or arbitrary QMI surface is exposed.
+ * request and one authenticated response.  Only status, dial, answer, end and
+ * the fixed USB Audio gate are accepted; no shell, arbitrary AT or arbitrary
+ * QMI surface is exposed.
  */
 
 #include <arpa/inet.h>
@@ -36,6 +37,7 @@
 #define CONTROL_TIMEOUT_SECONDS 5
 #define RANDOM_DEVICE "/dev/urandom"
 #define DEFAULT_KEY_FILE "/usrdata/djonehub/pairing.key"
+#define VOICE_AUDIO_ENABLE_PATH "/sys/class/android_usb/f_audio/audio_enable"
 
 static volatile sig_atomic_t stop_requested;
 
@@ -282,6 +284,127 @@ static enum djonehub_qmi_voice_error execute_request(
                                       call_id, result);
 }
 
+static int snapshot_is_idle(const struct djonehub_voice_snapshot *snapshot)
+{
+    size_t index;
+
+    if (snapshot == NULL) {
+        return 0;
+    }
+    for (index = 0U; index < snapshot->count; ++index) {
+        if (snapshot->calls[index].state != 0x09U) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int read_usb_audio_enabled(uint8_t *enabled)
+{
+    uint8_t value;
+    ssize_t received;
+    int descriptor;
+    int saved_errno;
+
+    if (enabled == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    do {
+        descriptor = open(VOICE_AUDIO_ENABLE_PATH, O_RDONLY | O_CLOEXEC);
+    } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) {
+        return -1;
+    }
+    do {
+        received = read(descriptor, &value, 1U);
+    } while (received < 0 && errno == EINTR);
+    saved_errno = errno;
+    if (close(descriptor) != 0 && received == (ssize_t)1) {
+        saved_errno = errno;
+        received = -1;
+    }
+    if (received != (ssize_t)1) {
+        errno = received == 0 ? EIO : saved_errno;
+        return -1;
+    }
+    if (value != (uint8_t)'0' && value != (uint8_t)'1') {
+        errno = EPROTO;
+        return -1;
+    }
+    *enabled = value == (uint8_t)'1' ? 1U : 0U;
+    return 0;
+}
+
+static int write_usb_audio_enabled(uint8_t enabled)
+{
+    const uint8_t value[2] = {enabled != 0U ? (uint8_t)'1' : (uint8_t)'0',
+                              (uint8_t)'\n'};
+    ssize_t written;
+    int descriptor;
+    int saved_errno;
+
+    do {
+        descriptor = open(VOICE_AUDIO_ENABLE_PATH, O_WRONLY | O_CLOEXEC);
+    } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) {
+        return -1;
+    }
+    do {
+        written = write(descriptor, value, sizeof(value));
+    } while (written < 0 && errno == EINTR);
+    saved_errno = errno;
+    if (close(descriptor) != 0 && written == (ssize_t)sizeof(value)) {
+        saved_errno = errno;
+        written = -1;
+    }
+    if (written != (ssize_t)sizeof(value)) {
+        errno = written >= 0 ? EIO : saved_errno;
+        return -1;
+    }
+    return 0;
+}
+
+static enum djonehub_control_status execute_usb_audio_request(
+    const struct djonehub_control_request *request,
+    struct djonehub_control_result *control_result)
+{
+    struct djonehub_qmi_voice_result qmi_result;
+    enum djonehub_qmi_voice_error qmi_error;
+    uint8_t enabled;
+
+    qmi_error = djonehub_qmi_voice_execute(DJONEHUB_VOICE_STATUS, NULL, 0U,
+                                           &qmi_result);
+    if (qmi_error != DJONEHUB_QMI_VOICE_SUCCESS) {
+        daemon_logf("USB Audio status preflight failed: %s transport=%d service=%u",
+                    djonehub_qmi_voice_error_name(qmi_error),
+                    qmi_result.transport_error, qmi_result.service_error);
+        return map_engine_error(qmi_error);
+    }
+    if (request->payload_length == 1U) {
+        if (!snapshot_is_idle(&qmi_result.snapshot)) {
+            return DJONEHUB_CONTROL_PRECONDITION;
+        }
+        if (write_usb_audio_enabled(request->payload[0]) != 0) {
+            daemon_logf("write(%s) failed: %s", VOICE_AUDIO_ENABLE_PATH,
+                        strerror(errno));
+            return DJONEHUB_CONTROL_INTERNAL;
+        }
+    }
+    if (read_usb_audio_enabled(&enabled) != 0 ||
+        (request->payload_length == 1U && enabled != request->payload[0])) {
+        daemon_logf("read-back(%s) failed: %s", VOICE_AUDIO_ENABLE_PATH,
+                    strerror(errno));
+        return DJONEHUB_CONTROL_INTERNAL;
+    }
+    memset(control_result, 0, sizeof(*control_result));
+    control_result->operation = DJONEHUB_USB_AUDIO;
+    control_result->action_call_id = enabled;
+    control_result->confirmed = 1U;
+    control_result->snapshot = qmi_result.snapshot;
+    return DJONEHUB_CONTROL_OK;
+}
+
 static int handle_client(int descriptor,
                          const uint8_t key[DJONEHUB_PAIRING_KEY_BYTES],
                          int status_only)
@@ -325,6 +448,24 @@ static int handle_client(int descriptor,
         frame_length = djonehub_control_encode_response(
             key, nonce, DJONEHUB_CONTROL_FORBIDDEN, request.request_id, NULL,
             frame, sizeof(frame));
+        memset(nonce, 0, sizeof(nonce));
+        if (frame_length == 0U ||
+            write_exact(descriptor, frame, frame_length) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+    if (request.operation == DJONEHUB_USB_AUDIO) {
+        status = execute_usb_audio_request(&request, &control_result);
+        if (status == DJONEHUB_CONTROL_OK) {
+            frame_length = djonehub_control_encode_response(
+                key, nonce, status, request.request_id, &control_result, frame,
+                sizeof(frame));
+        } else {
+            frame_length = djonehub_control_encode_response(
+                key, nonce, status, request.request_id, NULL, frame,
+                sizeof(frame));
+        }
         memset(nonce, 0, sizeof(nonce));
         if (frame_length == 0U ||
             write_exact(descriptor, frame, frame_length) != 0) {

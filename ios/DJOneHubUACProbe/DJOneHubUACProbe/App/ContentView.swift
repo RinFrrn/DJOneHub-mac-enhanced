@@ -47,7 +47,11 @@ struct ContentView: View {
         .task(id: voiceControl.moduleIdentifier) {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
-                if voiceControl.canControlCalls && voiceControl.shouldPollStatus {
+                if voiceControl.canControlCalls &&
+                    !voiceControl.didAttemptUSBAudioQuery &&
+                    !voiceControl.isBusy {
+                    voiceControl.refreshUSBAudioState(reportFailure: false)
+                } else if voiceControl.canControlCalls && voiceControl.shouldPollStatus {
                     voiceControl.pollStatus()
                 }
             }
@@ -163,6 +167,28 @@ struct ContentView: View {
             .disabled(voiceControl.isBusy || !voiceControl.isConfigured)
 
             if voiceControl.canControlCalls {
+                Toggle("系统声音留在 iPhone", isOn: Binding(
+                    get: { voiceControl.moduleUSBAudioEnabled == false },
+                    set: { voiceControl.setKeepsSystemAudioOnPhone($0) }
+                ))
+                .disabled(!voiceControl.canChangeUSBAudio)
+
+                LabeledContent("模块 USB Audio", value: usbAudioStateText)
+
+                if voiceControl.moduleUSBAudioEnabled == nil &&
+                    voiceControl.didAttemptUSBAudioQuery {
+                    Button("重新读取模块音频模式") {
+                        voiceControl.refreshUSBAudioState()
+                    }
+                    .disabled(voiceControl.isBusy)
+                }
+
+                Text("打开后会关闭模块的 USB Audio 数据通道，让非通话声音留在 iPhone；ECM 电话控制和蜂窝 PCM 桥不受影响。为避免和通话音频线程互相覆盖，仅允许在无活动通话时切换。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if voiceControl.canControlCalls {
                 TextField("电话号码", text: $voiceControl.dialNumber)
                     .keyboardType(.phonePad)
                     .textContentType(.telephoneNumber)
@@ -227,6 +253,13 @@ struct ContentView: View {
         case 0x09: return "结束"
         default: return "状态 0x\(String(state, radix: 16))"
         }
+    }
+
+    private var usbAudioStateText: String {
+        guard let enabled = voiceControl.moduleUSBAudioEnabled else {
+            return voiceControl.didAttemptUSBAudioQuery ? "未读取" : "读取中…"
+        }
+        return enabled ? "开启（模块可接收系统声音）" : "关闭（声音留在 iPhone）"
     }
 
     private func importPairing(_ result: Result<[URL], Error>) {

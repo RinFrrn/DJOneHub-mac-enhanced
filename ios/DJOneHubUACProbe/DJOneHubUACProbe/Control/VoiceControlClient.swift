@@ -11,6 +11,8 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var access: VoiceControlAccess?
     @Published private(set) var calls: [VoiceCallSnapshot] = []
     @Published private(set) var shouldPollStatus = false
+    @Published private(set) var moduleUSBAudioEnabled: Bool?
+    @Published private(set) var didAttemptUSBAudioQuery = false
     @Published var dialNumber = ""
     @Published var isImportingPairing = false
     @Published var isConfirmingUnpair = false
@@ -25,6 +27,9 @@ final class VoiceControlModel: ObservableObject {
     var isConfigured: Bool { client != nil }
     var canControlCalls: Bool { client != nil && access == .controlSession }
     var hasActiveCall: Bool { calls.contains { $0.state == 0x03 } }
+    var canChangeUSBAudio: Bool {
+        canControlCalls && calls.isEmpty && moduleUSBAudioEnabled != nil && !isBusy
+    }
 
     init(client: VoiceControlClient? = nil) {
         self.client = client
@@ -171,6 +176,8 @@ final class VoiceControlModel: ObservableObject {
         moduleIdentifier = nil
         access = nil
         calls = []
+        moduleUSBAudioEnabled = nil
+        didAttemptUSBAudioQuery = false
         shouldPollStatus = false
         if !preservingModuleList {
             availableModuleIdentifiers = []
@@ -187,6 +194,8 @@ final class VoiceControlModel: ObservableObject {
         self.keyStore = keyStore
         self.moduleIdentifier = moduleIdentifier
         access = credential.access
+        moduleUSBAudioEnabled = nil
+        didAttemptUSBAudioQuery = false
         stateText = credential.access == .controlSession
             ? "控制会话 · \(Self.shortIdentifier(moduleIdentifier))"
             : "STATUS 配对 · \(Self.shortIdentifier(moduleIdentifier))"
@@ -235,6 +244,41 @@ final class VoiceControlModel: ObservableObject {
         )
     }
 
+    func refreshUSBAudioState(reportFailure: Bool = true) {
+        guard let client, canControlCalls else { return }
+        didAttemptUSBAudioQuery = true
+        perform(
+            state: reportFailure ? "读取音频模式…" : nil,
+            success: reportFailure ? "已读取模块音频模式" : nil,
+            reportFailure: reportFailure,
+            operation: {
+                try await client.usbAudio(enabled: nil)
+            },
+            onSuccess: { [weak self] result in
+                self?.moduleUSBAudioEnabled = result.actionCallID != 0
+            }
+        )
+    }
+
+    func setKeepsSystemAudioOnPhone(_ enabled: Bool) {
+        guard let client, requireCallControl(), calls.isEmpty else {
+            stateText = "通话期间不能切换 USB Audio"
+            detailText = "请结束当前呼叫后再切换"
+            return
+        }
+        let moduleAudioEnabled = !enabled
+        perform(
+            state: "切换音频输出…",
+            success: enabled ? "系统声音留在 iPhone" : "系统声音可输出到模块",
+            operation: {
+                try await client.usbAudio(enabled: moduleAudioEnabled)
+            },
+            onSuccess: { [weak self] result in
+                self?.moduleUSBAudioEnabled = result.actionCallID != 0
+            }
+        )
+    }
+
     func dial() {
         guard let client, requireCallControl() else { return }
         let number = dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -273,7 +317,8 @@ final class VoiceControlModel: ObservableObject {
         updateSnapshotDescriptionOnSuccess: Bool = false,
         operation: @escaping @Sendable () async throws -> VoiceControlResult,
         enablePollingOnSuccess: Bool = false,
-        disablePollingOnFailure: Bool = false
+        disablePollingOnFailure: Bool = false,
+        onSuccess: (@MainActor @Sendable (VoiceControlResult) -> Void)? = nil
     ) {
         guard !isBusy else { return }
         requestGeneration &+= 1
@@ -320,6 +365,9 @@ final class VoiceControlModel: ObservableObject {
                         }
                     }
                     self.requestTask = nil
+                    if !cancelled {
+                        onSuccess?(result)
+                    }
                 }
             } catch {
                 let cancelled = Task.isCancelled
@@ -440,6 +488,14 @@ actor VoiceControlClient {
     func end(callID: UInt8) async throws -> VoiceControlResult {
         let payload = try VoiceControlProtocol.payload(for: .end, callID: callID)
         return try await perform(.end, payload: payload)
+    }
+
+    func usbAudio(enabled: Bool?) async throws -> VoiceControlResult {
+        let payload = try VoiceControlProtocol.payload(
+            for: .usbAudio,
+            usbAudioEnabled: enabled
+        )
+        return try await perform(.usbAudio, payload: payload)
     }
 
     private func perform(_ operation: VoiceControlOperation, payload: Data) async throws -> VoiceControlResult {

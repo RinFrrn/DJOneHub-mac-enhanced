@@ -92,6 +92,8 @@ static int operation_from_wire(uint8_t wire,
         *operation = DJONEHUB_VOICE_ANSWER;
     } else if (wire == 4U) {
         *operation = DJONEHUB_VOICE_END;
+    } else if (wire == 5U) {
+        *operation = DJONEHUB_USB_AUDIO;
     } else {
         return -1;
     }
@@ -109,6 +111,8 @@ static uint8_t operation_to_wire(enum djonehub_voice_operation operation)
         return 3U;
     case DJONEHUB_VOICE_END:
         return 4U;
+    case DJONEHUB_USB_AUDIO:
+        return 5U;
     default:
         return 0U;
     }
@@ -147,6 +151,10 @@ static int valid_operation_payload(enum djonehub_voice_operation operation,
     if (operation == DJONEHUB_VOICE_ANSWER ||
         operation == DJONEHUB_VOICE_END) {
         return length == 1U && payload != NULL && payload[0] != 0U;
+    }
+    if (operation == DJONEHUB_USB_AUDIO) {
+        return length == 0U ||
+               (length == 1U && payload != NULL && payload[0] <= 1U);
     }
     return 0;
 }

@@ -158,6 +158,21 @@ static int test_request_validation(void)
     CHECK(djonehub_control_encode_request(
               key, nonce, DJONEHUB_VOICE_END, 4U, &call_id, 1U, frame,
               sizeof(frame)) == 0U);
+    CHECK(djonehub_control_encode_request(
+              key, nonce, DJONEHUB_USB_AUDIO, 5U, NULL, 0U, frame,
+              sizeof(frame)) != 0U);
+    call_id = 0U;
+    CHECK(djonehub_control_encode_request(
+              key, nonce, DJONEHUB_USB_AUDIO, 6U, &call_id, 1U, frame,
+              sizeof(frame)) != 0U);
+    call_id = 1U;
+    CHECK(djonehub_control_encode_request(
+              key, nonce, DJONEHUB_USB_AUDIO, 7U, &call_id, 1U, frame,
+              sizeof(frame)) != 0U);
+    call_id = 2U;
+    CHECK(djonehub_control_encode_request(
+              key, nonce, DJONEHUB_USB_AUDIO, 8U, &call_id, 1U, frame,
+              sizeof(frame)) == 0U);
     return 0;
 }
 
@@ -195,6 +210,21 @@ static int test_response(void)
     CHECK(decoded.confirmed == 1U);
     CHECK(decoded.snapshot.count == 1U);
     CHECK(decoded.snapshot.calls[0].state == 3U);
+
+    memset(&encoded, 0, sizeof(encoded));
+    encoded.operation = DJONEHUB_USB_AUDIO;
+    encoded.action_call_id = 0U;
+    encoded.confirmed = 1U;
+    length = djonehub_control_encode_response(
+        key, nonce, DJONEHUB_CONTROL_OK, 45U, &encoded, frame,
+        sizeof(frame));
+    CHECK(length != 0U);
+    CHECK(djonehub_control_decode_response(key, nonce, frame, length, &status,
+                                           &request_id, &decoded) == 0);
+    CHECK(status == DJONEHUB_CONTROL_OK);
+    CHECK(decoded.operation == DJONEHUB_USB_AUDIO);
+    CHECK(decoded.action_call_id == 0U);
+    CHECK(decoded.confirmed == 1U);
 
     length = djonehub_control_encode_response(
         key, nonce, DJONEHUB_CONTROL_PRECONDITION, 43U, NULL, frame,

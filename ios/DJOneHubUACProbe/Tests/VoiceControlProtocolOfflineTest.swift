@@ -36,6 +36,31 @@ struct VoiceControlProtocolOfflineTest {
         )
         precondition(endRequest == Data(hex: "444a4f480102040000010000000000000000000b018b91dab5088e4d375757b14feb23b1ea6c4dc35acbbf8cb075348e856de39eab"), "END request vector mismatch")
 
+        let usbAudioQuery = try VoiceControlProtocol.payload(for: .usbAudio)
+        precondition(usbAudioQuery.isEmpty)
+        let usbAudioDisable = try VoiceControlProtocol.payload(
+            for: .usbAudio,
+            usbAudioEnabled: false
+        )
+        precondition(usbAudioDisable == Data([0]))
+
+        var usbAudioResponse = Data(hex: "444a4f480103000000040000000000000000000c05000100")
+        var authenticatedUSBAudioResponse = nonce
+        authenticatedUSBAudioResponse.append(usbAudioResponse)
+        usbAudioResponse.append(contentsOf: HMAC<SHA256>.authenticationCode(
+            for: authenticatedUSBAudioResponse,
+            using: SymmetricKey(data: key)
+        ))
+        let usbAudio = try VoiceControlProtocol.decodeResponse(
+            pairingKey: key,
+            nonce: nonce,
+            frame: usbAudioResponse,
+            expectedRequestID: 12,
+            expectedOperation: .usbAudio
+        )
+        precondition(usbAudio.result?.actionCallID == 0)
+        precondition(usbAudio.result?.confirmed == true)
+
         let response = Data(hex: "444a4f48010300000012000001020304050607080100000201020001000000020300020000005d47e52caa5a9ab5c4c1d430d84b014f11ae06f5cc2a28f6167f9e8f53bbb9d6")
         let decoded = try VoiceControlProtocol.decodeResponse(
             pairingKey: key,
