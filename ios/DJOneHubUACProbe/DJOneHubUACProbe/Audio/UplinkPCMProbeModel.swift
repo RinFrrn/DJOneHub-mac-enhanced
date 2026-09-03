@@ -209,9 +209,9 @@ final class UplinkPCMProbeModel: ObservableObject {
                     self.inputLevel = peak
                 }
             },
-            onDownlink: { [weak self] pcm, frames in
+            onDownlink: { [weak self] sequence, pcm, frames in
                 let peak = Self.normalizedPCM16Peak(pcm)
-                downlinkPlayer?.enqueue(pcm)
+                downlinkPlayer?.enqueue(sequence: sequence, pcm: pcm)
                 Task { @MainActor in
                     guard let self, self.isRunning else { return }
                     self.receivedFrames = frames
@@ -305,9 +305,13 @@ final class UplinkPCMProbeModel: ObservableObject {
 }
 
 private final class DownlinkPCMPlayer: @unchecked Sendable {
+    private static let startupFrameCount = 4
+    private static let maximumBufferedFrameCount = 16
+
     private let queue = DispatchQueue(label: "DJOneHub.DownlinkPCM")
     private let player: AVAudioPlayerNode
     private let format: AVAudioFormat
+    private var jitterBuffer = DownlinkJitterBuffer()
     private var bufferedFrames = 0
     private var started = false
     private var stopped = false
@@ -317,9 +321,12 @@ private final class DownlinkPCMPlayer: @unchecked Sendable {
         self.format = format
     }
 
-    func enqueue(_ pcm: Data) {
+    func enqueue(sequence: UInt32, pcm: Data) {
         queue.async { [self] in
-            scheduleLocked(pcm)
+            let result = jitterBuffer.push(sequence: sequence, pcm: pcm)
+            for frame in result.frames {
+                scheduleLocked(frame.pcm)
+            }
         }
     }
 
@@ -344,6 +351,7 @@ private final class DownlinkPCMPlayer: @unchecked Sendable {
 
     private func scheduleLocked(_ pcm: Data) {
         guard !stopped,
+              bufferedFrames < Self.maximumBufferedFrameCount,
               pcm.count == UplinkAudioProtocol.pcmBytes,
               let buffer = AVAudioPCMBuffer(
                   pcmFormat: format,
@@ -362,9 +370,13 @@ private final class DownlinkPCMPlayer: @unchecked Sendable {
                 self?.queue.async {
                     guard let self else { return }
                     self.bufferedFrames = max(0, self.bufferedFrames - 1)
+                    if self.started, self.bufferedFrames == 0 {
+                        self.player.pause()
+                        self.started = false
+                    }
                 }
             }
-            if !started, bufferedFrames >= 4 {
+            if !started, bufferedFrames >= Self.startupFrameCount {
                 player.play()
                 started = true
             }
@@ -375,6 +387,7 @@ private final class DownlinkPCMPlayer: @unchecked Sendable {
             guard !stopped else { return }
             stopped = true
             player.stop()
+            jitterBuffer.reset()
             bufferedFrames = 0
             started = false
         }
@@ -387,7 +400,7 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
     private let sessionID: UInt32
     private let onState: @Sendable (String) -> Void
     private let onProgress: @Sendable (UInt64, Double) -> Void
-    private let onDownlink: @Sendable (Data, UInt64) -> Void
+    private let onDownlink: @Sendable (UInt32, Data, UInt64) -> Void
     private let onError: @Sendable (String) -> Void
     private var connection: NWConnection?
     private var toneTimer: DispatchSourceTimer?
@@ -396,7 +409,6 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
     private var sequence: UInt32 = 0
     private var frames: UInt64 = 0
     private var downlinkFrames: UInt64 = 0
-    private var lastDownlinkSequence: UInt32 = 0
     private var stopped = false
 
     init(
@@ -404,7 +416,7 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
         sessionID: UInt32,
         onState: @escaping @Sendable (String) -> Void,
         onProgress: @escaping @Sendable (UInt64, Double) -> Void,
-        onDownlink: @escaping @Sendable (Data, UInt64) -> Void,
+        onDownlink: @escaping @Sendable (UInt32, Data, UInt64) -> Void,
         onError: @escaping @Sendable (String) -> Void
     ) {
         self.pairingKey = pairingKey
@@ -459,12 +471,8 @@ private final class UplinkPacketPipeline: @unchecked Sendable {
                             pairingKey: self.pairingKey,
                             sessionID: self.sessionID
                         )
-                        if self.lastDownlinkSequence == 0 ||
-                            Int32(bitPattern: frame.sequence &- self.lastDownlinkSequence) > 0 {
-                            self.lastDownlinkSequence = frame.sequence
-                            self.downlinkFrames &+= 1
-                            self.onDownlink(frame.pcm, self.downlinkFrames)
-                        }
+                        self.downlinkFrames &+= 1
+                        self.onDownlink(frame.sequence, frame.pcm, self.downlinkFrames)
                     } catch {
                         self.failLocked(error.localizedDescription)
                         return

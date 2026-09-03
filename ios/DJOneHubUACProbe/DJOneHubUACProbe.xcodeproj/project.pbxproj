@@ -15,6 +15,7 @@
 		A10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
 		A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
 		A10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* UplinkPCMProbeModel.swift */; };
+		A10000000000000000000009 /* DownlinkJitterBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* DownlinkJitterBuffer.swift */; };
 		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
 		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
 		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
@@ -24,6 +25,7 @@
 		B10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
 		B10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* UplinkPCMProbeModel.swift */; };
 		B10000000000000000000009 /* ProductCallPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* ProductCallPhase.swift */; };
+		B10000000000000000000010 /* DownlinkJitterBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* DownlinkJitterBuffer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +40,7 @@
 		A20000000000000000000009 /* PairingKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKeyStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* UplinkAudioProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkAudioProtocol.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* UplinkPCMProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkPCMProbeModel.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* DownlinkJitterBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkJitterBuffer.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
@@ -98,6 +101,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000003 /* AudioProbeModel.swift */,
+				A20000000000000000000012 /* DownlinkJitterBuffer.swift */,
 				A20000000000000000000010 /* UplinkAudioProtocol.swift */,
 				A20000000000000000000011 /* UplinkPCMProbeModel.swift */,
 			);
@@ -239,6 +243,7 @@
 				A10000000000000000000006 /* PairingKeyStore.swift in Sources */,
 				A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
 				A10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */,
+				A10000000000000000000009 /* DownlinkJitterBuffer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -255,6 +260,7 @@
 				B10000000000000000000006 /* PairingKeyStore.swift in Sources */,
 				B10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
 				B10000000000000000000008 /* UplinkPCMProbeModel.swift in Sources */,
+				B10000000000000000000010 /* DownlinkJitterBuffer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
