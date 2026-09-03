@@ -5,7 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var probe: AudioProbeModel
     @EnvironmentObject private var networkProbe: ModuleNetworkProbe
     @EnvironmentObject private var voiceControl: VoiceControlModel
-    @EnvironmentObject private var uplinkProbe: UplinkPCMProbeModel
+    @EnvironmentObject private var uplinkProbe: CallAudioCoordinator
     @State private var isConfirmingDial = false
 
     var body: some View {
@@ -75,6 +75,14 @@ struct ContentView: View {
             LabeledContent("格式", value: uplinkProbe.inputFormatText)
             LabeledContent("已发送", value: "\(uplinkProbe.sentFrames) 帧")
             LabeledContent("已接收", value: "\(uplinkProbe.receivedFrames) 帧")
+            LabeledContent(
+                "下行修复",
+                value: "丢包 \(uplinkProbe.downlinkMetrics.concealedFrames) · 乱序 \(uplinkProbe.downlinkMetrics.reorderedPackets) · 重缓冲 \(uplinkProbe.downlinkMetrics.rebufferEvents) · 队列丢弃 \(uplinkProbe.downlinkMetrics.queueDroppedFrames)"
+            )
+            LabeledContent(
+                "下行拒绝/重置",
+                value: "\(uplinkProbe.downlinkMetrics.droppedPackets) / \(uplinkProbe.downlinkMetrics.sequenceResets)"
+            )
             LabeledContent(
                 "下行峰值",
                 value: String(format: "%.0f / 32768", uplinkProbe.downlinkLevel * 32_768)

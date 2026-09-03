@@ -4,18 +4,18 @@ import SwiftUI
 @MainActor
 struct DJOneHubApp: App {
     @StateObject private var voiceControl: VoiceControlModel
-    @StateObject private var pcmBridge: UplinkPCMProbeModel
+    @StateObject private var callAudio: CallAudioCoordinator
     @StateObject private var lifecycle: CallLifecycleCoordinator
 
     init() {
         let voiceControl = VoiceControlModel()
-        let pcmBridge = UplinkPCMProbeModel()
+        let callAudio = CallAudioCoordinator()
         _voiceControl = StateObject(wrappedValue: voiceControl)
-        _pcmBridge = StateObject(wrappedValue: pcmBridge)
+        _callAudio = StateObject(wrappedValue: callAudio)
         _lifecycle = StateObject(
             wrappedValue: CallLifecycleCoordinator(
                 voiceControl: voiceControl,
-                pcmBridge: pcmBridge
+                callAudio: callAudio
             )
         )
     }
@@ -24,9 +24,8 @@ struct DJOneHubApp: App {
         WindowGroup {
             DJOneHubRootView()
                 .environmentObject(voiceControl)
-                .environmentObject(pcmBridge)
+                .environmentObject(callAudio)
                 .environmentObject(lifecycle)
         }
     }
 }
-

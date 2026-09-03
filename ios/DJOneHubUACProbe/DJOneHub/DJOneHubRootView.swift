@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 struct DJOneHubRootView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
-    @EnvironmentObject private var pcmBridge: UplinkPCMProbeModel
+    @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
 
     @State private var isConfirmingDial = false
@@ -162,21 +162,29 @@ struct DJOneHubRootView: View {
 
     private var audioSection: some View {
         Section("通话音频") {
-            LabeledContent("PCM", value: pcmBridge.stateText)
-            LabeledContent("上行", value: "\(pcmBridge.sentFrames) 帧")
-            LabeledContent("下行", value: "\(pcmBridge.receivedFrames) 帧")
+            LabeledContent("PCM", value: callAudio.stateText)
+            LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
+            LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
+            LabeledContent(
+                "链路修复",
+                value: "丢包 \(callAudio.downlinkMetrics.concealedFrames) · 乱序 \(callAudio.downlinkMetrics.reorderedPackets)"
+            )
+            LabeledContent(
+                "播放恢复",
+                value: "重缓冲 \(callAudio.downlinkMetrics.rebufferEvents) · 队列丢弃 \(callAudio.downlinkMetrics.queueDroppedFrames)"
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("麦克风")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ProgressView(value: pcmBridge.inputLevel)
+                ProgressView(value: callAudio.inputLevel)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("对端语音")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ProgressView(value: pcmBridge.downlinkLevel)
+                ProgressView(value: callAudio.downlinkLevel)
             }
 
             Text("进入通话后自动启动内置麦克风和 iPhone 扬声器；媒体通过 USB ECM，不经过 USB Audio。")

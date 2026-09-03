@@ -6,14 +6,16 @@ final class CallLifecycleCoordinator: ObservableObject {
     @Published private(set) var hasStarted = false
 
     private let voiceControl: VoiceControlModel
-    private let pcmBridge: UplinkPCMProbeModel
+    private let callAudio: CallAudioCoordinator
     private var lifecycleTask: Task<Void, Never>?
     private var audioStartRequested = false
+    private var handledAudioRecoveryGeneration: UInt64
     private var nextStatusAttempt = ContinuousClock.now
 
-    init(voiceControl: VoiceControlModel, pcmBridge: UplinkPCMProbeModel) {
+    init(voiceControl: VoiceControlModel, callAudio: CallAudioCoordinator) {
         self.voiceControl = voiceControl
-        self.pcmBridge = pcmBridge
+        self.callAudio = callAudio
+        handledAudioRecoveryGeneration = callAudio.recoveryGeneration
     }
 
     deinit {
@@ -39,8 +41,8 @@ final class CallLifecycleCoordinator: ObservableObject {
         lifecycleTask?.cancel()
         lifecycleTask = nil
         audioStartRequested = false
-        if pcmBridge.isRunning {
-            pcmBridge.stop()
+        if callAudio.isRunning || callAudio.hasActiveRequest {
+            callAudio.stop()
         }
         hasStarted = false
     }
@@ -77,15 +79,23 @@ final class CallLifecycleCoordinator: ObservableObject {
         )
 
         let shouldRunAudio = voiceControl.canControlCalls && voiceControl.hasActiveCall
+        if handledAudioRecoveryGeneration != callAudio.recoveryGeneration {
+            handledAudioRecoveryGeneration = callAudio.recoveryGeneration
+            audioStartRequested = false
+        }
         if shouldRunAudio {
-            guard !pcmBridge.isRunning, !audioStartRequested,
+            guard !callAudio.isInterrupted else {
+                audioStartRequested = false
+                return
+            }
+            guard !callAudio.isRunning, !audioStartRequested,
                   let key = voiceControl.pairingKeyForUplinkProbe() else { return }
             audioStartRequested = true
-            pcmBridge.start(pairingKey: key)
+            callAudio.start(pairingKey: key)
         } else {
             audioStartRequested = false
-            if pcmBridge.isRunning {
-                pcmBridge.stop()
+            if callAudio.isRunning || callAudio.hasActiveRequest {
+                callAudio.stop()
             }
         }
     }

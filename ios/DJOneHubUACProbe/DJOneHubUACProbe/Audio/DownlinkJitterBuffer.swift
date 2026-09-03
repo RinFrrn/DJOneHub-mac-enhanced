@@ -10,6 +10,7 @@ struct DownlinkJitterPushResult: Equatable {
     let frames: [DownlinkPlayoutFrame]
     let dropped: Bool
     let reset: Bool
+    let reordered: Bool
 }
 
 /// Small, bounded reorder window for the fixed 16 ms downlink stream.
@@ -37,7 +38,9 @@ struct DownlinkJitterBuffer {
 
     mutating func push(sequence: UInt32, pcm: Data) -> DownlinkJitterPushResult {
         guard sequence != 0, pcm.count == configuration.frameBytes else {
-            return DownlinkJitterPushResult(frames: [], dropped: true, reset: false)
+            return DownlinkJitterPushResult(
+                frames: [], dropped: true, reset: false, reordered: false
+            )
         }
 
         if expectedSequence == nil {
@@ -48,7 +51,9 @@ struct DownlinkJitterBuffer {
         if let expectedSequence, sequence != expectedSequence {
             let delta = Int32(bitPattern: sequence &- expectedSequence)
             if delta <= 0 {
-                return DownlinkJitterPushResult(frames: [], dropped: true, reset: false)
+                return DownlinkJitterPushResult(
+                    frames: [], dropped: true, reset: false, reordered: false
+                )
             }
             if delta > configuration.maximumSequenceJump {
                 pending.removeAll(keepingCapacity: true)
@@ -58,8 +63,11 @@ struct DownlinkJitterBuffer {
         }
 
         guard pending[sequence] == nil else {
-            return DownlinkJitterPushResult(frames: [], dropped: true, reset: didReset)
+            return DownlinkJitterPushResult(
+                frames: [], dropped: true, reset: didReset, reordered: false
+            )
         }
+        let filledReorderGap = !didReset && sequence == expectedSequence && !pending.isEmpty
         pending[sequence] = pcm
 
         var output: [DownlinkPlayoutFrame] = []
@@ -77,7 +85,12 @@ struct DownlinkJitterBuffer {
             drainContiguous(into: &output)
         }
 
-        return DownlinkJitterPushResult(frames: output, dropped: false, reset: didReset)
+        return DownlinkJitterPushResult(
+            frames: output,
+            dropped: false,
+            reset: didReset,
+            reordered: filledReorderGap
+        )
     }
 
     mutating func reset() {
@@ -99,4 +112,3 @@ struct DownlinkJitterBuffer {
         sequence == UInt32.max ? 1 : sequence + 1
     }
 }
-

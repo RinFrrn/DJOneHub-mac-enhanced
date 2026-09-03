@@ -9,6 +9,7 @@ struct DownlinkJitterBufferOfflineTest {
         testSequenceWrap()
         testLargeJumpReset()
         testInvalidFrame()
+        testPlaybackMetrics()
         print("DownlinkJitterBufferOfflineTest: PASS")
     }
 
@@ -25,6 +26,7 @@ struct DownlinkJitterBufferOfflineTest {
         _ = buffer.push(sequence: 10, pcm: pcm(10))
         precondition(buffer.push(sequence: 12, pcm: pcm(12)).frames.isEmpty)
         let reordered = buffer.push(sequence: 11, pcm: pcm(11))
+        precondition(reordered.reordered)
         precondition(reordered.frames == [frame(11, value: 11), frame(12, value: 12)])
     }
 
@@ -59,6 +61,29 @@ struct DownlinkJitterBufferOfflineTest {
         var buffer = DownlinkJitterBuffer()
         precondition(buffer.push(sequence: 0, pcm: pcm(1)).dropped)
         precondition(buffer.push(sequence: 1, pcm: Data()).dropped)
+    }
+
+    private static func testPlaybackMetrics() {
+        var metrics = DownlinkPlaybackMetrics()
+        var buffer = DownlinkJitterBuffer()
+
+        metrics.record(buffer.push(sequence: 10, pcm: pcm(10)))
+        metrics.record(buffer.push(sequence: 12, pcm: pcm(12)))
+        metrics.record(buffer.push(sequence: 11, pcm: pcm(11)))
+        metrics.record(buffer.push(sequence: 11, pcm: pcm(11)))
+        metrics.record(buffer.push(sequence: 100, pcm: pcm(100)))
+        metrics.record(buffer.push(sequence: 103, pcm: pcm(103)))
+        metrics.record(buffer.push(sequence: 104, pcm: pcm(104)))
+        metrics.record(buffer.push(sequence: 105, pcm: pcm(105)))
+        metrics.recordRebuffer()
+        metrics.recordQueueDrop()
+
+        precondition(metrics.reorderedPackets == 1)
+        precondition(metrics.concealedFrames == 2)
+        precondition(metrics.droppedPackets == 1)
+        precondition(metrics.sequenceResets == 1)
+        precondition(metrics.rebufferEvents == 1)
+        precondition(metrics.queueDroppedFrames == 1)
     }
 
     private static func pcm(_ value: UInt8) -> Data {

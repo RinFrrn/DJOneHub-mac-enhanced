@@ -60,23 +60,23 @@ PCM。正式通话媒体不经过 USB UAC；iPhone/iPad 模式下模块关闭 UA
 DJOneHubApp
   └─ CallLifecycleCoordinator
       ├─ VoiceControlModel / VoiceControlClient (TCP 45750)
-      ├─ UplinkPCMProbeModel [第一阶段复用]
+      ├─ CallAudioCoordinator
       │   ├─ AVAudioSession + AVAudioEngine
-      │   ├─ UplinkPacketPipeline (UDP 45751)
-      │   └─ DownlinkPCMPlayer
+      │   ├─ PCMTransport (UDP 45751)
+      │   ├─ DownlinkPCMPlayer
+      │   └─ DownlinkJitterBuffer
       └─ DJOneHubRootView
 ```
 
-第一阶段先复用已经真机通过的 `UplinkPCMProbeModel`，但只把它作为协调器内部媒体引擎，
-不向产品用户暴露探针按钮。第二阶段将其拆为：
+第一阶段复用的 `UplinkPCMProbeModel` 已在第二阶段拆除；Probe 与正式 App 目前共享以下正式
+媒体组件，但只有 Probe 暴露测试音等诊断入口：
 
-- `AudioSessionCoordinator`
-- `UplinkCapture`
+- `CallAudioCoordinator`
 - `PCMTransport`
 - `DownlinkJitterBuffer`
-- `CallAudioCoordinator`
+- `DownlinkPCMPlayer`
 
-这能避免在路径刚稳定时同时改协议、音频和 UI，降低回归范围。
+协议、PCM 格式和硬件路由均未随此次拆分改变。
 
 ## 5. 产品通话状态机
 
@@ -219,4 +219,13 @@ CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
 - [x] 真机来电页面、接听、挂断和拒接验收通过。
 - [x] 下行加入 3 帧乱序窗口、静音丢包补偿、序号跳变重置和播放断流自动恢复；
   离线测试、两个 iOS target 的 arm64 编译及真机长通话验收均已通过。
-- [ ] 将当前探针媒体类进一步拆分为正式音频组件。
+- [x] 移除正式 App 对 `UplinkPCMProbeModel` 的依赖，拆分为 `CallAudioCoordinator`、
+  `PCMTransport`、`DownlinkPCMPlayer` 和 `DownlinkJitterBuffer`。
+- [x] 实现 Audio Session interruption 和 media-services reset 的受控重建；仅当模块 STATUS
+  仍确认存在 active call 时恢复新 PCM session，等待真机中断场景验收。
+- [ ] route change 暂时维持已验证的“音频启动时固定内置麦克风和扬声器”；运行中主动
+  重设曾触发听筒/扬声器反复切换的通知反馈循环；撤回后真机双向通话恢复正常，后续采用
+  去抖状态机并在隔离测试中单独实现。
+- [x] 增加丢包补偿、乱序、重复/迟到拒绝、序号重置、重缓冲和队列丢弃指标；
+  指标不包含 PCM 内容或配对密钥，签名版本已安装，等待真机通话数值验收。
+- [ ] 完成 ECM 拔插、锁屏及前后台切换验收。

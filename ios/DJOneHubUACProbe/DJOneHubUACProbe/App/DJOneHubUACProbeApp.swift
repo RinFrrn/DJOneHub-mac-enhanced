@@ -5,7 +5,7 @@ struct DJOneHubUACProbeApp: App {
     @StateObject private var audioProbe = AudioProbeModel()
     @StateObject private var networkProbe = ModuleNetworkProbe()
     @StateObject private var voiceControl = VoiceControlModel()
-    @StateObject private var uplinkProbe = UplinkPCMProbeModel()
+    @StateObject private var uplinkProbe = CallAudioCoordinator()
 
     var body: some Scene {
         WindowGroup {
