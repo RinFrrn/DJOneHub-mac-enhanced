@@ -43,6 +43,8 @@ type voiceTestArmMode struct {
 	filePrefix       string
 }
 
+const voiceTestECMPreflightTimeout = 25 * time.Second
+
 var (
 	voiceStatusOnceMode = voiceTestArmMode{
 		confirmOperation: "arm-ios-status-once",
@@ -500,6 +502,11 @@ func queryTemporaryVoiceDaemon(key []byte) (voiceDaemonReply, error) {
 	return decodeVoiceDaemonReply(key, nonce, frame, requestID)
 }
 
+func isVoiceDaemonDialUnavailable(err error) bool {
+	var operationError *net.OpError
+	return errors.As(err, &operationError) && operationError.Op == "dial"
+}
+
 func (a *app) qmiVoiceDaemonStatusAPI(w http.ResponseWriter, r *http.Request) {
 	var request voiceDaemonStatusRequest
 	if !decodeJSON(w, r, &request) {
@@ -860,7 +867,8 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 	// unreachable for a little over eight seconds on a cold module.  Keep the
 	// daemon alive long enough for macOS to finish restoring that route before
 	// deciding the authenticated STATUS check failed.
-	for attempt := 0; attempt < 40; attempt++ {
+	preflightDeadline := time.Now().Add(voiceTestECMPreflightTimeout)
+	for attempt := 0; attempt < 40 && time.Now().Before(preflightDeadline); attempt++ {
 		reply, queryErr = queryTemporaryVoiceDaemon(key)
 		if queryErr == nil {
 			break
@@ -875,7 +883,7 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 	defer adb.Close()
 	stopErr := stopVoiceTestProcess(adb)
 	macECMUnavailable := mode.purpose == voiceTestSessionPurpose &&
-		queryErr != nil && strings.Contains(queryErr.Error(), "no route to host")
+		queryErr != nil && isVoiceDaemonDialUnavailable(queryErr)
 	if (queryErr != nil && !macECMUnavailable) || reply.Status != 0 || stopErr != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("认证 STATUS 预检失败: query=%v status=%d stop=%v", queryErr, reply.Status, stopErr))
 		return
