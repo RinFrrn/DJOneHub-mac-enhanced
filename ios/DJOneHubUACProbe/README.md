@@ -44,7 +44,7 @@ Apple 当前列出的第二设备只有有线耳麦和 Bluetooth LE/HFP，不包
 
 探针页面现在显示“模块电话控制（实验）”区域，并接入一个只读 `STATUS` 调用入口。该
 区域默认保持禁用，因为生产 pairing ceremony 尚未完成。业务层可显式注入内存中的
-32 字节 key；用于真机闭环的开发流程也可导入一小时有效的 JSON 测试配对包。测试 key
+32 字节 key；用于真机闭环的开发流程也可导入 30 天有效的 JSON 测试配对包。测试 key
 按其 SHA-256 指纹隔离保存在 `AfterFirstUnlockThisDeviceOnly` Keychain 中，不进入
 UserDefaults 或日志，也不提供粘贴密钥的文本框。
 
@@ -63,15 +63,18 @@ let usbAudio = try await client.usbAudio(enabled: false)
 仍未设计完成；测试时只能由外部可信流程把临时 32 字节 key 注入客户端和模块一次性
 daemon。不要把测试 key、设备 key 或模块持久凭据提交到仓库。
 
-`Control/PairingKeyStore.swift` 已提供生产配对完成后的 Keychain 存储边界：只接受 32 字节
-值，使用 `AfterFirstUnlockThisDeviceOnly`、明确禁止同步，并要求使用经过认证的稳定模块
-标识建立独立 Keychain account，避免不同模块互相覆盖；它支持读取、原子更新和撤销。
+`Control/PairingKeyStore.swift` 提供 Keychain 存储边界：只接受 32 字节值，使用
+`AfterFirstUnlockThisDeviceOnly`、明确禁止同步，并按稳定模块标识建立独立 account。
+新导入凭据使用 v2 envelope 保存权限、创建时间和到期时间，每次恢复都会重新校验；旧
+32 字节裸 key 维持只读权限，既有 v1 envelope 首次恢复时原地升级为从升级时起 30 天
+有效的 v2，不改变 key/权限/模块标识，也不会要求当前用户重新导入。
 只有用户显式导入测试配对包时才会写入；App 启动时只读取本 App 已有的配对项。生产
 配对完成后，业务层也可调用 `VoiceControlModel.configure(from:)` 将指定模块的 key
 注入内存。
 
 App 启动时会枚举本 App 自己的 Keychain 项：只有一个模块时恢复该模块；有多个模块时
-要求用户选择。App 内“撤销当前测试配对”只删除对应模块的 Keychain 项，不影响其他模块。
+要求用户选择。App 内“删除 iPhone 本机配对”只删除对应模块的 Keychain 项，不影响其他
+模块，也不谎称已经撤销模块侧 key；模块侧开发凭据必须接回 Mac 后通过卸载接口清理。
 
 客户端严格检查 20 字节大端 header、HELLO 32 字节 challenge、request ID、完整
 HMAC-SHA256 tag、响应 operation 与 call snapshot。号码只允许 `0-9`、`*`、`#` 和首位
@@ -193,10 +196,10 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-once \
 
 先把该 JSON 交给 iPhone，在 App 中选择“导入 STATUS 测试配对包”；确认显示“已配对”后，
 删除原始 JSON，再把模块换接 iPhone。此时不要运行裸 TCP 探针，直接点“读取模块通话状态”。
-配对包只允许在创建后一小时内导入，module identifier 必须等于 key 的 SHA-256 前 16 字节；
+配对包只允许在创建后 30 天内导入，module identifier 必须等于 key 的 SHA-256 前 16 字节；
 错误 endpoint、过期包和被替换的 identifier 都会被拒绝。
 
-STATUS 闭环通过后，可武装一次“本次供电有效”的开发控制会话：
+STATUS 闭环通过后，可武装持久开发控制会话：
 
 ```sh
 curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-session \
@@ -206,10 +209,11 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/arm-session \
 ```
 
 控制会话允许认证的 `STATUS / DIAL / ANSWER / END / USB_AUDIO`，App 每秒刷新活动 call snapshot，
-拨号前还会要求一次界面确认。模块启动脚本在 daemon 成功载入 key 后立即删除磁盘 key；
-daemon 只在当前模块供电周期内存活，断电后不会自行恢复。原 STATUS 模式则以
+拨号前还会要求一次界面确认。为支持无独立供电模块从 Mac 换接 iPhone，模块会保留
+control marker、`pairing.key` 和 rc5 启动链接，断电重启后自动恢复 daemon 与 PCM bridge，
+直至运行下方卸载接口。原 STATUS 模式仍以
 `--once --status-only` 启动，模块端会拒绝任何变更通话状态的命令，不能靠修改 App
-绕过。两类短期凭据在 Keychain 中带不同权限，新包导入后会清除旧的开发凭据。
+绕过。该持久行为只属于开发部署，首次 key 仍由 Mac 注入，不是生产配对。
 
 Probe 保留认证的 `USB_AUDIO` 诊断操作，用于读写模块固定节点
 `/sys/class/android_usb/f_audio/audio_enable`。实机验证表明该节点只控制已枚举 UAC 的数据门，
@@ -241,8 +245,8 @@ curl -fsS -X POST http://127.0.0.1:7575/api/ios/voice-test/uninstall \
 
 当前模块侧已经有经过真实 STATUS/ANSWER/END 验收的认证 voice daemon 候选；
 Mac 侧会用临时 key 启动它，并明确报告 `one_shot=true`、`persistent=false`。iOS 侧新增
-的是该控制协议客户端和一次供电周期内的开发控制会话，不会建立生产 pairing。生产通话
-仍缺方向正确的双向 PCM 媒体平面、后台来电与 CallKit 生命周期。
+的是该控制协议客户端和持久开发控制部署，不会建立生产 pairing。双向 ECM PCM 已完成
+真机验收；生产首次配对、双端撤销、后台来电与 CallKit 生命周期仍未完成。
 
 如果界面显示 `POSIX 错误 61`，它是 `ECONNREFUSED` 的系统表示，含义相同：ECM
 链路已经到达模块，但 `45750` 没有监听进程。仓库现在提供一个仅用于闭环验证的

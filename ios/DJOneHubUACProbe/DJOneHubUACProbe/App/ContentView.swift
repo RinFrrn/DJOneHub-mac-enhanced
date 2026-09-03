@@ -36,11 +36,11 @@ struct ContentView: View {
             importPairing(result)
         }
         .confirmationDialog(
-            "撤销当前模块的测试配对？",
+            "删除 iPhone 本机配对？模块侧开发凭据仍会保留，需接回 Mac 后卸载。",
             isPresented: $voiceControl.isConfirmingUnpair,
             titleVisibility: .visible
         ) {
-            Button("撤销配对", role: .destructive) {
+            Button("仅删除本机配对", role: .destructive) {
                 voiceControl.unpairCurrentModule()
             }
         }
@@ -223,7 +223,7 @@ struct ContentView: View {
             }
 
             if voiceControl.isConfigured {
-                Button("撤销当前测试配对", role: .destructive) {
+                Button("删除 iPhone 本机配对", role: .destructive) {
                     voiceControl.isConfirmingUnpair = true
                 }
             }
@@ -235,7 +235,7 @@ struct ContentView: View {
             }
 
             Text(voiceControl.canControlCalls
-                 ? "当前是一次启动有效的开发控制会话，可执行拨号、接听和挂断。模块断电后会话失效；测试凭据只保存在本机不可同步 Keychain。这仍不是最终的无 Mac 生产配对方案。"
+                 ? "当前是持久开发控制配对，可执行拨号、接听和挂断；模块重启后会自动恢复，直至接回 Mac 卸载。本机新凭据会保存并复核 30 天生命周期。这仍不是无 Mac 的生产配对方案。"
                  : "STATUS 配对仅允许只读状态。测试配对包由 Mac 武装流程生成，显式导入后只保存到本机不可同步 Keychain；请随即删除原文件。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)

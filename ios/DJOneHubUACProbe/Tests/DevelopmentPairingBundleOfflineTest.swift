@@ -16,6 +16,39 @@ struct DevelopmentPairingBundleOfflineTest {
         precondition(decoded.moduleIdentifier == identifier)
         precondition(decoded.pairingKey == key)
         precondition(decoded.access == .statusOnly)
+        precondition(decoded.createdAt == now)
+        precondition(decoded.expiresAt == now.addingTimeInterval(3_600))
+
+        let stored = StoredPairingCredential(
+            key: decoded.pairingKey,
+            access: decoded.access,
+            createdAt: decoded.createdAt,
+            expiresAt: decoded.expiresAt
+        )
+        let encodedCredential = try PairingKeyStore.encodeCredential(stored)
+        let restored = try PairingKeyStore.decodeCredential(encodedCredential, now: now)
+        precondition(restored.key == key)
+        precondition(restored.access == .statusOnly)
+        precondition(restored.createdAt == now)
+        precondition(restored.expiresAt == now.addingTimeInterval(3_600))
+
+        do {
+            _ = try PairingKeyStore.decodeCredential(
+                encodedCredential,
+                now: now.addingTimeInterval(3_601)
+            )
+            preconditionFailure("expired Keychain credential accepted")
+        } catch PairingKeyStoreError.expired {
+            // Expected.
+        }
+
+        var legacyControlCredential = Data([0x44, 0x4A, 0x50, 0x01, VoiceControlAccess.controlSession.rawValue])
+        legacyControlCredential.append(key)
+        let restoredLegacy = try PairingKeyStore.decodeCredential(legacyControlCredential, now: now)
+        precondition(restoredLegacy.key == key)
+        precondition(restoredLegacy.access == .controlSession)
+        precondition(restoredLegacy.createdAt == nil)
+        precondition(restoredLegacy.expiresAt == nil)
 
         let control = try DevelopmentPairingBundle.decodeAndValidate(
             bundleData(

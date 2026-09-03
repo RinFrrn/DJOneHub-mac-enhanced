@@ -46,11 +46,11 @@ struct DJOneHubRootView: View {
             Button("取消", role: .cancel) {}
         }
         .confirmationDialog(
-            "删除当前模块的配对？",
+            "删除 iPhone 本机配对？模块侧开发凭据仍会保留，需接回 Mac 后卸载。",
             isPresented: $isConfirmingUnpair,
             titleVisibility: .visible
         ) {
-            Button("删除配对", role: .destructive) {
+            Button("仅删除本机配对", role: .destructive) {
                 voiceControl.unpairCurrentModule()
                 lifecycle.pairingDidChange()
             }
@@ -206,7 +206,7 @@ struct DJOneHubRootView: View {
                 voiceControl.isImportingPairing = true
             }
             if voiceControl.isConfigured {
-                Button("删除当前配对", role: .destructive) {
+                Button("删除 iPhone 本机配对", role: .destructive) {
                     isConfirmingUnpair = true
                 }
             }

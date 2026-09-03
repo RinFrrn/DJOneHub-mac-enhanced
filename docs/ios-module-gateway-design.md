@@ -6,7 +6,7 @@
 
 当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机基线是 Qualcomm 厂商 `rmnet`，不是通用 USB Ethernet。ECM 已分别在 Mac 和真实 iPhone 上完成枚举、上网及模块 TCP 闭环验证；NCM 仍未验证。
 
-### 1.0 控制平面当前进度（2026-08-30）
+### 1.0 控制平面当前进度（2026-09-04）
 
 QDC507 当前 ECM 地址固定为 `192.168.225.1`，认证 voice daemon 监听 TCP `45750`。
 现有一次性候选已在 Mac 侧完成真实来电 `STATUS`、`ANSWER`、`END` 验收；最近一次
@@ -30,19 +30,28 @@ QDC507 当前 ECM 地址固定为 `192.168.225.1`，认证 voice daemon 监听 T
 每秒执行一次认证 STATUS 轮询来刷新来电状态，拨号前要求界面二次确认。UI 不接收自由
 格式 AT/QMI 命令，也不把 key 放入文本框、UserDefaults 或日志。
 
-仍未完成：模块到 iPhone 的双向 PCM 媒体传输、生产 pairing/轮换/撤销、后台来电与
-CallKit 生命周期、以及真机上完整的 iOS 本地网络/USB 配件权限和断线恢复策略。
+模块到 iPhone 的双向 ECM PCM、前后台与锁屏通话、断流恢复均已完成真机验收。仍未完成
+的是生产 pairing/轮换/双端撤销、后台来电与 CallKit 生命周期；当前开发配对不能替代
+产品首次信任根。
 
 为推进只读 STATUS 实机闭环，仓库增加了明确标注为 development-only 的一次性测试配对：
-Mac 后端生成随机 32 字节 key、在模块启动一次认证 daemon，并输出一小时内可导入的 JSON
+Mac 后端生成随机 32 字节 key、在模块启动一次认证 daemon，并输出 30 天内可导入的 JSON
 配对包；iOS 校验固定 purpose/endpoint、有效期和 key 指纹后，按模块写入不可同步
 Keychain。该流程仍依赖 Mac 完成首次武装，不能替代下节要求的生产信任根。
 
-STATUS 实机闭环通过后又增加了 `development-control-session`：模块下次启动时只消费一次
-marker，daemon 就绪后删除模块磁盘上的 key，但不以 `--once` 退出，因此同一供电周期可
-连续执行 `STATUS / DIAL / ANSWER / END`。断电即结束会话。原
+STATUS 实机闭环通过后又增加了 `development-control-session`。为支持无独立供电模块在
+Mac 与 iPhone 之间换接，它现在是**持久开发配对**：`run-control-session` marker、`pairing.key`
+和精确的 rc5 启动链接均保留在模块持久分区，模块每次上电都会恢复受认证控制 daemon 与
+PCM bridge，直至 Mac 卸载接口显式清理。它仍依赖 Mac 注入初始 key，不是生产配对。原
 `development-status-only` 明确以 `--once --status-only` 启动，非 STATUS 请求在模块
 侧返回 `FORBIDDEN`，iOS Keychain 的旧 32 字节裸值也只会迁移为只读权限。
+
+新导入凭据在 Keychain envelope v2 中保存权限、创建时间和到期时间，App 每次恢复凭据
+都会重新校验；既有 v1 control-session envelope 会在首次恢复时原地补成从升级时起 30 天
+有效的 v2，不改变 key、权限或模块标识，也不要求重新导入。当前 App 的删除操作只清理
+iPhone 本机 Keychain；模块侧撤销
+必须把模块接回 Mac 并调用测试卸载接口。生产版本必须把这两端合成可确认、可报告部分失败
+的统一撤销流程。
 
 ### 1.0.1 配对是独立的产品门槛
 

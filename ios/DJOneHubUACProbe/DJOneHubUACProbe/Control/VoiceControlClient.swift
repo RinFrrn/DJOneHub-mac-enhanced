@@ -45,7 +45,7 @@ final class VoiceControlModel: ObservableObject {
     }
 
     /// Injects a key only for the lifetime of this model; it is never persisted.
-    /// The production pairing ceremony will call this after authenticating the user.
+    /// A future production pairing ceremony may call this after authenticating the user.
     func configure(pairingKey: Data) {
         keyStore = nil
         moduleIdentifier = nil
@@ -64,8 +64,7 @@ final class VoiceControlModel: ObservableObject {
         }
     }
 
-    /// Loads a key only when the caller explicitly opts into the production
-    /// pairing store. The app does not call this during probe startup.
+    /// Loads a key only when the caller explicitly opts into the pairing store.
     func configure(from keyStore: PairingKeyStore) {
         do {
             guard let credential = try keyStore.load() else {
@@ -73,7 +72,7 @@ final class VoiceControlModel: ObservableObject {
                 self.keyStore = nil
                 moduleIdentifier = nil
                 stateText = "未找到 pairing key"
-                detailText = "请先完成生产配对"
+                detailText = "请先导入受信任的模块配对"
                 return
             }
             try selectPairing(moduleIdentifier: keyStore.moduleIdentifier, credential: credential)
@@ -133,7 +132,12 @@ final class VoiceControlModel: ObservableObject {
         do {
             let pairing = try DevelopmentPairingBundle.decodeAndValidate(data)
             let keyStore = try PairingKeyStore(moduleIdentifier: pairing.moduleIdentifier)
-            try keyStore.save(StoredPairingCredential(key: pairing.pairingKey, access: pairing.access))
+            try keyStore.save(StoredPairingCredential(
+                key: pairing.pairingKey,
+                access: pairing.access,
+                createdAt: pairing.createdAt,
+                expiresAt: pairing.expiresAt
+            ))
             try PairingKeyStore.deleteAll(exceptModuleIdentifier: pairing.moduleIdentifier)
             restorePairings()
             selectPairing(moduleIdentifier: pairing.moduleIdentifier)
@@ -154,9 +158,9 @@ final class VoiceControlModel: ObservableObject {
         do {
             try keyStore.delete()
             restorePairings()
-            detailText = "已从本机 Keychain 撤销测试凭据"
+            detailText = "已删除 iPhone 本机凭据；模块侧开发凭据仍需接回 Mac 后卸载"
         } catch {
-            stateText = "撤销配对失败"
+            stateText = "删除本机配对失败"
             detailText = error.localizedDescription
         }
     }
@@ -214,7 +218,7 @@ final class VoiceControlModel: ObservableObject {
     func refreshStatus() {
         guard let client else {
             stateText = "未配置 pairing key"
-            detailText = "控制请求被阻止：先完成生产配对流程"
+            detailText = "控制请求被阻止：请先导入模块配对"
             return
         }
         shouldPollStatus = false

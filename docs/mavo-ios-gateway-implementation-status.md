@@ -119,17 +119,19 @@ pairing 和通话自动启停收敛成正式
   回读状态确认；该阶段当时尚未调用任何 Dial/Answer/End 写命令。
 - iOS 探针已把控制客户端接入页面：默认无 pairing key 时按钮保持禁用；STATUS-only
   凭据只允许状态查询，control-session 凭据才显示拨号、接听和挂断。客户端连接被限定
-  到 `.wiredEthernet`；Keychain 禁止同步并在值内保存权限 envelope，旧 32 字节裸 key
-  只迁移为只读。App 每秒轮询 call snapshot，拨号要求界面二次确认。
+  到 `.wiredEthernet`；Keychain 禁止同步，新导入凭据以 v2 envelope 保存权限、创建时间
+  和到期时间并在每次恢复时复核。旧 32 字节裸 key 只保留只读权限，既有 v1 envelope
+  首次恢复时原地补成从升级时起 30 天有效的 v2，不改变 key/权限且不要求重新导入。App
+  每秒轮询 call snapshot，拨号要求界面二次确认。
 - 后续补齐 development-only 的 STATUS 测试配对包：Mac 一次性武装接口生成随机 key，
-  在返回文件前完成真实认证 STATUS 预检；iOS 显式导入后校验固定 endpoint、一小时
+  在返回文件前完成真实认证 STATUS 预检；iOS 显式导入后校验固定 endpoint、30 天
   有效期、创建时间及 SHA-256 模块标识，再写入不可同步 Keychain。App 可选择
   多模块并逐项撤销；已配对时禁用裸 TCP 探针，避免旧 one-shot daemon 被提前消费。
 - iPhone 经 USB ECM 的真实认证 STATUS 已完成：模块返回当前无活动通话；接回 Mac 后
   状态为 `key=absent`、`marker=absent`、`daemon-exit:0`，证明 key 在 daemon 就绪后
-  已从磁盘删除，一次性请求完成后正常退出。随后增加一次供电周期有效的控制会话模式：
-  同样只消费一次启动 marker 并删除磁盘 key，但 daemon 保持在内存中处理多个认证请求；
-  断电即结束，不等同于生产常驻配对。
+  已从磁盘删除，一次性请求完成后正常退出。随后增加持久开发控制模式：为支持模块在
+  Mac/iPhone 间换接，control marker 与 key 会保留并在每次上电恢复 daemon/PCM bridge；
+  只有 Mac 卸载接口会清理模块侧凭据和启动链接。它没有生产首次信任根，不能称为生产配对。
 - 实机发现 LaunchAgent 直接读取 Downloads 的新 ARM 文件会被 macOS TCC 卡在 `open(2)`，
   且后台进程无法可靠展示授权窗。安装器现由交互式终端校验 Actions 清单并把固定范围的
   ARM 文件缓存到 DJOneHub 的 Application Support；后端只读该缓存并再次执行固定哈希
