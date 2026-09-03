@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class CallAudioCoordinator: ObservableObject {
     @Published private(set) var isRunning = false
+    @Published private(set) var isMediaEnabled = false
     @Published private(set) var isTestTone = false
     @Published private(set) var isInterrupted = false
     @Published private(set) var hasActiveRequest = false
@@ -22,7 +23,11 @@ final class CallAudioCoordinator: ObservableObject {
     private var converter: AVAudioConverter?
     private var pipeline: PCMTransport?
     private var downlinkPlayer: DownlinkPCMPlayer?
+    private var playerNode: AVAudioPlayerNode?
+    private var networkFormat: AVAudioFormat?
     private var notificationObservers: [NSObjectProtocol] = []
+    private var desiredMediaEnabled = false
+    private var startGeneration: UInt64 = 0
 
     init() {
         observeAudioSession()
@@ -34,38 +39,98 @@ final class CallAudioCoordinator: ObservableObject {
         }
     }
 
-    func start(pairingKey: Data) {
-        guard !isRunning, !isInterrupted else { return }
+    func start(pairingKey: Data, mediaEnabled: Bool = true) {
+        guard !isRunning, !hasActiveRequest, !isInterrupted else { return }
         guard pairingKey.count == 32 else {
             stateText = "无法启动"
             detailText = "当前配对凭据无效"
             return
         }
+        startGeneration &+= 1
+        let generation = startGeneration
+        desiredMediaEnabled = mediaEnabled
+        isMediaEnabled = false
         hasActiveRequest = true
-        stateText = "请求麦克风权限…"
-        detailText = ""
+        guard let outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 8_000,
+            channels: 1,
+            interleaved: true
+        ) else {
+            hasActiveRequest = false
+            stateText = "无法启动"
+            detailText = "无法创建 8 kHz S16_LE 音频格式"
+            return
+        }
+        var sessionID: UInt32 = 0
+        while sessionID == 0 {
+            sessionID = UInt32.random(in: 1 ... UInt32.max)
+        }
+        let player = AVAudioPlayerNode()
+        let downlinkPlayer = makeDownlinkPlayer(
+            player: player,
+            format: outputFormat,
+            mediaEnabled: false
+        )
+        let pipeline = makePipeline(
+            pairingKey: pairingKey,
+            sessionID: sessionID,
+            mediaEnabled: false,
+            downlinkPlayer: downlinkPlayer
+        )
+        self.pipeline = pipeline
+        self.downlinkPlayer = downlinkPlayer
+        playerNode = player
+        networkFormat = outputFormat
+        pipeline.start()
+        stateText = mediaEnabled ? "请求麦克风权限…" : "正在预热通话音频…"
+        detailText = mediaEnabled ? "" : "麦克风和下行将在通话接通后放行"
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self,
+                      self.startGeneration == generation,
+                      self.hasActiveRequest else { return }
                 guard granted else {
+                    self.tearDownAudio(deactivateSession: false)
+                    self.hasActiveRequest = false
                     self.stateText = "麦克风权限被拒绝"
                     self.detailText = "请在系统设置中允许 DJOneHub 使用麦克风"
                     return
                 }
                 guard !self.isInterrupted else {
+                    self.tearDownAudio(deactivateSession: false)
+                    self.hasActiveRequest = false
                     self.stateText = "系统音频暂时不可用"
                     self.detailText = "音频中断结束且通话仍存在时会自动恢复"
                     return
                 }
-                self.startAuthorized(pairingKey: pairingKey)
+                self.startAuthorized(generation: generation)
             }
         }
     }
 
+    func setMediaEnabled(_ enabled: Bool) {
+        guard !isTestTone else { return }
+        desiredMediaEnabled = enabled
+        guard isRunning else { return }
+        pipeline?.setMediaEnabled(enabled)
+        downlinkPlayer?.setMediaEnabled(enabled)
+        isMediaEnabled = enabled
+        inputLevel = enabled ? inputLevel : 0
+        downlinkLevel = enabled ? downlinkLevel : 0
+        stateText = enabled ? "双向 PCM 传输中" : "通话音频已预热"
+        detailText = enabled
+            ? "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
+            : "仅发送认证静音保活；麦克风和下行尚未放行"
+    }
+
     func stop() {
+        startGeneration &+= 1
         tearDownAudio(deactivateSession: true)
         hasActiveRequest = false
         isRunning = false
+        isMediaEnabled = false
+        desiredMediaEnabled = false
         isTestTone = false
         stateText = "已停止"
         detailText = "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
@@ -82,6 +147,8 @@ final class CallAudioCoordinator: ObservableObject {
         pipeline = nil
         converter = nil
         downlinkPlayer = nil
+        playerNode = nil
+        networkFormat = nil
         engine = nil
         try? session.overrideOutputAudioPort(.none)
         if deactivateSession {
@@ -90,12 +157,14 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     func startTestTone(pairingKey: Data) {
-        guard !isRunning else { return }
+        guard !isRunning, !hasActiveRequest else { return }
         guard pairingKey.count == 32 else {
             stateText = "无法启动"
             detailText = "当前配对凭据无效"
             return
         }
+        startGeneration &+= 1
+        desiredMediaEnabled = true
         hasActiveRequest = true
         var sessionID: UInt32 = 0
         while sessionID == 0 {
@@ -113,12 +182,15 @@ final class CallAudioCoordinator: ObservableObject {
         detailText = "固定峰值 8192/32768；用于隔离麦克风采集问题"
         isTestTone = true
         isRunning = true
+        isMediaEnabled = true
         pipeline.start()
         pipeline.startTestTone()
     }
 
-    private func startAuthorized(pairingKey: Data) {
-        guard !isInterrupted else { return }
+    private func startAuthorized(generation: UInt64) {
+        guard !isInterrupted,
+              startGeneration == generation,
+              hasActiveRequest else { return }
         do {
             try session.setCategory(
                 .playAndRecord,
@@ -148,37 +220,17 @@ final class CallAudioCoordinator: ObservableObject {
             guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
                 throw CallAudioError.inputFormatUnavailable
             }
-            guard let outputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatInt16,
-                sampleRate: 8_000,
-                channels: 1,
-                interleaved: true
-            ), let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            guard let outputFormat = networkFormat,
+                  let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
                 throw CallAudioError.converterUnavailable
             }
-
-            var sessionID: UInt32 = 0
-            while sessionID == 0 {
-                sessionID = UInt32.random(in: 1 ... UInt32.max)
+            guard let player = playerNode,
+                  let downlinkPlayer,
+                  let pipeline else {
+                throw CallAudioError.prewarmUnavailable
             }
-            let player = AVAudioPlayerNode()
-            let downlinkPlayer = DownlinkPCMPlayer(
-                player: player,
-                format: outputFormat,
-                onMetrics: { [weak self] metrics in
-                    Task { @MainActor in
-                        guard let self, self.isRunning else { return }
-                        self.downlinkMetrics = metrics
-                    }
-                }
-            )
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
-            let pipeline = makePipeline(
-                pairingKey: pairingKey,
-                sessionID: sessionID,
-                downlinkPlayer: downlinkPlayer
-            )
 
             input.installTap(onBus: 0, bufferSize: 768, format: inputFormat) { buffer, _ in
                 do {
@@ -207,21 +259,30 @@ final class CallAudioCoordinator: ObservableObject {
                 inputFormat.sampleRate,
                 inputFormat.channelCount
             )
-            stateText = "连接模块 UDP…"
-            detailText = "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
+            let mediaEnabled = desiredMediaEnabled
+            stateText = mediaEnabled ? "连接模块 UDP…" : "正在预热模块 PCM…"
+            detailText = mediaEnabled
+                ? "双向 PCM：内置麦克风上行，modem 下行送往 iPhone 扬声器"
+                : "仅发送认证静音保活；麦克风和下行尚未放行"
             isTestTone = false
             isRunning = true
-            pipeline.start()
+            isMediaEnabled = mediaEnabled
+            pipeline.setMediaEnabled(mediaEnabled)
+            downlinkPlayer.setMediaEnabled(mediaEnabled)
         } catch {
             pipeline?.stop()
             pipeline = nil
             converter = nil
             downlinkPlayer?.stop()
             downlinkPlayer = nil
+            playerNode = nil
+            networkFormat = nil
             engine = nil
             try? session.overrideOutputAudioPort(.none)
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             isRunning = false
+            isMediaEnabled = false
+            hasActiveRequest = false
             stateText = "无法启动 PCM 上行"
             detailText = error.localizedDescription
         }
@@ -230,15 +291,17 @@ final class CallAudioCoordinator: ObservableObject {
     private func makePipeline(
         pairingKey: Data,
         sessionID: UInt32,
+        mediaEnabled: Bool = true,
         downlinkPlayer: DownlinkPCMPlayer? = nil
     ) -> PCMTransport {
         PCMTransport(
             pairingKey: pairingKey,
             sessionID: sessionID,
+            mediaEnabled: mediaEnabled,
             onState: { [weak self] state in
                 Task { @MainActor in
                     guard let self, self.isRunning else { return }
-                    self.stateText = state
+                    self.stateText = self.desiredMediaEnabled ? state : "通话音频已预热"
                 }
             },
             onProgress: { [weak self] frames, peak in
@@ -252,7 +315,7 @@ final class CallAudioCoordinator: ObservableObject {
                 let peak = Self.normalizedPCM16Peak(pcm)
                 downlinkPlayer?.enqueue(sequence: sequence, pcm: pcm)
                 Task { @MainActor in
-                    guard let self, self.isRunning else { return }
+                    guard let self, self.isRunning, self.desiredMediaEnabled else { return }
                     self.receivedFrames = frames
                     self.downlinkLevel = peak
                 }
@@ -263,6 +326,24 @@ final class CallAudioCoordinator: ObservableObject {
                     self.stop()
                     self.stateText = "PCM 发送失败"
                     self.detailText = error
+                }
+            }
+        )
+    }
+
+    private func makeDownlinkPlayer(
+        player: AVAudioPlayerNode,
+        format: AVAudioFormat,
+        mediaEnabled: Bool
+    ) -> DownlinkPCMPlayer {
+        DownlinkPCMPlayer(
+            player: player,
+            format: format,
+            mediaEnabled: mediaEnabled,
+            onMetrics: { [weak self] metrics in
+                Task { @MainActor in
+                    guard let self, self.isRunning else { return }
+                    self.downlinkMetrics = metrics
                 }
             }
         )
@@ -356,7 +437,9 @@ final class CallAudioCoordinator: ObservableObject {
             if isRunning || engine != nil || pipeline != nil {
                 tearDownAudio(deactivateSession: false)
                 isRunning = false
+                isMediaEnabled = false
                 isTestTone = false
+                hasActiveRequest = false
             }
             stateText = "系统音频已暂停"
             detailText = "音频中断结束且通话仍存在时会自动恢复"
@@ -384,7 +467,9 @@ final class CallAudioCoordinator: ObservableObject {
         let needsRecovery = isRunning || engine != nil || pipeline != nil
         tearDownAudio(deactivateSession: false)
         isRunning = false
+        isMediaEnabled = false
         isTestTone = false
+        hasActiveRequest = false
         inputLevel = 0
         downlinkLevel = 0
         if needsRecovery {
@@ -403,6 +488,7 @@ final class CallAudioCoordinator: ObservableObject {
         case builtInSpeakerNotSelected
         case inputFormatUnavailable
         case converterUnavailable
+        case prewarmUnavailable
         case outputBufferUnavailable
         case conversionFailed
 
@@ -412,6 +498,7 @@ final class CallAudioCoordinator: ObservableObject {
             case .builtInSpeakerNotSelected: return "iOS 仍将下行送往模块 USB Audio，未切换到 iPhone 扬声器"
             case .inputFormatUnavailable: return "无法读取麦克风 PCM 格式"
             case .converterUnavailable: return "无法创建 8 kHz S16_LE 转换器"
+            case .prewarmUnavailable: return "模块 PCM 预热资源已失效"
             case .outputBufferUnavailable: return "无法分配 8 kHz PCM 缓冲区"
             case .conversionFailed: return "AVAudioConverter 返回错误"
             }

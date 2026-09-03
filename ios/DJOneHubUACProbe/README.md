@@ -2,8 +2,8 @@
 
 本工程现在包含两个 target：
 
-- `DJOneHub`：正在实施的正式前台通话 App，自动轮询电话状态，并在通话进入
-  conversation 后自动启停 ECM 双向 PCM。
+- `DJOneHub`：正在实施的正式前台通话 App，自动轮询电话状态，在拨号/接听时预热
+  ECM PCM，并在通话进入 conversation 后放行双向媒体。
 - `DJOneHubUACProbe`：保留用于 USB Audio、ECM、控制协议和媒体链路诊断的实验工具。
 
 正式 App 的架构、阶段范围和验收门槛见

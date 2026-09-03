@@ -18,7 +18,31 @@ struct ProductCallPhaseOfflineTest {
             state: "模块已响应 STATUS"
         )
         expect(.recovering("控制请求超时"), state: "控制请求超时")
+        verifyAudioLifecycleHints()
         print("ProductCallPhaseOfflineTest: PASS")
+    }
+
+    private static func verifyAudioLifecycleHints() {
+        for phase in [
+            ProductCallPhase.placingCall,
+            .dialing(1),
+            .answering(1),
+            .active(1),
+        ] {
+            precondition(phase.shouldPrepareCallAudio, "\(phase) should prewarm audio")
+        }
+        for phase in [
+            ProductCallPhase.ready,
+            .incoming(1),
+            .ending,
+        ] {
+            precondition(!phase.shouldPrepareCallAudio, "\(phase) must not prewarm audio")
+        }
+        precondition(ProductCallPhase.active(1).shouldEnableCallMedia)
+        precondition(!ProductCallPhase.answering(1).shouldEnableCallMedia)
+        precondition(ProductCallPhase.dialing(1).prefersFastStatusPolling)
+        precondition(ProductCallPhase.incoming(1).prefersFastStatusPolling)
+        precondition(!ProductCallPhase.active(1).prefersFastStatusPolling)
     }
 
     private static func expect(

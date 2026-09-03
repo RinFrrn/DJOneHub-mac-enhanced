@@ -11,16 +11,20 @@ final class PCMTransport: @unchecked Sendable {
     private let onError: @Sendable (String) -> Void
     private var connection: NWConnection?
     private var toneTimer: DispatchSourceTimer?
+    private var warmupTimer: DispatchSourceTimer?
     private var toneSampleIndex: UInt64 = 0
     private var pendingPCM = Data()
     private var sequence: UInt32 = 0
     private var frames: UInt64 = 0
     private var downlinkFrames: UInt64 = 0
     private var stopped = false
+    private var connectionReady = false
+    private var mediaEnabled: Bool
 
     init(
         pairingKey: Data,
         sessionID: UInt32,
+        mediaEnabled: Bool = true,
         onState: @escaping @Sendable (String) -> Void,
         onProgress: @escaping @Sendable (UInt64, Double) -> Void,
         onDownlink: @escaping @Sendable (UInt32, Data, UInt64) -> Void,
@@ -28,6 +32,7 @@ final class PCMTransport: @unchecked Sendable {
     ) {
         self.pairingKey = pairingKey
         self.sessionID = sessionID
+        self.mediaEnabled = mediaEnabled
         self.onState = onState
         self.onProgress = onProgress
         self.onDownlink = onDownlink
@@ -46,8 +51,10 @@ final class PCMTransport: @unchecked Sendable {
                 self.queue.async {
                     switch state {
                     case .ready:
+                        self.connectionReady = true
                         self.onState("双向 PCM 传输中")
                         self.receiveDownlinkLocked(connection)
+                        self.updateWarmupTimerLocked()
                     case .failed(let error):
                         self.failLocked("UDP 连接失败：\(error.localizedDescription)")
                     case .cancelled:
@@ -92,38 +99,71 @@ final class PCMTransport: @unchecked Sendable {
 
     func enqueue(_ pcm: Data, peak: Double) {
         queue.async { [self] in
-            guard !stopped else { return }
+            guard !stopped, mediaEnabled else { return }
             pendingPCM.append(pcm)
             while pendingPCM.count >= UplinkAudioProtocol.pcmBytes {
                 let frame = Data(pendingPCM.prefix(UplinkAudioProtocol.pcmBytes))
                 pendingPCM.removeFirst(UplinkAudioProtocol.pcmBytes)
-                sequence &+= 1
-                if sequence == 0 { sequence = 1 }
-                do {
-                    let packet = try UplinkAudioProtocol.encodeUplink(
-                        pairingKey: pairingKey,
-                        sessionID: sessionID,
-                        sequence: sequence,
-                        pcm: frame
-                    )
-                    connection?.send(
-                        content: packet,
-                        contentContext: .defaultMessage,
-                        isComplete: true,
-                        completion: .contentProcessed { [weak self] error in
-                            guard let self, let error else { return }
-                            self.queue.async {
-                                self.failLocked("UDP PCM 发送失败：\(error.localizedDescription)")
-                            }
-                        }
-                    )
+                if sendFrameLocked(frame) {
                     frames &+= 1
-                } catch {
-                    failLocked(error.localizedDescription)
-                    return
                 }
             }
             onProgress(frames, peak)
+        }
+    }
+
+    func setMediaEnabled(_ enabled: Bool) {
+        queue.async { [self] in
+            guard !stopped, mediaEnabled != enabled else { return }
+            mediaEnabled = enabled
+            pendingPCM.removeAll(keepingCapacity: true)
+            updateWarmupTimerLocked()
+        }
+    }
+
+    private func updateWarmupTimerLocked() {
+        if stopped || mediaEnabled || !connectionReady {
+            warmupTimer?.cancel()
+            warmupTimer = nil
+            return
+        }
+        guard warmupTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(10))
+        timer.setEventHandler { [weak self] in
+            guard let self, !self.stopped, !self.mediaEnabled else { return }
+            _ = self.sendFrameLocked(Data(repeating: 0, count: UplinkAudioProtocol.pcmBytes))
+        }
+        warmupTimer = timer
+        timer.resume()
+    }
+
+    @discardableResult
+    private func sendFrameLocked(_ frame: Data) -> Bool {
+        sequence &+= 1
+        if sequence == 0 { sequence = 1 }
+        do {
+            let packet = try UplinkAudioProtocol.encodeUplink(
+                pairingKey: pairingKey,
+                sessionID: sessionID,
+                sequence: sequence,
+                pcm: frame
+            )
+            connection?.send(
+                content: packet,
+                contentContext: .defaultMessage,
+                isComplete: true,
+                completion: .contentProcessed { [weak self] error in
+                    guard let self, let error else { return }
+                    self.queue.async {
+                        self.failLocked("UDP PCM 发送失败：\(error.localizedDescription)")
+                    }
+                }
+            )
+            return true
+        } catch {
+            failLocked(error.localizedDescription)
+            return false
         }
     }
 
@@ -158,6 +198,8 @@ final class PCMTransport: @unchecked Sendable {
             stopped = true
             toneTimer?.cancel()
             toneTimer = nil
+            warmupTimer?.cancel()
+            warmupTimer = nil
             connection?.cancel()
             connection = nil
             pendingPCM.removeAll(keepingCapacity: false)
@@ -169,6 +211,8 @@ final class PCMTransport: @unchecked Sendable {
         stopped = true
         toneTimer?.cancel()
         toneTimer = nil
+        warmupTimer?.cancel()
+        warmupTimer = nil
         connection?.cancel()
         connection = nil
         pendingPCM.removeAll(keepingCapacity: false)

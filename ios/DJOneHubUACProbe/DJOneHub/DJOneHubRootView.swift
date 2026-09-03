@@ -35,7 +35,7 @@ struct DJOneHubRootView: View {
             titleVisibility: .visible
         ) {
             Button("拨打") {
-                voiceControl.dial()
+                lifecycle.dial()
             }
             Button("取消", role: .cancel) {}
         }
@@ -119,7 +119,7 @@ struct DJOneHubRootView: View {
             case .dialing(let callID):
                 callStatus(title: "正在呼叫", callID: callID)
                 Button("取消呼叫", role: .destructive) {
-                    voiceControl.end(callID: callID)
+                    lifecycle.end(callID: callID)
                 }
                 .disabled(voiceControl.isBusy)
 
@@ -127,12 +127,12 @@ struct DJOneHubRootView: View {
                 callStatus(title: "模块来电", callID: callID)
                 HStack {
                     Button("拒接", role: .destructive) {
-                        voiceControl.end(callID: callID)
+                        lifecycle.end(callID: callID)
                     }
                     .disabled(voiceControl.isBusy)
                     Spacer()
                     Button("接听") {
-                        voiceControl.answer(callID: callID)
+                        lifecycle.answer(callID: callID)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
@@ -146,7 +146,7 @@ struct DJOneHubRootView: View {
             case .active(let callID):
                 callStatus(title: "通话中", callID: callID)
                 Button("挂断", role: .destructive) {
-                    voiceControl.end(callID: callID)
+                    lifecycle.end(callID: callID)
                 }
                 .disabled(voiceControl.isBusy)
 
@@ -187,7 +187,7 @@ struct DJOneHubRootView: View {
                 ProgressView(value: callAudio.downlinkLevel)
             }
 
-            Text("进入通话后自动启动内置麦克风和 iPhone 扬声器；媒体通过 USB ECM，不经过 USB Audio。")
+            Text("拨号或接听时预热，进入通话后放行内置麦克风和 iPhone 扬声器；媒体通过 USB ECM，不经过 USB Audio。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

@@ -48,6 +48,29 @@ enum ProductCallPhase: Equatable {
         }
     }
 
+    var shouldPrepareCallAudio: Bool {
+        switch self {
+        case .placingCall, .dialing, .answering, .active:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var shouldEnableCallMedia: Bool {
+        if case .active = self { return true }
+        return false
+    }
+
+    var prefersFastStatusPolling: Bool {
+        switch self {
+        case .placingCall, .dialing, .incoming, .answering, .ending:
+            return true
+        default:
+            return false
+        }
+    }
+
     static func derive(
         isConfigured: Bool,
         canControlCalls: Bool,
@@ -90,4 +113,3 @@ enum ProductCallPhase: Equatable {
         return .recovering(reason)
     }
 }
-

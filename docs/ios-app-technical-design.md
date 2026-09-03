@@ -85,18 +85,20 @@ DJOneHubApp
 | `needsPairing` | Keychain 无控制凭据 | 只允许导入/添加模块 |
 | `connecting` | 首次 STATUS 或 ECM 恢复中 | 有界重试，不允许重复控制操作 |
 | `ready` | STATUS 成功且无通话 | 允许拨号 |
-| `dialing` | QMI state 01/04/05 | 继续轮询，尚不启动 PCM |
+| `dialing` | QMI state 01/04/05 | 250ms 轮询，预热本地音频与模块 PCM，媒体保持静音 |
 | `incoming` | QMI state 02/07 | 显示接听和拒接 |
-| `active` | QMI state 03 | 自动启动双向 PCM |
+| `active` | QMI state 03 | 放行已经预热的双向 PCM；未预热时自动冷启动 |
 | `ending` | 用户已请求挂断 | 禁止重复挂断，等待 STATUS 确认 |
 | `recovering` | 控制或媒体暂时失败 | 保留明确故障原因并有限重试 |
 
 媒体生命周期必须服从控制状态：
 
-1. 只有 control-session 凭据且存在 conversation 通话时才能启动媒体。
-2. 同一次 active 状态最多发起一个麦克风权限/音频启动操作。
-3. 通话结束、配对撤销或用户退出时立即停止媒体。
-4. UDP 三秒无合法包后模块自行关闭 PCM；iOS 同时主动释放本地 Audio Session。
+1. 主动拨号时立即预热；呼入只有用户点击“接听”后才访问麦克风和预热，单纯响铃不启动。
+2. 预热阶段只发送每 250ms 一个认证静音包，使模块提前打开 PCM；不发送麦克风内容，也不播放下行。
+3. 只有 control-session 凭据且 QMI 进入 conversation 状态后才放行真实双向媒体。
+4. 同一次建链最多发起一个麦克风权限/音频启动操作。
+5. 通话结束、控制失败、配对撤销或用户退出时立即停止媒体。
+6. UDP 三秒无合法包后模块自行关闭 PCM；iOS 同时主动释放本地 Audio Session。
 
 ## 6. 音频设计
 
@@ -107,6 +109,8 @@ DJOneHubApp
 - 麦克风输入通过 `AVAudioConverter` 转为 8 kHz / mono / S16_LE。
 - 网络严格按 256 字节重分帧。
 - 下行至少预缓冲四个 16 ms 帧后播放。
+- 拨号/接听动作立即唤醒状态确认；建链期间 STATUS 使用 250ms 周期，active 后恢复 1 秒。
+- 预热与媒体放行分离，接通后的额外播放缓冲仍只有四帧（约 64ms）。
 
 ### 6.2 第二阶段稳定性
 
@@ -228,4 +232,7 @@ CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
   去抖状态机并在隔离测试中单独实现。
 - [x] 增加丢包补偿、乱序、重复/迟到拒绝、序号重置、重缓冲和队列丢弃指标；
   指标不包含 PCM 内容或配对密钥，签名版本已安装，等待真机通话数值验收。
+- [x] 将 macOS 已验证的低延迟策略迁移到 ECM PCM：拨号/接听即预热 AudioSession、
+  AVAudioEngine 和模块 PCM，预热阶段仅发认证静音；QMI active 后才放行麦克风与下行；
+  建链 STATUS 提升到 250ms，并保留 64ms 下行预缓冲，等待真机首音延迟验收。
 - [ ] 完成 ECM 拔插、锁屏及前后台切换验收。

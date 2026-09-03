@@ -14,20 +14,23 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
     private var bufferedFrames = 0
     private var started = false
     private var stopped = false
+    private var mediaEnabled: Bool
 
     init(
         player: AVAudioPlayerNode,
         format: AVAudioFormat,
+        mediaEnabled: Bool = true,
         onMetrics: @escaping @Sendable (DownlinkPlaybackMetrics) -> Void = { _ in }
     ) {
         self.player = player
         self.format = format
+        self.mediaEnabled = mediaEnabled
         self.onMetrics = onMetrics
     }
 
     func enqueue(sequence: UInt32, pcm: Data) {
         queue.async { [self] in
-            guard !stopped else { return }
+            guard !stopped, mediaEnabled else { return }
             let previousMetrics = metrics
             let result = jitterBuffer.push(sequence: sequence, pcm: pcm)
             metrics.record(result)
@@ -40,9 +43,20 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
         }
     }
 
+    func setMediaEnabled(_ enabled: Bool) {
+        queue.async { [self] in
+            guard !stopped, mediaEnabled != enabled else { return }
+            mediaEnabled = enabled
+            player.stop()
+            jitterBuffer.reset()
+            bufferedFrames = 0
+            started = false
+        }
+    }
+
     func enqueueDiagnosticTone() {
         queue.async { [self] in
-            guard !stopped else { return }
+            guard !stopped, mediaEnabled else { return }
             var sampleIndex = 0
             for _ in 0 ..< 32 {
                 var samples = [Int16](

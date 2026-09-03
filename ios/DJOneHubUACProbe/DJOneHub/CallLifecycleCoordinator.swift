@@ -12,6 +12,9 @@ final class CallLifecycleCoordinator: ObservableObject {
     private var handledAudioRecoveryGeneration: UInt64
     private var nextStatusAttempt = ContinuousClock.now
 
+    private let normalStatusPollInterval: Duration = .seconds(1)
+    private let setupStatusPollInterval: Duration = .milliseconds(250)
+
     init(voiceControl: VoiceControlModel, callAudio: CallAudioCoordinator) {
         self.voiceControl = voiceControl
         self.callAudio = callAudio
@@ -32,7 +35,7 @@ final class CallLifecycleCoordinator: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 self.tick(clock: clock)
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .milliseconds(250))
             }
         }
     }
@@ -53,6 +56,26 @@ final class CallLifecycleCoordinator: ObservableObject {
         updatePhaseAndAudio()
     }
 
+    func dial() {
+        prepareAudioForUserAction()
+        nextStatusAttempt = .now
+        voiceControl.dial()
+        updatePhaseAndAudio()
+    }
+
+    func answer(callID: UInt8) {
+        prepareAudioForUserAction()
+        nextStatusAttempt = .now
+        voiceControl.answer(callID: callID)
+        updatePhaseAndAudio()
+    }
+
+    func end(callID: UInt8) {
+        nextStatusAttempt = .now
+        voiceControl.end(callID: callID)
+        updatePhaseAndAudio()
+    }
+
     private func tick(clock: ContinuousClock) {
         updatePhaseAndAudio()
 
@@ -61,7 +84,10 @@ final class CallLifecycleCoordinator: ObservableObject {
 
         if voiceControl.shouldPollStatus, clock.now >= nextStatusAttempt {
             voiceControl.pollStatus()
-            nextStatusAttempt = clock.now.advanced(by: .seconds(1))
+            let interval = phase.prefersFastStatusPolling
+                ? setupStatusPollInterval
+                : normalStatusPollInterval
+            nextStatusAttempt = clock.now.advanced(by: interval)
         } else if clock.now >= nextStatusAttempt {
             voiceControl.refreshStatus()
             nextStatusAttempt = clock.now.advanced(by: .seconds(3))
@@ -78,26 +104,41 @@ final class CallLifecycleCoordinator: ObservableObject {
             stateText: voiceControl.stateText
         )
 
-        let shouldRunAudio = voiceControl.canControlCalls && voiceControl.hasActiveCall
+        let shouldPrepareAudio = voiceControl.canControlCalls && phase.shouldPrepareCallAudio
+        let shouldEnableMedia = voiceControl.canControlCalls && phase.shouldEnableCallMedia
         if handledAudioRecoveryGeneration != callAudio.recoveryGeneration {
             handledAudioRecoveryGeneration = callAudio.recoveryGeneration
             audioStartRequested = false
         }
-        if shouldRunAudio {
+        if shouldPrepareAudio {
             guard !callAudio.isInterrupted else {
                 audioStartRequested = false
                 return
             }
-            guard !callAudio.isRunning, !audioStartRequested,
-                  let key = voiceControl.pairingKeyForUplinkProbe() else { return }
-            audioStartRequested = true
-            callAudio.start(pairingKey: key)
+            if callAudio.isRunning || callAudio.hasActiveRequest {
+                callAudio.setMediaEnabled(shouldEnableMedia)
+            } else {
+                guard !audioStartRequested,
+                      let key = voiceControl.pairingKeyForUplinkProbe() else { return }
+                audioStartRequested = true
+                callAudio.start(pairingKey: key, mediaEnabled: shouldEnableMedia)
+            }
         } else {
             audioStartRequested = false
             if callAudio.isRunning || callAudio.hasActiveRequest {
                 callAudio.stop()
             }
         }
+    }
+
+    private func prepareAudioForUserAction() {
+        guard voiceControl.canControlCalls,
+              !callAudio.isInterrupted,
+              !callAudio.isRunning,
+              !callAudio.hasActiveRequest,
+              let key = voiceControl.pairingKeyForUplinkProbe() else { return }
+        audioStartRequested = true
+        callAudio.start(pairingKey: key, mediaEnabled: false)
     }
 
 }
