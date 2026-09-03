@@ -38,7 +38,7 @@ PCM。正式通话媒体不经过 USB UAC；iPhone/iPad 模式下模块关闭 UA
 
 | 产物 | SHA-256 |
 |---|---|
-| `mavo-pcm-bridge.armv7` | `e8b8b9b227b1c716e7889930c61686cc68cf2f69c8699772d3f5eaeff2887b51` |
+| `mavo-pcm-bridge.armv7` | `052912efc5f9ef21ac891a5d2f9c457b3a3242f8423b17b3cb2f95418e982e48` |
 | `qdc507_incall_card.new.ko` | `dfabcecff905b97ed46f755f4667e7c2635799e00524a10a8ed9d546bd1feea7` |
 
 ## 3. 工程策略
@@ -125,8 +125,9 @@ DJOneHubApp
 - 处理 interruption、route change、media services reset、锁屏和前后台切换。
 - 记录帧计数、丢包、乱序、重缓冲次数和峰值，但绝不记录 PCM 内容或 key。
 
-模块内部 48 kHz/8 kHz 的带滤波重采样属于模块 bridge 产品化工作，不由 iOS 改变网络
-协议来规避。
+模块 bridge 已在不改变网络协议的前提下完成 48 kHz/8 kHz 转换：上行采用跨帧连续
+线性插值，下行采用 127-tap Q15 FIR 抗混叠后 6:1 抽取。iOS 仍只收发固定的 8 kHz、
+单声道、S16_LE、256 字节媒体帧。
 
 ## 7. 网络恢复原则
 

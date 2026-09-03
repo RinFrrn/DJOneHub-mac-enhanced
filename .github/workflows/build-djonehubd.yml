@@ -23,6 +23,8 @@ on:
       - "module/djonehub_voice_policy.c"
       - "module/djonehub_voice_policy.h"
       - "module/mavo_pcm_bridge.c"
+      - "module/mavo_pcm_resampler.h"
+      - "module/mavo_pcm_resampler_test.c"
       - "module/qdc507_incall_card.c"
       - "outputs/module/qdc507_incall_card.new.ko"
       - "outputs/module/qdc507_incall_card.new.ko.sha256"
@@ -231,6 +233,26 @@ jobs:
         run: |
           set -euxo pipefail
           ./scripts/build_pcm_bridge_armel.sh --container
+
+      - name: Test PCM resampler
+        run: |
+          set -euxo pipefail
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/mavo_pcm_resampler_test.c -lm \
+            -o outputs/module/mavo-pcm-resampler-test
+          outputs/module/mavo-pcm-resampler-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/mavo_pcm_resampler_test.c -lm \
+            -o outputs/module/mavo-pcm-resampler-test-sanitized
+          outputs/module/mavo-pcm-resampler-test-sanitized
 
       - name: Verify pinned QDC507 in-call card
         run: |

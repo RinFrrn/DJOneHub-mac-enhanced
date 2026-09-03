@@ -1,5 +1,7 @@
 source=/src/module/mavo_pcm_bridge.c
-source_sha256=58dee9f21cad9fa8346a2d1c4da9d03280b5e465b57eba55202c6dc73880d6ce
+source_sha256=a510ecf4c3ab2dcc0d6560f925472f7bf6411a2055acacb5a346a3db1d7739fc
+resampler_header=/src/module/mavo_pcm_resampler.h
+resampler_header_sha256=5630dee35ad2660bf23908a8264e52ec4b63b6a689fc1678fc8f03265813e3a7
 compiler=10.2.1
 binutils=2.35.2
 target=ARMv7 EABI5 soft-float (arm-linux-gnueabi)
@@ -15,9 +17,9 @@ ELF Header:
   Type:                              EXEC (Executable file)
   Machine:                           ARM
   Version:                           0x1
-  Entry point address:               0x1323c
+  Entry point address:               0x13e58
   Start of program headers:          52 (bytes into file)
-  Start of section headers:          41316 (bytes into file)
+  Start of section headers:          45412 (bytes into file)
   Flags:                             0x5000200, Version5 EABI, soft-float ABI
   Size of this header:               52 (bytes)
   Size of program headers:           32 (bytes)

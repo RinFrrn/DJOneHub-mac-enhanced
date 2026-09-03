@@ -17,8 +17,9 @@
 - 下行已实测：modem voice DSP → `VOC_REC_DL` → Media1 capture → HMAC UDP →
   iPhone `AVAudioPlayerNode` → 内置扬声器；iPhone 可清晰听到对端。
 - 网络格式固定为 8000 Hz、单声道、signed S16 little-endian，128 samples / 256 bytes /
-  16 ms。模块 Media1 端为 48000 Hz、单声道、S16_LE；上行当前用 6 倍重复升采样，
-  下行当前每 6 个样本抽取一个，足以验证路径，后续仍应换成带滤波的重采样器。
+  16 ms。模块 Media1 端为 48000 Hz、单声道、S16_LE；模块 bridge 上行使用跨帧连续的
+  线性插值，下行使用 127-tap Blackman Q15 FIR 低通后 6:1 抽取。协议帧大小和节拍不变，
+  下行滤波群延迟约 1.3 ms。
 - iPhone/iPad 模式把 `AT+QCFG="usbcfg"` 的 UAC 位关闭，仅保留 USB 网络、AT、短信
   等接口。真机确认普通系统音频不再被模块抢占，同时 ECM 双向通话仍正常。通话媒体
   因而真正绕过 UAC，而不是仅在会话期间暂停 gadget PCM。
@@ -34,10 +35,10 @@
 | 文件 | SHA-256 |
 |---|---|
 | `qdc507_incall_card.new.ko` | `dfabcecff905b97ed46f755f4667e7c2635799e00524a10a8ed9d546bd1feea7` |
-| `mavo-pcm-bridge.armv7` | `e8b8b9b227b1c716e7889930c61686cc68cf2f69c8699772d3f5eaeff2887b51` |
+| `mavo-pcm-bridge.armv7` | `052912efc5f9ef21ac891a5d2f9c457b3a3242f8423b17b3cb2f95418e982e48` |
 
-剩余工作属于产品化而不是路径可行性验证：用带滤波的 48 kHz/8 kHz 重采样替换抽取/
-重复、完善下行欠载后的重新缓冲、把 development pairing 和通话自动启停收敛成正式
+剩余工作属于产品化而不是路径可行性验证：完善下行欠载后的重新缓冲、把 development
+pairing 和通话自动启停收敛成正式
 生命周期，并完成重新部署后的冷启动回归。
 
 ## 已完成
@@ -91,6 +92,9 @@
 
 ## 验收结果
 
+- 模块重采样器通过严格 C11 告警、Address/Undefined Sanitizer、跨帧连续性、分块与连续
+  输入一致性、DC 增益、通带及带外抑制测试；ARMv7 bridge 同时通过 GCC 静态分析和既有
+  ELF/glibc 兼容性审计。真机听感与长通话稳定性仍待新固定产物部署后验收。
 - 主机严格 C11 语法检查通过（仅保留原有 Apple Clang 的动态 `vsnprintf` 提示）。
 - Clang 静态分析通过，无诊断项。
 - HMAC-SHA256 已知向量通过。

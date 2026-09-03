@@ -10,6 +10,8 @@
 
 #define _GNU_SOURCE
 
+#include "mavo_pcm_resampler.h"
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -79,6 +81,9 @@
 #define NETWORK_SESSION_TIMEOUT_USEC 3000000LL
 #define NETWORK_POLL_USEC NETWORK_PCM_FRAME_USEC
 #define UPLINK_JITTER_CAPACITY 16U
+
+_Static_assert(NETWORK_UPLINK_RATE_MULTIPLIER == MAVO_PCM_RESAMPLE_FACTOR,
+               "Media1 and network sample rates must match the resampler");
 
 #define IDLE_RETRY_USEC 20000U
 #define STARTUP_RETRY_USEC 200000U
@@ -1242,6 +1247,8 @@ struct network_session {
     unsigned char *downlink_resample_buffer;
     size_t downlink_resample_capacity;
     size_t downlink_resample_available;
+    struct mavo_pcm_upsampler uplink_resampler;
+    struct mavo_pcm_downsampler downlink_resampler;
     volatile int media_stop;
     volatile int downlink_failed;
     volatile int failed;
@@ -1936,26 +1943,21 @@ static int valid_downlink_pcm_buffer_length(unsigned int length)
 }
 
 static int write_uplink_network_frame(
-    struct vendor_audio *api, void *pcm, unsigned int pcm_buffer_length,
-    unsigned char payload[NETWORK_PCM_FRAME_BYTES])
+    struct vendor_audio *api, void *pcm,
+    struct mavo_pcm_upsampler *resampler,
+    unsigned int pcm_buffer_length,
+    const unsigned char payload[NETWORK_PCM_FRAME_BYTES])
 {
-    unsigned char device_payload[NETWORK_UPLINK_DEVICE_FRAME_BYTES];
-    unsigned int input_sample;
+    int16_t network_samples[NETWORK_PCM_FRAME_SAMPLES];
+    int16_t device_samples[
+        NETWORK_PCM_FRAME_SAMPLES * NETWORK_UPLINK_RATE_MULTIPLIER];
+    unsigned char *device_payload = (unsigned char *)device_samples;
     unsigned int offset;
 
-    for (input_sample = 0U; input_sample < NETWORK_PCM_FRAME_SAMPLES;
-         ++input_sample) {
-        unsigned int copy;
-
-        for (copy = 0U; copy < NETWORK_UPLINK_RATE_MULTIPLIER; ++copy) {
-            unsigned int output_sample =
-                input_sample * NETWORK_UPLINK_RATE_MULTIPLIER + copy;
-
-            device_payload[output_sample * 2U] = payload[input_sample * 2U];
-            device_payload[output_sample * 2U + 1U] =
-                payload[input_sample * 2U + 1U];
-        }
-    }
+    memcpy(network_samples, payload, sizeof(network_samples));
+    mavo_pcm_upsample_8k_to_48k(
+        resampler, network_samples, NETWORK_PCM_FRAME_SAMPLES,
+        device_samples);
     for (offset = 0U; offset < NETWORK_UPLINK_DEVICE_FRAME_BYTES;
          offset += pcm_buffer_length) {
         int write_result =
@@ -1978,7 +1980,10 @@ static int read_downlink_network_frame(
     struct network_session *session,
     unsigned char payload[NETWORK_PCM_FRAME_BYTES])
 {
-    unsigned int output_sample;
+    int16_t device_samples[
+        NETWORK_PCM_FRAME_SAMPLES * NETWORK_UPLINK_RATE_MULTIPLIER];
+    int16_t network_samples[NETWORK_PCM_FRAME_SAMPLES];
+    size_t produced;
     size_t remaining;
 
     while (session->downlink_resample_available <
@@ -2010,16 +2015,18 @@ static int read_downlink_network_frame(
         session->downlink_resample_available +=
             session->downlink_pcm_buffer_length;
     }
-    for (output_sample = 0U; output_sample < NETWORK_PCM_FRAME_SAMPLES;
-         ++output_sample) {
-        unsigned int input_sample =
-            output_sample * NETWORK_UPLINK_RATE_MULTIPLIER;
-
-        payload[output_sample * 2U] =
-            session->downlink_resample_buffer[input_sample * 2U];
-        payload[output_sample * 2U + 1U] =
-            session->downlink_resample_buffer[input_sample * 2U + 1U];
+    memcpy(device_samples, session->downlink_resample_buffer,
+           sizeof(device_samples));
+    produced = mavo_pcm_downsample_48k_to_8k(
+        &session->downlink_resampler, device_samples,
+        NETWORK_PCM_FRAME_SAMPLES * NETWORK_UPLINK_RATE_MULTIPLIER,
+        network_samples, NETWORK_PCM_FRAME_SAMPLES);
+    if (produced != NETWORK_PCM_FRAME_SAMPLES) {
+        log_message("error", "Media1 downlink resampler produced %u samples",
+                    (unsigned int)produced);
+        return -1;
     }
+    memcpy(payload, network_samples, sizeof(network_samples));
     remaining = session->downlink_resample_available -
         NETWORK_UPLINK_DEVICE_FRAME_BYTES;
     if (remaining != 0U) {
@@ -2120,6 +2127,7 @@ static int run_incall_music_tone_probe(struct vendor_audio *api)
         0, 5793, 8192, 5793, 0, -5793, -8192, -5793
     };
     unsigned char payload[NETWORK_PCM_FRAME_BYTES];
+    struct mavo_pcm_upsampler resampler;
     struct voice_session_anchor anchor;
     void *uplink_pcm = NULL;
     unsigned int pcm_buffer_length = 0U;
@@ -2168,6 +2176,7 @@ static int run_incall_music_tone_probe(struct vendor_audio *api)
     }
     log_message("info", "local in-call tone started: 1 kHz, peak=8192, "
                 "duration=10s, pcm_buffer=%u", pcm_buffer_length);
+    mavo_pcm_upsampler_reset(&resampler);
     for (frame = 0U; frame < 625U && !should_stop(); ++frame) {
         unsigned int sample;
 
@@ -2180,8 +2189,8 @@ static int run_incall_music_tone_probe(struct vendor_audio *api)
             memcpy(payload + sample * 2U, &value, sizeof(value));
             ++sample_index;
         }
-        if (write_uplink_network_frame(api, uplink_pcm, pcm_buffer_length,
-                                       payload) != 0) {
+        if (write_uplink_network_frame(api, uplink_pcm, &resampler,
+                                       pcm_buffer_length, payload) != 0) {
             goto cleanup;
         }
         if ((frame + 1U) % 125U == 0U) {
@@ -2250,6 +2259,8 @@ static int run_uplink_media_session(
     session->tx_sequence = 0U;
     session->media_stop = 0;
     session->downlink_failed = 0;
+    mavo_pcm_upsampler_reset(&session->uplink_resampler);
+    mavo_pcm_downsampler_reset(&session->downlink_resampler);
     enqueue_uplink_frame(&jitter, payload, sequence);
 
     if (get_voice_audio_enabled(&original_usb_audio) != 0) {
@@ -2386,7 +2397,8 @@ static int run_uplink_media_session(
             goto cleanup;
         }
         if (write_uplink_network_frame(
-                session->api, uplink_pcm, uplink_pcm_buffer_length,
+                session->api, uplink_pcm, &session->uplink_resampler,
+                uplink_pcm_buffer_length,
                 payload_ready ? payload : silence) != 0) {
             log_message("error", "uplink listener Media1 PCM write failed");
             goto cleanup;

@@ -11,6 +11,7 @@ umask 022
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
 SOURCE="$PROJECT_DIR/module/mavo_pcm_bridge.c"
+RESAMPLER_HEADER="$PROJECT_DIR/module/mavo_pcm_resampler.h"
 OUT_DIR=${OUT_DIR:-"$PROJECT_DIR/outputs/module"}
 
 BUILDER_IMAGE=${MAVO_PCM_BUILDER_IMAGE:-"debian@sha256:19d6c1c4e66453a5d729cf13c3dcdb4708aeff1b2ed9886805afcda191f064b7"}
@@ -164,6 +165,9 @@ build_local()
         printf 'source=%s\n' "$SOURCE"
         printf 'source_sha256='
         sha256sum "$SOURCE" | awk '{print $1}'
+        printf 'resampler_header=%s\n' "$RESAMPLER_HEADER"
+        printf 'resampler_header_sha256='
+        sha256sum "$RESAMPLER_HEADER" | awk '{print $1}'
         printf 'compiler=%s\n' "$("$CC" -dumpfullversion -dumpversion)"
         printf 'binutils=%s\n' \
             "$("$READELF" --version | sed -n '1s/.* //p')"
@@ -299,6 +303,9 @@ build_module_sysroot()
         printf 'source=%s\n' "$SOURCE"
         printf 'source_sha256='
         sha256sum "$SOURCE" | awk '{print $1}'
+        printf 'resampler_header=%s\n' "$RESAMPLER_HEADER"
+        printf 'resampler_header_sha256='
+        sha256sum "$RESAMPLER_HEADER" | awk '{print $1}'
         printf 'compiler=%s\n' "$($CC -dumpfullversion -dumpversion)"
         printf 'binutils=%s\n' \
             "$($READELF --version | sed -n '1s/.* //p')"

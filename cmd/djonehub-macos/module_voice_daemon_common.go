@@ -15,7 +15,7 @@ import (
 
 const (
 	voiceDaemonExpectedSHA256         = "68c672e8d669b61d4e95a61b480cc503763f84b87bb7d50d1c88e4e191cf7c0e"
-	voiceUplinkExpectedSHA256         = "e8b8b9b227b1c716e7889930c61686cc68cf2f69c8699772d3f5eaeff2887b51"
+	voiceUplinkExpectedSHA256         = "052912efc5f9ef21ac891a5d2f9c457b3a3242f8423b17b3cb2f95418e982e48"
 	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
 	voiceTestVoiceExpectedSHA256      = "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
 	voiceTestIncallCardExpectedSHA256 = "dfabcecff905b97ed46f755f4667e7c2635799e00524a10a8ed9d546bd1feea7"
