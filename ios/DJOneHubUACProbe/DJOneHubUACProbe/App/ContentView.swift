@@ -167,9 +167,9 @@ struct ContentView: View {
             .disabled(voiceControl.isBusy || !voiceControl.isConfigured)
 
             if voiceControl.canControlCalls {
-                Toggle("系统声音留在 iPhone", isOn: Binding(
-                    get: { voiceControl.moduleUSBAudioEnabled == false },
-                    set: { voiceControl.setKeepsSystemAudioOnPhone($0) }
+                Toggle("启用模块 USB Audio 数据通道", isOn: Binding(
+                    get: { voiceControl.moduleUSBAudioEnabled == true },
+                    set: { voiceControl.setModuleUSBAudioEnabled($0) }
                 ))
                 .disabled(!voiceControl.canChangeUSBAudio)
 
@@ -183,7 +183,7 @@ struct ContentView: View {
                     .disabled(voiceControl.isBusy)
                 }
 
-                Text("打开后会关闭模块的 USB Audio 数据通道，让非通话声音留在 iPhone；ECM 电话控制和蜂窝 PCM 桥不受影响。为避免和通话音频线程互相覆盖，仅允许在无活动通话时切换。")
+                Text("仅用于诊断模块的 UAC 数据门控，不会从 USB 描述符移除音频设备，也不会改变 iOS 的系统音频路由。正式移动模式必须在 Mac 端关闭 USBCFG 的 UAC 位。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -259,7 +259,7 @@ struct ContentView: View {
         guard let enabled = voiceControl.moduleUSBAudioEnabled else {
             return voiceControl.didAttemptUSBAudioQuery ? "未读取" : "读取中…"
         }
-        return enabled ? "开启（模块可接收系统声音）" : "关闭（声音留在 iPhone）"
+        return enabled ? "数据通道开启" : "数据通道关闭"
     }
 
     private func importPairing(_ result: Result<[URL], Error>) {

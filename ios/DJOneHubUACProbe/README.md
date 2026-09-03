@@ -200,10 +200,11 @@ daemon 只在当前模块供电周期内存活，断电后不会自行恢复。�
 `--once --status-only` 启动，模块端会拒绝任何变更通话状态的命令，不能靠修改 App
 绕过。两类短期凭据在 Keychain 中带不同权限，新包导入后会清除旧的开发凭据。
 
-正式 App 会显示“系统声音留在 iPhone”开关。它不靠长期占用 `AVAudioSession`，而是经
-认证控制面读写模块固定节点 `/sys/class/android_usb/f_audio/audio_enable`；只允许在无活动
-通话时设置，并在响应前读回确认。关闭后的值会成为下一次网络 PCM 会话的进入值，所以
-通话结束不会再被 bridge 恢复成开启；模块重新上电或切换持久 USB profile 后仍需重新查询。
+Probe 保留认证的 `USB_AUDIO` 诊断操作，用于读写模块固定节点
+`/sys/class/android_usb/f_audio/audio_enable`。实机验证表明该节点只控制已枚举 UAC 的数据门，
+不会从 USB 描述符移除音频设备，也不会让 iOS 重新选择系统输出；正式 App 因此不再显示
+该开关。要让普通声音留在手机，必须先在 Mac 端选择 iPhone/iPad USB profile，使
+`USBCFG` 的 UAC 位在模块下次上电时为 0；ECM 电话控制和网络 PCM 保持可用。
 
 控制会话现在还会启动一个独立的认证 UDP 上行监听器 `192.168.225.1:45751`。监听器空闲时
 不打开 PCM；首个来自 USB ECM `/24` 的合法 HMAC 包确定 peer 和随机 session ID 后，才

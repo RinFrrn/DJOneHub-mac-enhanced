@@ -136,8 +136,8 @@ DJOneHubApp
 - UDP session ID 每次媒体启动随机生成且不能为零。
 - USB 瞬断时停止发送；ECM 恢复后先 STATUS，再根据 conversation 状态决定是否重启媒体。
 - UI 必须区分模块未连接、ECM 未就绪、认证失败、daemon 未监听和 PCM 失败。
-- App 启动后查询模块 `audio_enable` 实际值；用户只能在 QMI 快照无活动通话时切换，
-  模块写入后必须读回确认。该开关不长期占用 iOS `AVAudioSession`。
+- 正式 App 不用 `audio_enable` 控制系统声音路由。该节点只控制已枚举 UAC 的数据门，
+  不会从 USB 描述符移除音频设备，也不会促使 iOS 改选扬声器。
 
 ## 8. 配对与安全
 
@@ -151,9 +151,6 @@ DJOneHubApp
 ## 9. UI 范围
 
 前台 MVP 包含：
-
-- “系统声音留在 iPhone”开关；打开时模块侧关闭 UAC 数据通道，但 ECM 控制和网络 PCM
-  保持可用。
 
 - 模块连接/认证状态。
 - 拨号输入、拨号确认。
@@ -201,7 +198,8 @@ CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
 - 上下行均清晰，不出现持续噪音、一次欠载后永久静音或延迟持续增加。
 - 通话结束后麦克风、Audio Session、UDP 和播放器全部释放。
 - 不再出现由测试逻辑造成的约 60 秒自动挂断。
-- UAC 关闭时系统普通音频仍由 iPhone 扬声器播放。
+- 模块以 Mac 端预先设置的 iPhone/iPad USB profile 启动，`USBCFG` 的 UAC 位为 0；
+  iOS 不枚举模块音频设备，系统普通音频仍由 iPhone 扬声器播放。
 - 30 分钟通话无崩溃；60 分钟压力测试无资源持续增长。
 - 错误 key、篡改包、错误 session 和非 wiredEthernet 路径全部 fail closed。
 

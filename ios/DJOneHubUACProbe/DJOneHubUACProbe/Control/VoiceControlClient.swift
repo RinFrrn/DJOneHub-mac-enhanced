@@ -260,18 +260,17 @@ final class VoiceControlModel: ObservableObject {
         )
     }
 
-    func setKeepsSystemAudioOnPhone(_ enabled: Bool) {
+    func setModuleUSBAudioEnabled(_ enabled: Bool) {
         guard let client, requireCallControl(), calls.isEmpty else {
             stateText = "通话期间不能切换 USB Audio"
             detailText = "请结束当前呼叫后再切换"
             return
         }
-        let moduleAudioEnabled = !enabled
         perform(
-            state: "切换音频输出…",
-            success: enabled ? "系统声音留在 iPhone" : "系统声音可输出到模块",
+            state: "切换 USB Audio 数据通道…",
+            success: enabled ? "模块 USB Audio 数据通道已开启" : "模块 USB Audio 数据通道已关闭",
             operation: {
-                try await client.usbAudio(enabled: moduleAudioEnabled)
+                try await client.usbAudio(enabled: enabled)
             },
             onSuccess: { [weak self] result in
                 self?.moduleUSBAudioEnabled = result.actionCallID != 0

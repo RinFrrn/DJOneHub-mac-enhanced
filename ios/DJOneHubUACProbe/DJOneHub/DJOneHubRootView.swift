@@ -16,7 +16,6 @@ struct DJOneHubRootView: View {
                 connectionSection
                 callSection
                 audioSection
-                systemAudioSection
                 pairingSection
             }
             .navigationTitle("DJOneHub")
@@ -201,30 +200,6 @@ struct DJOneHubRootView: View {
         }
     }
 
-    private var systemAudioSection: some View {
-        Section("手机声音") {
-            Toggle("系统声音留在 iPhone", isOn: Binding(
-                get: { voiceControl.moduleUSBAudioEnabled == false },
-                set: { voiceControl.setKeepsSystemAudioOnPhone($0) }
-            ))
-            .disabled(!voiceControl.canChangeUSBAudio)
-
-            LabeledContent("模块 USB Audio", value: usbAudioStateText)
-
-            if voiceControl.moduleUSBAudioEnabled == nil &&
-                voiceControl.didAttemptUSBAudioQuery {
-                Button("重新读取音频模式") {
-                    voiceControl.refreshUSBAudioState()
-                }
-                .disabled(voiceControl.isBusy || !voiceControl.canControlCalls)
-            }
-
-            Text("打开后，音乐、视频等非通话声音会留在 iPhone；电话控制和蜂窝 PCM 仍走 USB ECM。只能在没有活动通话时切换。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var pairingSection: some View {
         Section("模块") {
             Button(voiceControl.isConfigured ? "替换模块配对" : "导入模块配对") {
@@ -243,13 +218,6 @@ struct DJOneHubRootView: View {
 
     private var trimmedDialNumber: String {
         voiceControl.dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var usbAudioStateText: String {
-        guard let enabled = voiceControl.moduleUSBAudioEnabled else {
-            return voiceControl.didAttemptUSBAudioQuery ? "未读取" : "读取中…"
-        }
-        return enabled ? "开启（声音可进入模块）" : "关闭（声音留在手机）"
     }
 
     private var phaseColor: Color {
