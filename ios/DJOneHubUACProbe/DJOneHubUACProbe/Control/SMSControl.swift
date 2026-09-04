@@ -366,6 +366,7 @@ final class SMSControlModel: ObservableObject {
     @Published private(set) var stateText = "等待连接模块"
     @Published private(set) var isLoading = false
     private var refreshTask: Task<Void, Never>?
+    private var messageCache: [SMSMessageReference: ModuleSMSMessage] = [:]
 
     deinit { refreshTask?.cancel() }
 
@@ -373,6 +374,7 @@ final class SMSControlModel: ObservableObject {
         refreshTask?.cancel()
         guard let pairingKey else {
             messages = []
+            messageCache = [:]
             stateText = "请先连接已配对模块"
             isLoading = false
             return
@@ -388,20 +390,30 @@ final class SMSControlModel: ObservableObject {
                     references.append(contentsOf: try await client.list(storage))
                 }
                 var loaded: [ModuleSMSMessage] = []
+                var updatedCache: [SMSMessageReference: ModuleSMSMessage] = [:]
                 for reference in references {
                     try Task.checkCancellation()
-                    loaded.append(try await client.read(reference))
+                    let message: ModuleSMSMessage
+                    if let cached = messageCache[reference] {
+                        message = cached
+                    } else {
+                        message = try await client.read(reference)
+                    }
+                    loaded.append(message)
+                    updatedCache[reference] = message
                 }
                 messages = loaded.sorted {
                     if $0.storage != $1.storage { return $0.storage.rawValue < $1.storage.rawValue }
                     return $0.index > $1.index
                 }
-                stateText = messages.isEmpty ? "模块中暂无短信" : "已读取 \(messages.count) 条短信"
+                messageCache = updatedCache
+                stateText = messages.isEmpty
+                    ? "模块中暂无短信 · 自动更新"
+                    : "已读取 \(messages.count) 条短信 · 自动更新"
             } catch is CancellationError {
                 return
             } catch {
-                messages = []
-                stateText = error.localizedDescription
+                stateText = "自动重试：\(error.localizedDescription)"
             }
             isLoading = false
         }

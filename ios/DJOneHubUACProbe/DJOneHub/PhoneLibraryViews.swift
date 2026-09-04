@@ -308,11 +308,6 @@ struct MessagesView: View {
                         )
                     } description: {
                         Text(sms.stateText)
-                    } actions: {
-                        if !sms.isLoading {
-                            Button("重新读取") { refresh() }
-                                .buttonStyle(.borderedProminent)
-                        }
                     }
                 } else {
                     List(sms.messages) { message in
@@ -343,10 +338,6 @@ struct MessagesView: View {
             }
             .navigationTitle("信息")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("刷新", systemImage: "arrow.clockwise", action: refresh)
-                        .disabled(sms.isLoading)
-                }
                 ProductToolbar(onSettings: onSettings)
             }
             .safeAreaInset(edge: .bottom) {
@@ -357,14 +348,23 @@ struct MessagesView: View {
                         .padding(.vertical, 6)
                 }
             }
-            .task {
-                if sms.messages.isEmpty { refresh() }
-            }
+            .task { await runAutomaticRefresh() }
         }
     }
 
     private func refresh() {
         sms.refresh(pairingKey: voiceControl.pairingKeyForUplinkProbe())
+    }
+
+    private func runAutomaticRefresh() async {
+        while !Task.isCancelled {
+            if !sms.isLoading { refresh() }
+            do {
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return
+            }
+        }
     }
 }
 
