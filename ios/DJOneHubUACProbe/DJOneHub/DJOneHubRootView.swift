@@ -11,6 +11,7 @@ struct DJOneHubRootView: View {
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var contacts: ContactsModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @StateObject private var sms = SMSControlModel()
     @AppStorage(PhoneProductPreferences.automaticCallRecording)
     private var automaticCallRecordingEnabled = false
 
@@ -33,9 +34,10 @@ struct DJOneHubRootView: View {
                 KeypadView(onCall: { isConfirmingDial = true }, onSettings: showSettings)
                     .tag(PhoneTab.keypad)
                     .tabItem { Label("拨号键盘", systemImage: "circle.grid.3x3.fill") }
-                MessagesView(onSettings: showSettings)
+                MessagesView(sms: sms, onRefresh: refreshSMS, onSettings: showSettings)
                     .tag(PhoneTab.messages)
                     .tabItem { Label("信息", systemImage: "message.fill") }
+                    .badge(sms.unreadCount)
             }
 
             if shouldPresentCallScreen {
@@ -54,10 +56,12 @@ struct DJOneHubRootView: View {
             lifecycle.start()
             contacts.loadIfAuthorized()
         }
+        .task { await runAutomaticSMSRefresh() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 lifecycle.applicationDidBecomeActive()
                 contacts.loadIfAuthorized()
+                refreshSMS()
             }
         }
         .onChange(of: lifecycle.phase) { _, newPhase in
@@ -128,6 +132,22 @@ struct DJOneHubRootView: View {
     }
 
     private func showSettings() { isShowingSettings = true }
+
+    private func refreshSMS() {
+        guard !sms.isLoading else { return }
+        sms.refresh(pairingKey: voiceControl.pairingKeyForUplinkProbe())
+    }
+
+    private func runAutomaticSMSRefresh() async {
+        while !Task.isCancelled {
+            if scenePhase == .active { refreshSMS() }
+            do {
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return
+            }
+        }
+    }
 
     private func toggleRecording() {
         if callAudio.isRecording {

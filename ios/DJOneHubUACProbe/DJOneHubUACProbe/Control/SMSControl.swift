@@ -53,6 +53,11 @@ struct ModuleSMSMessage: Identifiable, Hashable, Sendable {
 
     var decoded: SMSDeliverSummary? { SMSPDU.decodeDeliver(pdu) }
     var rawHex: String { pdu.map { String(format: "%02X", $0) }.joined() }
+    var trackingID: String {
+        let digest = SHA256.hash(data: pdu).prefix(8)
+        let fingerprint = digest.map { String(format: "%02x", $0) }.joined()
+        return "\(storage.rawValue)-\(index)-\(fingerprint)"
+    }
 }
 
 struct SMSDeliverSummary: Hashable, Sendable {
@@ -270,7 +275,7 @@ actor SMSControlClient {
         return ModuleSMSMessage(
             storage: reference.storage,
             index: reference.index,
-            tag: payload[5],
+            tag: payload[5] == 0xFF ? reference.tag : payload[5],
             format: payload[6],
             pdu: payload.subdata(in: 9..<payload.count)
         )
@@ -365,8 +370,22 @@ final class SMSControlModel: ObservableObject {
     @Published private(set) var messages: [ModuleSMSMessage] = []
     @Published private(set) var stateText = "等待连接模块"
     @Published private(set) var isLoading = false
+    @Published private(set) var unreadCount = 0
     private var refreshTask: Task<Void, Never>?
     private var messageCache: [SMSMessageReference: ModuleSMSMessage] = [:]
+    private var unreadMessageIDs: Set<String>
+    private var readMessageIDs: Set<String>
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        unreadMessageIDs = Set(defaults.stringArray(forKey: Self.unreadDefaultsKey) ?? [])
+        readMessageIDs = Set(defaults.stringArray(forKey: Self.readDefaultsKey) ?? [])
+        unreadCount = unreadMessageIDs.count
+    }
+
+    private let defaults: UserDefaults
+    private static let unreadDefaultsKey = "DJOneHub.moduleSMS.unread.v1"
+    private static let readDefaultsKey = "DJOneHub.moduleSMS.read.v1"
 
     deinit { refreshTask?.cancel() }
 
@@ -391,6 +410,7 @@ final class SMSControlModel: ObservableObject {
                 }
                 var loaded: [ModuleSMSMessage] = []
                 var updatedCache: [SMSMessageReference: ModuleSMSMessage] = [:]
+                var loadedPairs: [(SMSMessageReference, ModuleSMSMessage)] = []
                 for reference in references {
                     try Task.checkCancellation()
                     let message: ModuleSMSMessage
@@ -401,12 +421,14 @@ final class SMSControlModel: ObservableObject {
                     }
                     loaded.append(message)
                     updatedCache[reference] = message
+                    loadedPairs.append((reference, message))
                 }
                 messages = loaded.sorted {
                     if $0.storage != $1.storage { return $0.storage.rawValue < $1.storage.rawValue }
                     return $0.index > $1.index
                 }
                 messageCache = updatedCache
+                updateUnreadState(with: loadedPairs)
                 stateText = messages.isEmpty
                     ? "模块中暂无短信 · 自动更新"
                     : "已读取 \(messages.count) 条短信 · 自动更新"
@@ -417,6 +439,34 @@ final class SMSControlModel: ObservableObject {
             }
             isLoading = false
         }
+    }
+
+    func isUnread(_ message: ModuleSMSMessage) -> Bool {
+        unreadMessageIDs.contains(message.trackingID)
+    }
+
+    func markRead(_ message: ModuleSMSMessage) {
+        let id = message.trackingID
+        guard unreadMessageIDs.remove(id) != nil else { return }
+        readMessageIDs.insert(id)
+        persistReadState()
+    }
+
+    private func updateUnreadState(with pairs: [(SMSMessageReference, ModuleSMSMessage)]) {
+        let currentIDs = Set(pairs.map { $0.1.trackingID })
+        unreadMessageIDs.formIntersection(currentIDs)
+        readMessageIDs.formIntersection(currentIDs)
+        for (reference, message) in pairs
+        where reference.tag == 1 && !readMessageIDs.contains(message.trackingID) {
+            unreadMessageIDs.insert(message.trackingID)
+        }
+        persistReadState()
+    }
+
+    private func persistReadState() {
+        unreadCount = unreadMessageIDs.count
+        defaults.set(unreadMessageIDs.sorted(), forKey: Self.unreadDefaultsKey)
+        defaults.set(readMessageIDs.sorted(), forKey: Self.readDefaultsKey)
     }
 }
 

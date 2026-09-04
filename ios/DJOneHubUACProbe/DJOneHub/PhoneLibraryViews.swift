@@ -293,8 +293,8 @@ struct ContactsView: View {
 }
 
 struct MessagesView: View {
-    @EnvironmentObject private var voiceControl: VoiceControlModel
-    @StateObject private var sms = SMSControlModel()
+    @ObservedObject var sms: SMSControlModel
+    let onRefresh: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -313,27 +313,36 @@ struct MessagesView: View {
                     List(sms.messages) { message in
                         NavigationLink {
                             ModuleSMSDetailView(message: message)
+                                .onAppear { sms.markRead(message) }
                         } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(message.title)
-                                        .font(.body.weight(.semibold))
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Text(message.storage.title)
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.secondary)
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 8, height: 8)
+                                    .opacity(sms.isUnread(message) ? 1 : 0)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Text(message.title)
+                                            .font(.body.weight(sms.isUnread(message) ? .semibold : .regular))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text(message.storage.title)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(message.preview)
+                                        .font(.subheadline)
+                                        .foregroundStyle(sms.isUnread(message) ? .primary : .secondary)
+                                        .lineLimit(2)
                                 }
-                                Text(message.preview)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
                             }
                             .padding(.vertical, 3)
+                            .accessibilityValue(sms.isUnread(message) ? "未读" : "已读")
                         }
                     }
                     .listStyle(.plain)
-                    .refreshable { refresh() }
+                    .refreshable { onRefresh() }
                 }
             }
             .navigationTitle("信息")
@@ -347,22 +356,6 @@ struct MessagesView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 6)
                 }
-            }
-            .task { await runAutomaticRefresh() }
-        }
-    }
-
-    private func refresh() {
-        sms.refresh(pairingKey: voiceControl.pairingKeyForUplinkProbe())
-    }
-
-    private func runAutomaticRefresh() async {
-        while !Task.isCancelled {
-            if !sms.isLoading { refresh() }
-            do {
-                try await Task.sleep(for: .seconds(5))
-            } catch {
-                return
             }
         }
     }
