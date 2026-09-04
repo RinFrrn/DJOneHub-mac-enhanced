@@ -79,7 +79,7 @@ enum SMSControlProtocolError: Error, LocalizedError {
     }
 }
 
-private enum SMSControlProtocol {
+enum SMSControlProtocol {
     static let magic: UInt32 = 0x444A4F53
     static let version: UInt8 = 1
     static let headerBytes = 20
@@ -499,19 +499,22 @@ enum SMSPDU {
     )
 }
 
-private extension Data {
+extension Data {
     mutating func appendBE(_ value: UInt16) {
-        append(UInt8(value >> 8)); append(UInt8(value))
+        append(UInt8(truncatingIfNeeded: value >> 8))
+        append(UInt8(truncatingIfNeeded: value))
     }
 
     mutating func appendBE(_ value: UInt32) {
-        append(UInt8(value >> 24)); append(UInt8(value >> 16))
-        append(UInt8(value >> 8)); append(UInt8(value))
+        append(UInt8(truncatingIfNeeded: value >> 24))
+        append(UInt8(truncatingIfNeeded: value >> 16))
+        append(UInt8(truncatingIfNeeded: value >> 8))
+        append(UInt8(truncatingIfNeeded: value))
     }
 
     mutating func appendBE(_ value: UInt64) {
         for shift in stride(from: 56, through: 0, by: -8) {
-            append(UInt8(value >> UInt64(shift)))
+            append(UInt8(truncatingIfNeeded: value >> UInt64(shift)))
         }
     }
 }
