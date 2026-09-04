@@ -287,7 +287,7 @@ actor SMSControlClient {
         }
         let connection = try await connect(port)
         defer { connection.cancel() }
-        let hello = try await withTimeout(configuration.ioTimeout) {
+        let hello = try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
             try await connection.smsReceiveExactly(SMSControlProtocol.helloBytes)
         }
         let nonce = try SMSControlProtocol.decodeHello(hello)
@@ -300,15 +300,17 @@ actor SMSControlClient {
             requestID: requestID,
             payload: payload
         )
-        try await withTimeout(configuration.ioTimeout) { try await connection.smsSend(request) }
-        let header = try await withTimeout(configuration.ioTimeout) {
+        try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
+            try await connection.smsSend(request)
+        }
+        let header = try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
             try await connection.smsReceiveExactly(SMSControlProtocol.headerBytes)
         }
         let payloadLength = Int(SMSControlProtocol.uint16(header, 8))
         guard payloadLength <= SMSControlProtocol.maxResponsePayload else {
             throw SMSControlProtocolError.invalidFrame
         }
-        let tail = try await withTimeout(configuration.ioTimeout) {
+        let tail = try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
             try await connection.smsReceiveExactly(payloadLength + SMSControlProtocol.tagBytes)
         }
         return try SMSControlProtocol.decodeResponse(
@@ -335,7 +337,7 @@ actor SMSControlClient {
                 using: parameters
             )
             do {
-                try await withTimeout(configuration.attemptTimeout) {
+                try await withTimeout(configuration.attemptTimeout, onCancel: { connection.cancel() }) {
                     try await connection.smsStart()
                 }
                 return connection
@@ -350,17 +352,23 @@ actor SMSControlClient {
 
     private func withTimeout<T: Sendable>(
         _ duration: Duration,
+        onCancel: @escaping @Sendable () -> Void,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(for: duration)
-                throw ClientError.timeout
+        try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: T.self) { group in
+                group.addTask { try await operation() }
+                group.addTask {
+                    try await Task.sleep(for: duration)
+                    onCancel()
+                    throw ClientError.timeout
+                }
+                guard let result = try await group.next() else { throw ClientError.timeout }
+                group.cancelAll()
+                return result
             }
-            guard let result = try await group.next() else { throw ClientError.timeout }
-            group.cancelAll()
-            return result
+        } onCancel: {
+            onCancel()
         }
     }
 }
@@ -390,7 +398,7 @@ final class SMSControlModel: ObservableObject {
     deinit { refreshTask?.cancel() }
 
     func refresh(pairingKey: Data?) {
-        refreshTask?.cancel()
+        guard !isLoading else { return }
         guard let pairingKey else {
             messages = []
             messageCache = [:]
@@ -401,6 +409,7 @@ final class SMSControlModel: ObservableObject {
         isLoading = true
         stateText = "正在读取短信…"
         refreshTask = Task {
+            defer { isLoading = false }
             do {
                 let client = try SMSControlClient(pairingKey: pairingKey)
                 try await client.status()
@@ -437,7 +446,6 @@ final class SMSControlModel: ObservableObject {
             } catch {
                 stateText = "自动重试：\(error.localizedDescription)"
             }
-            isLoading = false
         }
     }
 
