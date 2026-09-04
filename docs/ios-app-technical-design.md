@@ -242,13 +242,14 @@ CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
   `PCMTransport`、`DownlinkPCMPlayer` 和 `DownlinkJitterBuffer`。
 - [x] 实现 Audio Session interruption 和 media-services reset 的受控重建；仅当模块 STATUS
   仍确认存在 active call 时恢复新 PCM session，等待真机中断场景验收。
-- [ ] route change 暂时维持已验证的“音频启动时固定内置麦克风和扬声器”；运行中主动
+- [x] route change 暂时维持已验证的“音频启动时固定内置麦克风和扬声器”；运行中主动
   重设曾触发听筒/扬声器反复切换的通知反馈循环；撤回后真机双向通话恢复正常，后续采用
   去抖状态机并在隔离测试中单独实现。现已加入 500ms 安静窗口：正确路由和空闲通知不做
   任何操作；运行中的错误路由先停止 PCM，稳定后只请求一次恢复，并继续要求新 STATUS
   确认通话仍存在。针对 iOS 27 蓝牙切换可能只发 interruption began 或
   `routeDisconnected`、不补 ended 的路径，增加延迟路由重激活探测；探测失败时保持暂停，
-  不循环抢占系统音频。等待真机路由切换验收后完成此项。
+  不循环抢占系统音频。修复版已完成真机蓝牙连接/断开验收：通话继续使用 iPhone 内置
+  麦克风和扬声器，双向音频不受影响，未再出现系统音频永久暂停或听筒/扬声器切换循环。
 - [x] 增加丢包补偿、乱序、重复/迟到拒绝、序号重置、重缓冲和队列丢弃指标；
   指标不包含 PCM 内容或配对密钥。加入 generation 隔离、六帧重缓冲和长缺口快进后的
   签名版本已无线安装；真机通话结果为丢包 0、乱序 0、队列丢弃 0、无感重缓冲 1，验收通过。
