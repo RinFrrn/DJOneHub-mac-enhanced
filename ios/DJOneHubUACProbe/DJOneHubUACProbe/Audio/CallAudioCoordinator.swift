@@ -37,6 +37,9 @@ final class CallAudioCoordinator: ObservableObject {
     private var routeRecoveryState = AudioRouteRecoveryState()
     private var routeSettleTask: Task<Void, Never>?
     private var routeRecoveryReason = "音频路由发生变化"
+    private var interruptedRouteSettleTask: Task<Void, Never>?
+    private var interruptedRouteRevision: UInt64 = 0
+    private var interruptedRouteRetryNotBefore: ContinuousClock.Instant?
 
     init() {
         observeAudioSession()
@@ -44,6 +47,7 @@ final class CallAudioCoordinator: ObservableObject {
 
     deinit {
         routeSettleTask?.cancel()
+        interruptedRouteSettleTask?.cancel()
         for observer in notificationObservers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -181,7 +185,10 @@ final class CallAudioCoordinator: ObservableObject {
         detailText = "已重新认证模块通话状态；当前没有需要恢复的 PCM 会话"
     }
 
-    private func tearDownAudio(deactivateSession: Bool) {
+    private func tearDownAudio(
+        deactivateSession: Bool,
+        clearOutputOverride: Bool = true
+    ) {
         let input = engine?.inputNode
         input?.removeTap(onBus: 0)
         engine?.stop()
@@ -193,7 +200,9 @@ final class CallAudioCoordinator: ObservableObject {
         playerNode = nil
         networkFormat = nil
         engine = nil
-        try? session.overrideOutputAudioPort(.none)
+        if clearOutputOverride {
+            try? session.overrideOutputAudioPort(.none)
+        }
         if deactivateSession {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
         }
@@ -249,27 +258,7 @@ final class CallAudioCoordinator: ObservableObject {
               startGeneration == generation,
               hasActiveRequest else { return }
         do {
-            try session.setCategory(
-                .playAndRecord,
-                mode: .voiceChat,
-                options: [.defaultToSpeaker]
-            )
-            try session.setPreferredSampleRate(48_000)
-            try session.setPreferredIOBufferDuration(0.016)
-            try session.setActive(true)
-            if let builtInMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-                try session.setPreferredInput(builtInMic)
-            }
-            // A connected QDC507 also advertises a USB Audio playback sink.
-            // defaultToSpeaker does not override that external route, so force
-            // the receiver side of this ECM bridge back to the iPhone speaker.
-            try session.overrideOutputAudioPort(.speaker)
-            guard session.currentRoute.inputs.contains(where: { $0.portType == .builtInMic }) else {
-                throw CallAudioError.builtInMicrophoneNotSelected
-            }
-            guard session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }) else {
-                throw CallAudioError.builtInSpeakerNotSelected
-            }
+            try activateBuiltInCallRoute()
 
             let engine = AVAudioEngine()
             let input = engine.inputNode
@@ -542,11 +531,20 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func handleRouteChange(_ notification: Notification) {
-        guard !isInterrupted, !isTestTone else { return }
+        let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+        if isInterrupted {
+            let retryWindowIsOpen = interruptedRouteRetryNotBefore.map {
+                ContinuousClock.now >= $0
+            } ?? true
+            if retryWindowIsOpen, Self.canRetryInterruptedRoute(after: rawReason) {
+                scheduleInterruptedRouteSettleCheck(reason: Self.routeChangeReason(rawReason))
+            }
+            return
+        }
+        guard !isTestTone else { return }
         let hasMediaResources = hasAudioResources
         guard hasMediaResources || routeRecoveryState.isRecoveryPending else { return }
 
-        let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
         let reason = Self.routeChangeReason(rawReason)
         let routeMatchesPolicy = currentRouteMatchesPolicy
         let requiresImmediatePause = isRunning && !routeMatchesPolicy
@@ -611,6 +609,7 @@ final class CallAudioCoordinator: ObservableObject {
         routeSettleTask = nil
         routeRecoveryState.reset()
         routeRecoveryReason = "音频路由发生变化"
+        cancelInterruptedRouteSettleCheck()
     }
 
     private var hasAudioResources: Bool {
@@ -622,12 +621,75 @@ final class CallAudioCoordinator: ObservableObject {
             && session.currentRoute.outputs.contains { $0.portType == .builtInSpeaker }
     }
 
+    private func activateBuiltInCallRoute() throws {
+        try session.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker]
+        )
+        try session.setPreferredSampleRate(48_000)
+        try session.setPreferredIOBufferDuration(0.016)
+        try session.setActive(true)
+        if let builtInMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+            try session.setPreferredInput(builtInMic)
+        }
+        // A connected QDC507 may advertise a USB Audio playback sink. Keep
+        // the ECM call on the iPhone even while other routes come and go.
+        try session.overrideOutputAudioPort(.speaker)
+        guard session.currentRoute.inputs.contains(where: { $0.portType == .builtInMic }) else {
+            throw CallAudioError.builtInMicrophoneNotSelected
+        }
+        guard session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }) else {
+            throw CallAudioError.builtInSpeakerNotSelected
+        }
+    }
+
+    private func scheduleInterruptedRouteSettleCheck(reason: String) {
+        interruptedRouteRevision &+= 1
+        let revision = interruptedRouteRevision
+        interruptedRouteSettleTask?.cancel()
+        interruptedRouteSettleTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled,
+                  let self,
+                  self.interruptedRouteRevision == revision,
+                  self.isInterrupted else { return }
+            self.interruptedRouteSettleTask = nil
+            self.retryInterruptedRoute(reason: reason)
+        }
+    }
+
+    private func retryInterruptedRoute(reason: String) {
+        do {
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            try activateBuiltInCallRoute()
+            isInterrupted = false
+            cancelInterruptedRouteSettleCheck()
+            requestRecovery("蓝牙路由切换已稳定，正在重新确认通话状态（\(reason)）")
+        } catch {
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            interruptedRouteRetryNotBefore = ContinuousClock.now.advanced(by: .seconds(1))
+            stateText = "系统音频已暂停"
+            detailText = "系统仍占用音频路由；等待中断结束或下一次设备连接变化"
+        }
+    }
+
+    private func cancelInterruptedRouteSettleCheck() {
+        interruptedRouteRevision &+= 1
+        interruptedRouteSettleTask?.cancel()
+        interruptedRouteSettleTask = nil
+        interruptedRouteRetryNotBefore = nil
+    }
+
     private func handleInterruption(_ notification: Notification) {
         guard let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
 
         switch type {
         case .began:
+            let shouldRetryAsRouteChange = routeRecoveryState.isRecoveryPending
+                || (hasAudioResources && !currentRouteMatchesPolicy)
+                || Self.canRetryInterruptionWithoutEnded(notification)
             resetRouteRecoveryTracking()
             isInterrupted = true
             if isRunning || engine != nil || pipeline != nil {
@@ -640,14 +702,18 @@ final class CallAudioCoordinator: ObservableObject {
                 isTestTone = false
                 isAwaitingRecovery = false
                 hasActiveRequest = false
-                tearDownAudio(deactivateSession: false)
+                tearDownAudio(deactivateSession: false, clearOutputOverride: false)
             }
             stateText = "系统音频已暂停"
             detailText = "音频中断结束且通话仍存在时会自动恢复"
             inputLevel = 0
             downlinkLevel = 0
+            if shouldRetryAsRouteChange {
+                scheduleInterruptedRouteSettleCheck(reason: "系统音频中断或外接设备变化")
+            }
 
         case .ended:
+            cancelInterruptedRouteSettleCheck()
             isInterrupted = false
             let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
@@ -705,6 +771,34 @@ final class CallAudioCoordinator: ObservableObject {
         case .routeConfigurationChange: return "系统音频路由配置变化"
         case .unknown: return "未知音频路由变化"
         @unknown default: return "未来音频路由变化 \(rawValue)"
+        }
+    }
+
+    private static func canRetryInterruptedRoute(after rawValue: UInt) -> Bool {
+        guard let reason = AVAudioSession.RouteChangeReason(rawValue: rawValue) else { return false }
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable, .wakeFromSleep, .noSuitableRouteForCategory:
+            return true
+        case .routeConfigurationChange:
+            return true
+        case .categoryChange, .override, .unknown:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private static func canRetryInterruptionWithoutEnded(_ notification: Notification) -> Bool {
+        let rawReason = notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt
+            ?? AVAudioSession.InterruptionReason.default.rawValue
+        guard let reason = AVAudioSession.InterruptionReason(rawValue: rawReason) else { return false }
+        switch reason {
+        case .default, .routeDisconnected:
+            return true
+        case .appWasSuspended, .builtInMicMuted:
+            return false
+        @unknown default:
+            return false
         }
     }
 
