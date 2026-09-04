@@ -241,7 +241,7 @@ final class VoiceControlModel: ObservableObject {
             reportFailure: false,
             updateSnapshotDescriptionOnSuccess: true,
             operation: {
-                try await client.status()
+                try await client.status(connectTimeout: .seconds(3))
             },
             enablePollingOnSuccess: false,
             disablePollingOnFailure: true
@@ -474,8 +474,8 @@ actor VoiceControlClient {
         self.configuration = configuration
     }
 
-    func status() async throws -> VoiceControlResult {
-        try await perform(.status, payload: Data())
+    func status(connectTimeout: Duration? = nil) async throws -> VoiceControlResult {
+        try await perform(.status, payload: Data(), connectTimeout: connectTimeout)
     }
 
     func dial(_ number: String) async throws -> VoiceControlResult {
@@ -501,13 +501,20 @@ actor VoiceControlClient {
         return try await perform(.usbAudio, payload: payload)
     }
 
-    private func perform(_ operation: VoiceControlOperation, payload: Data) async throws -> VoiceControlResult {
+    private func perform(
+        _ operation: VoiceControlOperation,
+        payload: Data,
+        connectTimeout: Duration? = nil
+    ) async throws -> VoiceControlResult {
         try Task.checkCancellation()
         guard let port = NWEndpoint.Port(rawValue: configuration.port) else {
             throw ClientError.invalidPort
         }
 
-        let connection = try await connectWhenReady(port: port)
+        let connection = try await connectWhenReady(
+            port: port,
+            timeout: connectTimeout ?? configuration.connectTimeout
+        )
         defer { connection.cancel() }
 
         return try await withTaskCancellationHandler {
@@ -567,9 +574,12 @@ actor VoiceControlClient {
     /// has loaded the QDC507 drivers and started the authenticated listener.
     /// Retry only TCP establishment; once a HELLO is received, operations such
     /// as DIAL are never replayed automatically.
-    private func connectWhenReady(port: NWEndpoint.Port) async throws -> NWConnection {
+    private func connectWhenReady(
+        port: NWEndpoint.Port,
+        timeout: Duration
+    ) async throws -> NWConnection {
         let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: configuration.connectTimeout)
+        let deadline = clock.now.advanced(by: timeout)
         var lastError: Error = ClientError.timeout
 
         while clock.now < deadline {
