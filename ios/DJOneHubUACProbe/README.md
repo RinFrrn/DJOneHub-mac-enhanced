@@ -67,7 +67,8 @@ daemon。不要把测试 key、设备 key 或模块持久凭据提交到仓库�
 `AfterFirstUnlockThisDeviceOnly`、明确禁止同步，并按稳定模块标识建立独立 account。
 新导入凭据使用 v2 envelope 保存权限、创建时间和到期时间，每次恢复都会重新校验；旧
 32 字节裸 key 维持只读权限，既有 v1 envelope 首次恢复时原地升级为从升级时起 30 天
-有效的 v2，不改变 key/权限/模块标识，也不会要求当前用户重新导入。
+有效的 v2，不改变 key/权限/模块标识，也不会要求当前用户重新导入。该迁移已完成真机
+验收：保留现有 `4a424aff…` control-session 凭据安装新版后可直接进入“可以拨号”。
 只有用户显式导入测试配对包时才会写入；App 启动时只读取本 App 已有的配对项。生产
 配对完成后，业务层也可调用 `VoiceControlModel.configure(from:)` 将指定模块的 key
 注入内存。

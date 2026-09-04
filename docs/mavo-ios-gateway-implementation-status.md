@@ -122,7 +122,8 @@ pairing 和通话自动启停收敛成正式
   到 `.wiredEthernet`；Keychain 禁止同步，新导入凭据以 v2 envelope 保存权限、创建时间
   和到期时间并在每次恢复时复核。旧 32 字节裸 key 只保留只读权限，既有 v1 envelope
   首次恢复时原地补成从升级时起 30 天有效的 v2，不改变 key/权限且不要求重新导入。App
-  每秒轮询 call snapshot，拨号要求界面二次确认。
+  每秒轮询 call snapshot，拨号要求界面二次确认。该迁移已在保留现有 `4a424aff…` 凭据的
+  真机上通过：新 App 启动后无需重新导入，直接进入“可以拨号”。
 - 后续补齐 development-only 的 STATUS 测试配对包：Mac 一次性武装接口生成随机 key，
   在返回文件前完成真实认证 STATUS 预检；iOS 显式导入后校验固定 endpoint、30 天
   有效期、创建时间及 SHA-256 模块标识，再写入不可同步 Keychain。App 可选择

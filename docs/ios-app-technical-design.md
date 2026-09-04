@@ -231,6 +231,8 @@ CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
 - [x] 状态机、控制协议、媒体协议和 pairing bundle 离线测试通过。
 - [x] 正式 App 通过 Apple Development 签名并安装到真机。
 - [x] 真机首屏自动恢复既有 Keychain 配对，并自动进入“可以拨号”。
+- [x] Keychain v2 生命周期升级已无线安装验收：既有 `4a424aff…` v1 control-session
+  凭据自动原地迁移，未轮换 key、未要求重新导入，App 启动后直接显示“可以拨号”。
 - [x] 真机主动拨号、conversation 自动启动 PCM、双向清晰语音、超过 90 秒稳定通话、
   App 挂断及 PCM 自动停止验收通过。
 - [x] 真机来电页面、接听、挂断和拒接验收通过。
