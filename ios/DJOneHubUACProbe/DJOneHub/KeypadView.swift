@@ -128,10 +128,28 @@ struct KeypadView: View {
                     .accessibilityHidden(displayNumber.isEmpty)
                 }
 
-                Toggle("自动录音", isOn: $automaticCallRecordingEnabled)
-                    .font(.subheadline.weight(.medium))
-                    .fixedSize()
-                    .accessibilityHint("开启后，每次电话接通时自动开始本地录音")
+                Toggle(isOn: $automaticCallRecordingEnabled) {
+                    Label(
+                        "自动录音",
+                        systemImage: automaticCallRecordingEnabled
+                            ? "record.circle.fill"
+                            : "record.circle"
+                    )
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .fixedSize()
+                .padding(.leading, 12)
+                .padding(.trailing, 8)
+                .frame(height: 38)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(.primary.opacity(0.06), lineWidth: 0.5)
+                }
+                .accessibilityHint("开启后，每次电话接通时自动开始本地录音")
                 Spacer(minLength: 4)
             }
             .navigationBarTitleDisplayMode(.inline)
