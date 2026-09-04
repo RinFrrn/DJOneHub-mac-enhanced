@@ -77,6 +77,31 @@ private struct RecordingPlaybackView: View {
                 Text("\(phoneDurationText(recording.duration)) · \(fileSizeText)")
                     .font(.body.monospacedDigit())
                     .foregroundStyle(.secondary)
+
+                VStack(spacing: 5) {
+                    Slider(
+                        value: Binding(
+                            get: { min(player.currentTime, progressDuration) },
+                            set: { player.seek(to: $0) }
+                        ),
+                        in: 0 ... progressDuration
+                    )
+                    .disabled(!player.canSeek(recording))
+                    .accessibilityLabel("录音播放进度")
+                    .accessibilityValue(
+                        "\(phoneDurationText(player.currentTime))，共 \(phoneDurationText(progressDuration))"
+                    )
+
+                    HStack {
+                        Text(phoneDurationText(player.currentTime))
+                        Spacer()
+                        Text(phoneDurationText(progressDuration))
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+
                 Button {
                     player.toggle(recording)
                 } label: {
@@ -110,6 +135,10 @@ private struct RecordingPlaybackView: View {
 
     private var fileSizeText: String {
         ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file)
+    }
+
+    private var progressDuration: TimeInterval {
+        max(recording.duration, max(player.duration, 0.001))
     }
 }
 

@@ -310,20 +310,31 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
     @Published private(set) var playingURL: URL?
     @Published private(set) var isPlayingNow = false
     @Published private(set) var errorText: String?
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
 
     private var player: AVAudioPlayer?
+    private var progressTask: Task<Void, Never>?
 
     func isPlaying(_ recording: CallRecordingInfo) -> Bool {
         isPlayingNow && playingURL == recording.url
+    }
+
+    func canSeek(_ recording: CallRecordingInfo) -> Bool {
+        playingURL == recording.url && player != nil
     }
 
     func toggle(_ recording: CallRecordingInfo) {
         if playingURL == recording.url, let player {
             if player.isPlaying {
                 player.pause()
+                currentTime = player.currentTime
                 isPlayingNow = false
+                progressTask?.cancel()
+                progressTask = nil
             } else {
                 isPlayingNow = player.play()
+                if isPlayingNow { startProgressUpdates() }
             }
             return
         }
@@ -335,11 +346,21 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
             player.prepareToPlay()
             self.player = player
             playingURL = recording.url
+            currentTime = 0
+            duration = player.duration
             isPlayingNow = player.play()
             errorText = isPlayingNow ? nil : "无法播放这段录音"
+            if isPlayingNow { startProgressUpdates() }
         } catch {
             report(error)
         }
+    }
+
+    func seek(to time: TimeInterval) {
+        guard let player else { return }
+        let target = min(max(0, time), player.duration)
+        player.currentTime = target
+        currentTime = target
     }
 
     func stop(ifPlaying recording: CallRecordingInfo) {
@@ -348,10 +369,14 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     func stop() {
+        progressTask?.cancel()
+        progressTask = nil
         player?.stop()
         player = nil
         playingURL = nil
         isPlayingNow = false
+        currentTime = 0
+        duration = 0
     }
 
     func report(_ error: Error) {
@@ -360,9 +385,25 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        progressTask?.cancel()
+        progressTask = nil
+        currentTime = player.duration
+        duration = player.duration
         self.player = nil
         playingURL = nil
         isPlayingNow = false
         if !flag { errorText = "录音播放中断" }
+    }
+
+    private func startProgressUpdates() {
+        progressTask?.cancel()
+        progressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, let player = self.player, player.isPlaying else { return }
+                self.currentTime = player.currentTime
+                self.duration = player.duration
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
     }
 }
