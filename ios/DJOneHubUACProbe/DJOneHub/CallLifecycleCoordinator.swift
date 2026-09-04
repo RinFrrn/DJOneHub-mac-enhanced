@@ -47,7 +47,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         lifecycleTask = nil
         audioStartRequested = false
         mediaRecoveryGate.reset()
-        if callAudio.isRunning || callAudio.hasActiveRequest {
+        if callAudio.isRunning || callAudio.hasActiveRequest || callAudio.isAwaitingRecovery {
             callAudio.stop()
         }
         hasStarted = false
@@ -155,7 +155,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         } else {
             audioStartRequested = false
             nextAudioStartAttempt = ContinuousClock.now
-            if callAudio.isRunning || callAudio.hasActiveRequest {
+            if callAudio.isRunning || callAudio.hasActiveRequest || callAudio.isAwaitingRecovery {
                 let reason: String?
                 switch phase {
                 case .connecting, .recovering:

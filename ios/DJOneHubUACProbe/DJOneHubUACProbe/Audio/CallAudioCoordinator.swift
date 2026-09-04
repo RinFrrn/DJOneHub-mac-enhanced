@@ -11,6 +11,7 @@ final class CallAudioCoordinator: ObservableObject {
     @Published private(set) var isTestTone = false
     @Published private(set) var isInterrupted = false
     @Published private(set) var hasActiveRequest = false
+    @Published private(set) var isAwaitingRecovery = false
     @Published private(set) var recoveryGeneration: UInt64 = 0
     @Published private(set) var stateText = "停止"
     @Published private(set) var detailText = ""
@@ -33,12 +34,16 @@ final class CallAudioCoordinator: ObservableObject {
     private var desiredDownlinkEnabled = false
     private var desiredLocalRingbackEnabled = false
     private var startGeneration: UInt64 = 0
+    private var routeRecoveryState = AudioRouteRecoveryState()
+    private var routeSettleTask: Task<Void, Never>?
+    private var routeRecoveryReason = "音频路由发生变化"
 
     init() {
         observeAudioSession()
     }
 
     deinit {
+        routeSettleTask?.cancel()
         for observer in notificationObservers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -50,7 +55,11 @@ final class CallAudioCoordinator: ObservableObject {
         downlinkEnabled: Bool = true,
         localRingbackEnabled: Bool = false
     ) {
-        guard !isRunning, !hasActiveRequest, !isInterrupted else { return }
+        guard !isRunning,
+              !hasActiveRequest,
+              !isInterrupted,
+              routeSettleTask == nil,
+              !routeRecoveryState.isRecoveryPending else { return }
         guard pairingKey.count == 32 else {
             stateText = "无法启动"
             detailText = "当前配对凭据无效"
@@ -65,6 +74,7 @@ final class CallAudioCoordinator: ObservableObject {
         isUplinkEnabled = false
         isDownlinkEnabled = false
         isLocalRingbackEnabled = false
+        isAwaitingRecovery = false
         hasActiveRequest = true
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -143,8 +153,8 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     func stop(reason: String? = nil) {
+        resetRouteRecoveryTracking()
         startGeneration &+= 1
-        tearDownAudio(deactivateSession: true)
         hasActiveRequest = false
         isRunning = false
         isMediaEnabled = false
@@ -155,6 +165,8 @@ final class CallAudioCoordinator: ObservableObject {
         desiredDownlinkEnabled = false
         desiredLocalRingbackEnabled = false
         isTestTone = false
+        isAwaitingRecovery = false
+        tearDownAudio(deactivateSession: true)
         stateText = reason == nil ? "已停止" : "连接中断，PCM 已停止"
         detailText = reason ?? "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
         inputLevel = 0
@@ -188,7 +200,10 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     func startTestTone(pairingKey: Data) {
-        guard !isRunning, !hasActiveRequest else { return }
+        guard !isRunning,
+              !hasActiveRequest,
+              routeSettleTask == nil,
+              !routeRecoveryState.isRecoveryPending else { return }
         guard pairingKey.count == 32 else {
             stateText = "无法启动"
             detailText = "当前配对凭据无效"
@@ -199,6 +214,7 @@ final class CallAudioCoordinator: ObservableObject {
         desiredUplinkEnabled = true
         desiredDownlinkEnabled = true
         desiredLocalRingbackEnabled = false
+        isAwaitingRecovery = false
         hasActiveRequest = true
         var sessionID: UInt32 = 0
         while sessionID == 0 {
@@ -305,11 +321,14 @@ final class CallAudioCoordinator: ObservableObject {
             let localRingbackEnabled = desiredLocalRingbackEnabled
             isTestTone = false
             isRunning = true
+            isAwaitingRecovery = false
+            resetRouteRecoveryTracking()
             pipeline.setMediaEnabled(uplinkEnabled)
             downlinkPlayer.setMediaEnabled(downlinkEnabled)
             downlinkPlayer.setLocalRingbackEnabled(localRingbackEnabled)
             applyMediaState(uplink: uplinkEnabled, downlink: downlinkEnabled)
         } catch {
+            resetRouteRecoveryTracking()
             startGeneration &+= 1
             pipeline?.stop()
             pipeline = nil
@@ -326,6 +345,7 @@ final class CallAudioCoordinator: ObservableObject {
             isUplinkEnabled = false
             isDownlinkEnabled = false
             isLocalRingbackEnabled = false
+            isAwaitingRecovery = false
             hasActiveRequest = false
             stateText = "无法启动 PCM 上行"
             detailText = error.localizedDescription
@@ -387,9 +407,8 @@ final class CallAudioCoordinator: ObservableObject {
                           self.startGeneration == generation,
                           self.isRunning || self.hasActiveRequest else { return }
                     self.stop()
-                    self.recoveryGeneration &+= 1
+                    self.requestRecovery(error)
                     self.stateText = "PCM 发送失败，准备恢复"
-                    self.detailText = error
                 }
             }
         )
@@ -509,8 +528,98 @@ final class CallAudioCoordinator: ObservableObject {
                 Task { @MainActor [weak self] in
                     self?.handleMediaServicesReset()
                 }
+            },
+            center.addObserver(
+                forName: AVAudioSession.routeChangeNotification,
+                object: session,
+                queue: .main
+            ) { [weak self] notification in
+                Task { @MainActor [weak self] in
+                    self?.handleRouteChange(notification)
+                }
             }
         ]
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        guard !isInterrupted, !isTestTone else { return }
+        let hasMediaResources = hasAudioResources
+        guard hasMediaResources || routeRecoveryState.isRecoveryPending else { return }
+
+        let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+        let reason = Self.routeChangeReason(rawReason)
+        let routeMatchesPolicy = currentRouteMatchesPolicy
+        let requiresImmediatePause = isRunning && !routeMatchesPolicy
+        if requiresImmediatePause || !routeRecoveryState.isRecoveryPending {
+            routeRecoveryReason = reason
+        }
+        _ = routeRecoveryState.noteRouteChange(requiresRecovery: requiresImmediatePause)
+        if requiresImmediatePause {
+            pauseForRouteRecovery(reason: reason)
+        }
+        scheduleRouteSettleCheck(revision: routeRecoveryState.revision)
+    }
+
+    private func scheduleRouteSettleCheck(revision: UInt64) {
+        routeSettleTask?.cancel()
+        routeSettleTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self else { return }
+            self.finishRouteSettleCheck(revision: revision)
+        }
+    }
+
+    private func finishRouteSettleCheck(revision: UInt64) {
+        routeSettleTask = nil
+        let decision = routeRecoveryState.settledDecision(
+            revision: revision,
+            hasMediaResources: hasAudioResources,
+            routeMatchesPolicy: currentRouteMatchesPolicy,
+            isInterrupted: isInterrupted
+        )
+        switch decision {
+        case .ignore:
+            return
+        case .requestRecovery:
+            requestRecovery("音频路由已稳定，正在重新确认通话状态（\(routeRecoveryReason)）")
+        case .pauseAndRequestRecovery:
+            pauseForRouteRecovery(reason: routeRecoveryReason)
+            requestRecovery("音频路由已稳定，正在重新确认通话状态（\(routeRecoveryReason)）")
+        }
+    }
+
+    private func pauseForRouteRecovery(reason: String) {
+        guard hasAudioResources else { return }
+        startGeneration &+= 1
+        isRunning = false
+        isMediaEnabled = false
+        isUplinkEnabled = false
+        isDownlinkEnabled = false
+        isLocalRingbackEnabled = false
+        isTestTone = false
+        isAwaitingRecovery = false
+        hasActiveRequest = false
+        tearDownAudio(deactivateSession: true)
+        stateText = "音频路由变化，PCM 已暂停"
+        detailText = "等待路由稳定后重新认证 STATUS：\(reason)"
+        inputLevel = 0
+        downlinkLevel = 0
+    }
+
+    private func resetRouteRecoveryTracking() {
+        routeSettleTask?.cancel()
+        routeSettleTask = nil
+        routeRecoveryState.reset()
+        routeRecoveryReason = "音频路由发生变化"
+    }
+
+    private var hasAudioResources: Bool {
+        isRunning || hasActiveRequest || engine != nil || pipeline != nil
+    }
+
+    private var currentRouteMatchesPolicy: Bool {
+        session.currentRoute.inputs.contains { $0.portType == .builtInMic }
+            && session.currentRoute.outputs.contains { $0.portType == .builtInSpeaker }
     }
 
     private func handleInterruption(_ notification: Notification) {
@@ -519,17 +628,19 @@ final class CallAudioCoordinator: ObservableObject {
 
         switch type {
         case .began:
+            resetRouteRecoveryTracking()
             isInterrupted = true
             if isRunning || engine != nil || pipeline != nil {
                 startGeneration &+= 1
-                tearDownAudio(deactivateSession: false)
                 isRunning = false
                 isMediaEnabled = false
                 isUplinkEnabled = false
                 isDownlinkEnabled = false
                 isLocalRingbackEnabled = false
                 isTestTone = false
+                isAwaitingRecovery = false
                 hasActiveRequest = false
+                tearDownAudio(deactivateSession: false)
             }
             stateText = "系统音频已暂停"
             detailText = "音频中断结束且通话仍存在时会自动恢复"
@@ -555,15 +666,17 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func handleMediaServicesReset() {
         let needsRecovery = isRunning || engine != nil || pipeline != nil
+        resetRouteRecoveryTracking()
         startGeneration &+= 1
-        tearDownAudio(deactivateSession: false)
         isRunning = false
         isMediaEnabled = false
         isUplinkEnabled = false
         isDownlinkEnabled = false
         isLocalRingbackEnabled = false
         isTestTone = false
+        isAwaitingRecovery = false
         hasActiveRequest = false
+        tearDownAudio(deactivateSession: false)
         inputLevel = 0
         downlinkLevel = 0
         if needsRecovery {
@@ -573,8 +686,26 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func requestRecovery(_ reason: String) {
         recoveryGeneration &+= 1
+        isAwaitingRecovery = true
         stateText = "等待恢复通话音频"
         detailText = reason
+    }
+
+    private static func routeChangeReason(_ rawValue: UInt) -> String {
+        guard let reason = AVAudioSession.RouteChangeReason(rawValue: rawValue) else {
+            return "未知原因 \(rawValue)"
+        }
+        switch reason {
+        case .newDeviceAvailable: return "检测到新音频设备"
+        case .oldDeviceUnavailable: return "原音频设备已断开"
+        case .categoryChange: return "系统音频类别变化"
+        case .override: return "系统音频输出被重设"
+        case .wakeFromSleep: return "设备从休眠唤醒"
+        case .noSuitableRouteForCategory: return "当前没有可用通话音频路由"
+        case .routeConfigurationChange: return "系统音频路由配置变化"
+        case .unknown: return "未知音频路由变化"
+        @unknown default: return "未来音频路由变化 \(rawValue)"
+        }
     }
 
     private enum CallAudioError: Error, LocalizedError {

@@ -116,6 +116,17 @@ xcrun swiftc \
 /tmp/djonehub-playout-state-test
 ```
 
+音频路由恢复状态机测试覆盖去抖 revision、立即暂停后的单次恢复、空闲路由变化、系统中断
+接管恢复和旧 settle 回调失效：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Audio/AudioRouteRecoveryState.swift \
+  ios/DJOneHubUACProbe/Tests/AudioRouteRecoveryStateOfflineTest.swift \
+  -o /tmp/djonehub-route-recovery-test
+/tmp/djonehub-route-recovery-test
+```
+
 开发测试配对包解析测试：
 
 ```sh
