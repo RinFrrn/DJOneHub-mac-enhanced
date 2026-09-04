@@ -53,27 +53,17 @@ struct KeypadView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
-                ConnectionPill().padding(.top, 8)
                 Spacer(minLength: 0)
-                HStack(spacing: 10) {
-                    Text(displayNumber.isEmpty ? "输入号码" : displayNumber)
-                        .font(.system(
-                            size: displayNumber.count > 18 ? 28 : 36,
-                            weight: .regular,
-                            design: .rounded
-                        ))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .foregroundStyle(displayNumber.isEmpty ? .secondary : .primary)
-                        .frame(maxWidth: .infinity)
-                    if !displayNumber.isEmpty {
-                        Button("删除", systemImage: "delete.left.fill") {
-                            voiceControl.dialNumber.removeLast()
-                        }
-                        .labelStyle(.iconOnly)
-                        .font(.title2)
-                    }
-                }
+                Text(displayNumber.isEmpty ? "输入号码" : displayNumber)
+                    .font(.system(
+                        size: displayNumber.count > 18 ? 28 : 36,
+                        weight: .regular,
+                        design: .rounded
+                    ))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(displayNumber.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity)
                 .frame(height: 52)
                 .padding(.horizontal, 34)
 
@@ -83,13 +73,20 @@ struct KeypadView: View {
                 ) {
                     ForEach(keys, id: \.digit) { key in
                         Button { append(key.digit) } label: {
-                            VStack(spacing: 0) {
-                                Text(key.digit)
-                                    .font(.system(size: 32, weight: .regular, design: .rounded))
-                                Text(key.letters)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .tracking(1.5)
-                                    .frame(height: 12)
+                            Group {
+                                if key.digit == "*" || key.digit == "#" {
+                                    Text(key.digit)
+                                        .font(.system(size: 32, weight: .regular, design: .rounded))
+                                } else {
+                                    VStack(spacing: 0) {
+                                        Text(key.digit)
+                                            .font(.system(size: 32, weight: .regular, design: .rounded))
+                                        Text(key.letters)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .tracking(1.5)
+                                            .frame(height: 12)
+                                    }
+                                }
                             }
                             .frame(width: 76, height: 76)
                             .foregroundStyle(.primary)
@@ -101,22 +98,42 @@ struct KeypadView: View {
                     }
                 }
 
-                Button(action: onCall) {
-                    Image(systemName: "phone.fill")
-                        .font(.system(size: 28, weight: .semibold))
-                        .frame(width: 72, height: 72)
-                        .foregroundStyle(.white)
-                        .background(.green, in: Circle())
+                HStack(spacing: 22) {
+                    Color.clear
+                        .frame(width: 78, height: 72)
+
+                    Button(action: onCall) {
+                        Image(systemName: "phone.fill")
+                            .font(.system(size: 28, weight: .semibold))
+                            .frame(width: 72, height: 72)
+                            .foregroundStyle(.white)
+                            .background(.green, in: Circle())
+                    }
+                    .buttonStyle(PhoneCircleButtonStyle())
+                    .disabled(!canDial)
+                    .opacity(canDial ? 1 : 0.35)
+                    .frame(width: 78, height: 72)
+                    .accessibilityLabel("拨打电话")
+
+                    Button("删除", systemImage: "delete.left.fill") {
+                        voiceControl.dialNumber.removeLast()
+                    }
+                    .labelStyle(.iconOnly)
+                    .font(.title2)
+                    .frame(width: 78, height: 72)
+                    .disabled(displayNumber.isEmpty)
+                    .opacity(displayNumber.isEmpty ? 0 : 1)
+                    .accessibilityHidden(displayNumber.isEmpty)
                 }
-                .buttonStyle(PhoneCircleButtonStyle())
-                .disabled(!canDial)
-                .opacity(canDial ? 1 : 0.35)
-                .accessibilityLabel("拨打电话")
                 Spacer(minLength: 4)
             }
-            .navigationTitle("拨号键盘")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ProductToolbar(onSettings: onSettings) }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    ConnectionPill()
+                }
+                ProductToolbar(onSettings: onSettings)
+            }
         }
     }
 
