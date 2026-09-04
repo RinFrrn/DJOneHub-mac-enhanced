@@ -82,6 +82,22 @@ func TestValidateVoiceDaemonArtifactRejectsUnpinnedBinary(t *testing.T) {
 	}
 }
 
+func TestPinnedVoiceSMSArtifact(t *testing.T) {
+	data, err := os.ReadFile("../../outputs/module/djonehub-sms-daemon.armv7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateVoiceSMSArtifact(data); err != nil {
+		t.Fatalf("pinned SMS daemon rejected: %v", err)
+	}
+	mutated := append([]byte(nil), data...)
+	mutated[len(mutated)-1] ^= 1
+	if err := validateVoiceSMSArtifact(mutated); err == nil ||
+		!strings.Contains(err.Error(), "SHA-256 不匹配") {
+		t.Fatalf("mutated SMS daemon rejection = %v", err)
+	}
+}
+
 func TestPinnedVoiceIncallCardArtifact(t *testing.T) {
 	data, err := os.ReadFile("../../outputs/module/qdc507_incall_card.new.ko")
 	if err != nil {
@@ -166,6 +182,11 @@ func TestVoiceTestStartScriptSeparatesReadOnlyAndControlModes(t *testing.T) {
 		"mode=control-session",
 		"start_uplink=0",
 		"start_uplink=1",
+		"start_sms=0",
+		"start_sms=1",
+		"djonehub-sms-daemon.armv7",
+		`"$sms_binary" --read-only --key-file "$key"`,
+		"authenticated SMS control listening on 192.168.225.1:45752",
 		"--uplink-listener",
 		"--audio-port 45751",
 		"qdc507_aprv3.ko",

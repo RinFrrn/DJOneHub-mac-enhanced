@@ -15,6 +15,7 @@ import (
 
 const (
 	voiceDaemonExpectedSHA256         = "68c672e8d669b61d4e95a61b480cc503763f84b87bb7d50d1c88e4e191cf7c0e"
+	voiceSMSExpectedSHA256            = "61d314497a20a69fb7c762da9e9881d926ab5516f2bd5e3d8679a1ab76628f75"
 	voiceUplinkExpectedSHA256         = "052912efc5f9ef21ac891a5d2f9c457b3a3242f8423b17b3cb2f95418e982e48"
 	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
 	voiceTestVoiceExpectedSHA256      = "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
@@ -26,6 +27,7 @@ const (
 	voiceDaemonAddress                = "192.168.225.1:45750"
 	voiceTestRemoteDir                = "/usrdata/djonehub/voice-test"
 	voiceTestRemoteBinary             = voiceTestRemoteDir + "/djonehub-voice-daemon.armv7"
+	voiceTestRemoteSMS                = voiceTestRemoteDir + "/djonehub-sms-daemon.armv7"
 	voiceTestRemoteUplink             = voiceTestRemoteDir + "/mavo-pcm-bridge.armv7"
 	voiceTestRemoteAPRv3              = voiceTestRemoteDir + "/qdc507_aprv3.ko"
 	voiceTestRemoteVoice              = voiceTestRemoteDir + "/qdc507_voice.ko"
@@ -40,6 +42,7 @@ const (
 	voiceTestRemoteLog                = voiceTestRemoteDir + "/last-start.log"
 	voiceTestInitLink                 = "/etc/rc5.d/S99djonehub-voice-test"
 	voiceTestPIDFile                  = "/run/djonehub-voice-test.pid"
+	voiceTestSMSPIDFile               = "/run/djonehub-sms-test.pid"
 	voiceTestUplinkPIDFile            = "/run/djonehub-uplink-test.pid"
 	voiceTestStatusPurpose            = "development-status-only"
 	voiceTestSessionPurpose           = "development-control-session"
@@ -133,6 +136,21 @@ func validateVoiceDaemonArtifact(data []byte) error {
 	actual := hex.EncodeToString(sum[:])
 	if actual != voiceDaemonExpectedSHA256 {
 		return fmt.Errorf("QMI Voice daemon SHA-256 不匹配：需要 %s，实际 %s", voiceDaemonExpectedSHA256, actual)
+	}
+	return nil
+}
+
+func validateVoiceSMSArtifact(data []byte) error {
+	if len(data) == 0 || len(data) > qmiVoiceProbeMaximumSize {
+		return fmt.Errorf("QDC507 SMS daemon 文件大小无效：%d bytes", len(data))
+	}
+	if err := validateQMIVoiceProbeELF(data); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != voiceSMSExpectedSHA256 {
+		return fmt.Errorf("QDC507 SMS daemon SHA-256 不匹配：需要 %s，实际 %s", voiceSMSExpectedSHA256, actual)
 	}
 	return nil
 }
@@ -256,6 +274,7 @@ func voiceDaemonReplyFrameForTest(key, nonce []byte, requestID uint64, payload [
 const voiceTestStartScript = `#!/bin/sh
 base=/usrdata/djonehub/voice-test
 binary="$base/djonehub-voice-daemon.armv7"
+sms_binary="$base/djonehub-sms-daemon.armv7"
 uplink="$base/mavo-pcm-bridge.armv7"
 aprv3="$base/qdc507_aprv3.ko"
 voice="$base/qdc507_voice.ko"
@@ -269,6 +288,7 @@ log="$base/last-start.log"
 previous_state="$base/previous-start.state"
 previous_log="$base/previous-start.log"
 pidfile=/run/djonehub-voice-test.pid
+sms_pidfile=/run/djonehub-sms-test.pid
 uplink_pidfile=/run/djonehub-uplink-test.pid
 calibration_pidfile=/run/mavo-alsaucm.pid
 calibration_log=/run/mavo-alsaucm.log
@@ -337,11 +357,13 @@ if test -f "$once_marker"; then
     mode=status-once
     daemon_args="--once --status-only"
     start_uplink=0
+    start_sms=0
     retain_session=0
 elif test -f "$session_marker"; then
     mode=control-session
     daemon_args=
     start_uplink=1
+    start_sms=1
     retain_session=1
 else
     exit 0
@@ -383,6 +405,7 @@ remove_ephemeral_key() {
                 printf '%s\n' 'voice runtime ready: ALSA devices and VoLTE ACDB calibrated'
             fi
             uplink_pid=
+            sms_pid=
             uplink_owned() {
                 test -n "$uplink_pid" && test -d "/proc/$uplink_pid" &&
                     test "$(tr '\000' '\n' < "/proc/$uplink_pid/cmdline" 2>/dev/null | sed -n '1p')" = "$uplink"
@@ -393,6 +416,11 @@ remove_ephemeral_key() {
                     --token-file "$key" --interface bridge0 >>"$log" 2>&1 &
                 uplink_pid=$!
                 printf '%s\n' "$uplink_pid" >"$uplink_pidfile"
+            fi
+            if test "$start_sms" = 1; then
+                LD_LIBRARY_PATH=/usr/lib "$sms_binary" --read-only --key-file "$key" >>"$log" 2>&1 &
+                sms_pid=$!
+                printf '%s\n' "$sms_pid" >"$sms_pidfile"
             fi
             LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" >>"$log" 2>&1 &
             daemon_pid=$!
@@ -405,13 +433,21 @@ remove_ephemeral_key() {
                     uplink_ready=0
                     grep -F 'authenticated uplink listener ready on 192.168.225.1:45751' "$log" >/dev/null 2>&1 && uplink_ready=1
                 fi
-                if test "$uplink_ready" = 1 && grep -F 'authenticated control listening on 192.168.225.1:45750' "$log" >/dev/null 2>&1; then
+                sms_ready=1
+                if test "$start_sms" = 1; then
+                    sms_ready=0
+                    grep -F 'authenticated SMS control listening on 192.168.225.1:45752' "$log" >/dev/null 2>&1 && sms_ready=1
+                fi
+                if test "$uplink_ready" = 1 && test "$sms_ready" = 1 && grep -F 'authenticated control listening on 192.168.225.1:45750' "$log" >/dev/null 2>&1; then
                     ready=1
                     break
                 fi
                 kill -0 "$daemon_pid" 2>/dev/null || break
                 if test "$start_uplink" = 1; then
                     kill -0 "$uplink_pid" 2>/dev/null || break
+                fi
+                if test "$start_sms" = 1; then
+                    kill -0 "$sms_pid" 2>/dev/null || break
                 fi
                 check=$((check + 1))
                 sleep 0.1
@@ -429,6 +465,11 @@ remove_ephemeral_key() {
                     wait "$uplink_pid" 2>/dev/null || true
                     rm -f "$uplink_pidfile"
                 fi
+                if test -n "$sms_pid"; then
+                    kill -TERM "$sms_pid" 2>/dev/null || true
+                    wait "$sms_pid" 2>/dev/null || true
+                    rm -f "$sms_pidfile"
+                fi
                 printf 'daemon-exit:%s\n' "$result" >"$state"
                 rm -f "$pidfile"
                 exit "$result"
@@ -438,7 +479,11 @@ remove_ephemeral_key() {
             if uplink_owned; then
                 kill -TERM "$uplink_pid" 2>/dev/null || true
             fi
+            if test -n "$sms_pid"; then
+                kill -TERM "$sms_pid" 2>/dev/null || true
+            fi
             rm -f "$uplink_pidfile"
+            rm -f "$sms_pidfile"
             rm -f "$pidfile"
             exit 1
         fi

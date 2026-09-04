@@ -293,17 +293,114 @@ struct ContactsView: View {
 }
 
 struct MessagesView: View {
+    @EnvironmentObject private var voiceControl: VoiceControlModel
+    @StateObject private var sms = SMSControlModel()
     let onSettings: () -> Void
 
     var body: some View {
         NavigationStack {
-            ContentUnavailableView {
-                Label("模块短信尚未启用", systemImage: "message.badge")
-            } description: {
-                Text("当前认证网关只支持电话控制和 PCM。短信需要先在 QDC507 上增加受限的收取、发送和状态协议。")
+            Group {
+                if sms.messages.isEmpty {
+                    ContentUnavailableView {
+                        Label(
+                            sms.isLoading ? "正在读取短信" : "暂无短信",
+                            systemImage: sms.isLoading ? "arrow.triangle.2.circlepath" : "message"
+                        )
+                    } description: {
+                        Text(sms.stateText)
+                    } actions: {
+                        if !sms.isLoading {
+                            Button("重新读取") { refresh() }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }
+                } else {
+                    List(sms.messages) { message in
+                        NavigationLink {
+                            ModuleSMSDetailView(message: message)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(message.title)
+                                        .font(.body.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(message.storage.title)
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(message.preview)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .refreshable { refresh() }
+                }
             }
             .navigationTitle("信息")
-            .toolbar { ProductToolbar(onSettings: onSettings) }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("刷新", systemImage: "arrow.clockwise", action: refresh)
+                        .disabled(sms.isLoading)
+                }
+                ProductToolbar(onSettings: onSettings)
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !sms.messages.isEmpty {
+                    Text(sms.stateText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                }
+            }
+            .task {
+                if sms.messages.isEmpty { refresh() }
+            }
+        }
+    }
+
+    private func refresh() {
+        sms.refresh(pairingKey: voiceControl.pairingKeyForUplinkProbe())
+    }
+}
+
+private struct ModuleSMSDetailView: View {
+    let message: ModuleSMSMessage
+
+    var body: some View {
+        List {
+            Section("内容") {
+                LabeledContent("发件人", value: message.title)
+                Text(message.preview)
+                    .textSelection(.enabled)
+            }
+            Section("模块存储") {
+                LabeledContent("位置", value: message.storage.title)
+                LabeledContent("索引", value: String(message.index))
+                LabeledContent("标签", value: tagText)
+                LabeledContent("格式", value: String(format: "0x%02X", message.format))
+            }
+            Section("原始 PDU") {
+                Text(message.rawHex)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+        }
+        .navigationTitle("短信")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var tagText: String {
+        switch message.tag {
+        case 0: return "已读"
+        case 1: return "未读"
+        case 2: return "已发送"
+        case 3: return "未发送"
+        default: return "未知"
         }
     }
 }

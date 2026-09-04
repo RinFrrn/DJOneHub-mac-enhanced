@@ -32,6 +32,7 @@ type voiceTestArmRequest struct {
 	ArtifactPath           string `json:"artifact_path"`
 	UplinkArtifactPath     string `json:"uplink_artifact_path"`
 	IncallCardArtifactPath string `json:"incall_card_artifact_path"`
+	SMSArtifactPath        string `json:"sms_artifact_path"`
 	PairingBundlePath      string `json:"pairing_bundle_path"`
 	RotatePairing          bool   `json:"rotate_pairing"`
 }
@@ -250,6 +251,10 @@ func stopVoiceTestUplinkProcess(adb *adbClient) error {
 	return stopOwnedVoiceTestProcess(adb, voiceTestUplinkPIDFile, voiceTestRemoteUplink)
 }
 
+func stopVoiceTestSMSProcess(adb *adbClient) error {
+	return stopOwnedVoiceTestProcess(adb, voiceTestSMSPIDFile, voiceTestRemoteSMS)
+}
+
 func startVoiceTestForValidation(adb *adbClient) error {
 	command := "rm -f '" + voiceTestPIDFile + "' /tmp/djonehub-voice-test-validate.log; " +
 		"LD_LIBRARY_PATH=/usr/lib nohup '" + voiceTestRemoteBinary + "' --once --status-only --key-file '" + voiceTestRemoteKey + "' " +
@@ -310,6 +315,35 @@ func loadVoiceDaemonArtifact(path string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("读取 QMI Voice daemon 失败: %w", err)
 	}
 	if err := validateVoiceDaemonArtifact(data); err != nil {
+		return nil, "", err
+	}
+	return data, absPath, nil
+}
+
+func defaultVoiceSMSArtifactPath() string {
+	return defaultPinnedQMIArtifactPath("djonehub-sms-daemon.armv7", validateVoiceSMSArtifact)
+}
+
+func loadVoiceSMSArtifact(path string) ([]byte, string, error) {
+	if strings.TrimSpace(path) == "" {
+		path = defaultVoiceSMSArtifactPath()
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("无法解析 QDC507 SMS daemon 路径: %w", err)
+	}
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("无法读取 QDC507 SMS daemon: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, "", errors.New("QDC507 SMS daemon 必须是普通文件，不能是符号链接")
+	}
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取 QDC507 SMS daemon 失败: %w", err)
+	}
+	if err := validateVoiceSMSArtifact(data); err != nil {
 		return nil, "", err
 	}
 	return data, absPath, nil
@@ -631,12 +665,14 @@ func (a *app) voiceTestStatusAPI(w http.ResponseWriter, _ *http.Request) {
 	defer adb.Close()
 	out, status, err := adb.shellChecked(
 		"printf 'binary=%s\\n' \"$(test -x '"+voiceTestRemoteBinary+"' && echo yes || echo no)\"; "+
+			"printf 'sms_binary=%s\\n' \"$(test -x '"+voiceTestRemoteSMS+"' && echo yes || echo no)\"; "+
 			"printf 'uplink_binary=%s\\n' \"$(test -x '"+voiceTestRemoteUplink+"' && echo yes || echo no)\"; "+
 			"printf 'aprv3_binary=%s\\n' \"$(test -f '"+voiceTestRemoteAPRv3+"' && echo yes || echo no)\"; "+
 			"printf 'voice_binary=%s\\n' \"$(test -f '"+voiceTestRemoteVoice+"' && echo yes || echo no)\"; "+
 			"printf 'incall_card_binary=%s\\n' \"$(test -f '"+voiceTestRemoteIncallCard+"' && echo yes || echo no)\"; "+
 			"printf 'incall_prepare=%s\\n' \"$(test -x '"+voiceTestRemotePrepareCard+"' && echo yes || echo no)\"; "+
 			"printf 'uplink_process=%s\\n' \"$(test -s '"+voiceTestUplinkPIDFile+"' && read pid < '"+voiceTestUplinkPIDFile+"' && test -d \"/proc/$pid\" && echo running || echo stopped)\"; "+
+			"printf 'sms_process=%s\\n' \"$(test -s '"+voiceTestSMSPIDFile+"' && read pid < '"+voiceTestSMSPIDFile+"' && test -d \"/proc/$pid\" && echo running || echo stopped)\"; "+
 			"printf 'key=%s\\n' \"$(test -f '"+voiceTestRemoteKey+"' && echo present || echo absent)\"; "+
 			"printf 'status_marker=%s\\n' \"$(test -f '"+voiceTestRemoteOnceMarker+"' && echo armed || echo absent)\"; "+
 			"printf 'session_marker=%s\\n' \"$(test -f '"+voiceTestRemoteSessionMarker+"' && echo armed || echo absent)\"; "+
@@ -686,9 +722,16 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 	var aprv3Data []byte
 	var voiceData []byte
 	var incallCardData []byte
+	var smsData []byte
 	var uplinkArtifactPath string
 	var incallCardArtifactPath string
+	var smsArtifactPath string
 	if mode.purpose == voiceTestSessionPurpose {
+		smsData, smsArtifactPath, err = loadVoiceSMSArtifact(request.SMSArtifactPath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		uplinkData, uplinkArtifactPath, err = loadVoiceUplinkArtifact(request.UplinkArtifactPath)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -775,6 +818,10 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		writeError(w, http.StatusBadGateway, "停止旧 PCM 上行监听失败: "+err.Error())
 		return
 	}
+	if err := stopVoiceTestSMSProcess(adb); err != nil {
+		writeError(w, http.StatusBadGateway, "停止旧短信网关失败: "+err.Error())
+		return
+	}
 	armed := false
 	defer func() {
 		if !armed {
@@ -790,6 +837,10 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		return
 	}
 	if len(uplinkData) != 0 {
+		if err := adb.pushContext(r.Context(), smsData, voiceTestRemoteSMS, 0o100700, 30*time.Second); err != nil {
+			writeError(w, http.StatusBadGateway, "推送短信认证网关失败: "+err.Error())
+			return
+		}
 		if err := adb.pushContext(r.Context(), uplinkData, voiceTestRemoteUplink, 0o100700, 30*time.Second); err != nil {
 			writeError(w, http.StatusBadGateway, "推送 PCM 上行 bridge 失败: "+err.Error())
 			return
@@ -823,7 +874,8 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		"test \"$(sha256sum '" + voiceTestRemoteBinary + "' | awk '{print $1}')\" = '" + voiceDaemonExpectedSHA256 + "' && " +
 		"test \"$(wc -c < '" + voiceTestRemoteKey + "')\" = 32"
 	if len(uplinkData) != 0 {
-		verify += " && chmod 700 '" + voiceTestRemoteUplink + "' && " +
+		verify += " && chmod 700 '" + voiceTestRemoteSMS + "' '" + voiceTestRemoteUplink + "' && " +
+			"test \"$(sha256sum '" + voiceTestRemoteSMS + "' | awk '{print $1}')\" = '" + voiceSMSExpectedSHA256 + "' && " +
 			"chmod 700 '" + voiceTestRemotePrepareCard + "' && " +
 			"chmod 600 '" + voiceTestRemoteAPRv3 + "' '" + voiceTestRemoteVoice + "' && " +
 			"chmod 600 '" + voiceTestRemoteIncallCard + "' && " +
@@ -898,6 +950,17 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 		writeError(w, http.StatusBadGateway, "设置一次性测试标记失败: "+err.Error())
 		return
 	}
+	if mode.purpose == voiceTestSessionPurpose {
+		// A control-session update normally happens while the powered module is
+		// still attached to this Mac.  Start the newly installed session now as
+		// well as retaining the boot marker, so updating the SMS companion does
+		// not force a physical unplug/replug cycle.
+		startNow := "nohup setsid '" + voiceTestRemoteScript + "' </dev/null >/tmp/djonehub-session-launch.log 2>&1 & launcher_pid=$!; sleep 1; test \"$launcher_pid\" -gt 0 && test -f '" + voiceTestRemoteState + "'"
+		if err := sentinelShell(adb, startNow, 8*time.Second); err != nil {
+			writeError(w, http.StatusBadGateway, "立即启动模块控制会话失败: "+err.Error())
+			return
+		}
+	}
 	armed = true
 	if mode.purpose == voiceTestSessionPurpose {
 		a.moduleVoiceMu.Lock()
@@ -913,6 +976,9 @@ func (a *app) voiceTestArmAPI(w http.ResponseWriter, r *http.Request, mode voice
 	}
 	if incallCardArtifactPath != "" {
 		w.Header().Set("X-DJOneHub-Incall-Card-Artifact-Path", incallCardArtifactPath)
+	}
+	if smsArtifactPath != "" {
+		w.Header().Set("X-DJOneHub-SMS-Artifact-Path", smsArtifactPath)
 	}
 	w.Header().Set("X-DJOneHub-Module-Identifier", identifier)
 	if stablePairingPath != "" {
@@ -960,9 +1026,13 @@ func (a *app) voiceTestUninstallAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "停止 PCM 上行监听失败: "+err.Error())
 		return
 	}
+	if err := stopVoiceTestSMSProcess(adb); err != nil {
+		writeError(w, http.StatusBadGateway, "停止短信认证网关失败: "+err.Error())
+		return
+	}
 	cleanup := "if test -x '" + voiceTestRemotePrepareCard + "'; then '" + voiceTestRemotePrepareCard + "' --restore-stock || exit 1; fi; " +
 		"rm -f '" + voiceTestLegacyOnceMarker + "' '" + voiceTestRemoteOnceMarker + "' '" + voiceTestRemoteSessionMarker + "' '" + voiceTestRemoteState + "' '" + voiceTestRemoteLog + "' '" +
-		voiceTestRemoteScript + "' '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteUplink + "' '" + voiceTestRemoteAPRv3 + "' '" + voiceTestRemoteVoice + "' '" + voiceTestRemoteIncallCard + "' '" + voiceTestRemotePrepareCard + "' '" + voiceTestRemoteKey + "' '" + voiceTestPIDFile + "' '" + voiceTestUplinkPIDFile + "'; " +
+		voiceTestRemoteScript + "' '" + voiceTestRemoteBinary + "' '" + voiceTestRemoteSMS + "' '" + voiceTestRemoteUplink + "' '" + voiceTestRemoteAPRv3 + "' '" + voiceTestRemoteVoice + "' '" + voiceTestRemoteIncallCard + "' '" + voiceTestRemotePrepareCard + "' '" + voiceTestRemoteKey + "' '" + voiceTestPIDFile + "' '" + voiceTestSMSPIDFile + "' '" + voiceTestUplinkPIDFile + "'; " +
 		"rmdir '" + voiceTestRemoteDir + "' 2>/dev/null || true; sync"
 	if err := sentinelShell(adb, cleanup, 10*time.Second); err != nil {
 		writeError(w, http.StatusBadGateway, "清理 iOS STATUS 测试失败: "+err.Error())

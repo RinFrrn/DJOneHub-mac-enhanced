@@ -80,6 +80,7 @@ if [ -n "${latest_arm_dir}" ]; then
     djonehub-qmi-probe.armv7 \
     djonehub-qmi-voice-control.armv7 \
     djonehub-voice-daemon.armv7 \
+    djonehub-sms-daemon.armv7 \
     mavo-pcm-bridge.armv7 \
     qdc507_incall_card.new.ko
   do

@@ -24,6 +24,8 @@ struct djonehub_wms_raw_message {
 size_t djonehub_wms_build_list_request(uint8_t storage, uint8_t tag,
                                        uint8_t tag_tlv, int include_mode,
                                        uint8_t *output, size_t capacity);
+size_t djonehub_wms_build_list_all_request(uint8_t storage, int include_mode,
+                                           uint8_t *output, size_t capacity);
 size_t djonehub_wms_build_read_request(uint8_t storage, uint32_t index,
                                        uint8_t *output, size_t capacity);
 size_t djonehub_wms_build_delete_request(uint8_t storage, uint32_t index,

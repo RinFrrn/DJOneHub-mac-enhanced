@@ -1113,6 +1113,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/module/qmi-voice/control/answer", a.qmiVoiceControlAnswerAPI)
 	mux.HandleFunc("POST /api/module/qmi-voice/control/end", a.qmiVoiceControlEndAPI)
 	mux.HandleFunc("POST /api/module/qmi-voice/daemon/status", a.qmiVoiceDaemonStatusAPI)
+	mux.HandleFunc("POST /api/module/qmi-sms/daemon/status", a.qmiSMSGatewayStatusAPI)
+	mux.HandleFunc("POST /api/module/qmi-sms/session/status", a.qmiSMSSessionStatusAPI)
 	mux.HandleFunc("GET /api/ios/voice-test", a.voiceTestStatusAPI)
 	mux.HandleFunc("POST /api/ios/voice-test/arm-once", a.voiceTestArmOnceAPI)
 	mux.HandleFunc("POST /api/ios/voice-test/arm-session", a.voiceTestArmSessionAPI)

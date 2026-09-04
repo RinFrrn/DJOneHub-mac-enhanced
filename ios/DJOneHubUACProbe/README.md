@@ -148,6 +148,16 @@ xcrun swiftc \
 /tmp/djonehub-call-recording-test
 ```
 
+短信 PDU 离线测试覆盖 UCS-2、GSM 7-bit、国际号码和畸形输入：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Control/SMSControl.swift \
+  ios/DJOneHubUACProbe/Tests/SMSPDUOfflineTest.swift \
+  -o /tmp/djonehub-sms-pdu-test
+/tmp/djonehub-sms-pdu-test
+```
+
 ## 构建
 
 无需签名的编译检查：

@@ -88,7 +88,26 @@ size_t djonehub_wms_build_list_request(uint8_t storage, uint8_t tag,
         return 0U;
     }
     if (include_mode != 0) {
-        offset = append_tlv(0x10U, &mode, 1U, output, capacity, offset);
+        offset = append_tlv(0x12U, &mode, 1U, output, capacity, offset);
+    }
+    return offset == SIZE_MAX ? 0U : offset;
+}
+
+size_t djonehub_wms_build_list_all_request(uint8_t storage, int include_mode,
+                                           uint8_t *output, size_t capacity)
+{
+    const uint8_t mode = 1U;
+    size_t offset;
+
+    if (output == NULL || storage > 1U) {
+        return 0U;
+    }
+    offset = append_tlv(0x01U, &storage, 1U, output, capacity, 0U);
+    if (offset == SIZE_MAX) {
+        return 0U;
+    }
+    if (include_mode != 0) {
+        offset = append_tlv(0x12U, &mode, 1U, output, capacity, offset);
     }
     return offset == SIZE_MAX ? 0U : offset;
 }

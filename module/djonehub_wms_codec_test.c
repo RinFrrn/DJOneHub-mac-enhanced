@@ -29,7 +29,17 @@ int main(void)
                                               sizeof(buffer));
     CHECK(length == 12U);
     CHECK(memcmp(buffer, "\x01\x01\x00\x01\x11\x01\x00\x01"
-                         "\x10\x01\x00\x01", 12U) == 0);
+                         "\x12\x01\x00\x01", 12U) == 0);
+
+    length = djonehub_wms_build_list_all_request(0U, 0, buffer,
+                                                  sizeof(buffer));
+    CHECK(length == 4U);
+    CHECK(memcmp(buffer, "\x01\x01\x00\x00", 4U) == 0);
+    length = djonehub_wms_build_list_all_request(1U, 1, buffer,
+                                                  sizeof(buffer));
+    CHECK(length == 8U);
+    CHECK(memcmp(buffer, "\x01\x01\x00\x01\x12\x01\x00\x01",
+                 8U) == 0);
 
     length = djonehub_wms_build_read_request(0U, 0x78563412U, buffer,
                                               sizeof(buffer));

@@ -14,9 +14,7 @@
 #define QMI_WMS_RAW_SEND 0x0020U
 #define QMI_WMS_RAW_READ 0x0022U
 #define QMI_WMS_DELETE 0x0024U
-#define QMI_WMS_GET_MESSAGE_PROTOCOL 0x0030U
 #define QMI_WMS_LIST_MESSAGES 0x0031U
-#define QMI_WMS_GET_TRANSPORT_REGISTRATION 0x004AU
 #define QMI_TIMEOUT_MS 5000U
 #define RESPONSE_CAPACITY 4096U
 
@@ -43,7 +41,22 @@ typedef int (*qmi_client_send_raw_msg_sync_fn)(
     unsigned int request_length, void *response,
     unsigned int response_capacity, unsigned int *response_length,
     unsigned int timeout_ms);
+typedef int (*qmi_client_message_encode_fn)(
+    qmi_client_type client, int message_type, unsigned int message_id,
+    const void *source, unsigned int source_length, void *destination,
+    unsigned int destination_length, unsigned int *encoded_length);
 typedef int (*qmi_client_release_fn)(qmi_client_type client);
+
+struct wms_list_messages_req_v01 {
+    int32_t storage_type;
+    uint8_t message_tag_valid;
+    int32_t message_tag;
+    uint8_t message_mode_valid;
+    int32_t message_mode;
+};
+
+_Static_assert(sizeof(struct wms_list_messages_req_v01) == 20U,
+               "unexpected ARM QMI WMS list request layout");
 
 struct qmi_api {
     void *services_library;
@@ -51,6 +64,7 @@ struct qmi_api {
     wms_get_service_object_fn get_service_object;
     qmi_client_init_instance_fn client_init_instance;
     qmi_client_send_raw_msg_sync_fn send_raw_sync;
+    qmi_client_message_encode_fn message_encode;
     qmi_client_release_fn client_release;
 };
 
@@ -111,6 +125,8 @@ static int load_api(struct qmi_api *api)
                     sizeof(api->client_init_instance)) != 0 ||
         load_symbol(api->client_library, "qmi_client_send_raw_msg_sync",
                     &api->send_raw_sync, sizeof(api->send_raw_sync)) != 0 ||
+        load_symbol(api->client_library, "qmi_client_message_encode",
+                    &api->message_encode, sizeof(api->message_encode)) != 0 ||
         load_symbol(api->client_library, "qmi_client_release",
                     &api->client_release, sizeof(api->client_release)) != 0) {
         unload_api(api);
@@ -234,15 +250,13 @@ static int append_unique(struct djonehub_qmi_wms_result *result,
 enum djonehub_qmi_wms_error djonehub_qmi_wms_get_status(
     struct djonehub_qmi_wms_result *result)
 {
-    uint8_t response[RESPONSE_CAPACITY];
-    size_t response_length = 0U;
     enum djonehub_qmi_wms_error error;
-    int parsed;
 
     if (result == NULL) {
         return DJONEHUB_QMI_WMS_INVALID_INPUT;
     }
     memset(result, 0, sizeof(*result));
+    result->status.protocol = 0xffU;
     result->status.registration = 0xffU;
     (void)pthread_mutex_lock(&qmi_context.mutex);
     error = ensure_client_locked(&result->transport_error);
@@ -250,39 +264,8 @@ enum djonehub_qmi_wms_error djonehub_qmi_wms_get_status(
         result->status.idl_major = WMS_IDL_MAJOR;
         result->status.idl_minor = qmi_context.idl_minor;
         result->status.idl_tool = qmi_context.idl_tool;
-        error = send_locked(QMI_WMS_GET_MESSAGE_PROTOCOL, NULL, 0U, response,
-                            &response_length, result);
-    }
-    if (error == DJONEHUB_QMI_WMS_SUCCESS) {
-        parsed = djonehub_wms_parse_u8_response(
-            response, response_length, &result->status.protocol,
-            &result->service_error);
-        if (parsed != 0) {
-            error = parse_error(parsed);
-        }
-    }
-    if (error == DJONEHUB_QMI_WMS_SUCCESS) {
-        error = send_locked(QMI_WMS_GET_TRANSPORT_REGISTRATION, NULL, 0U,
-                            response, &response_length, result);
-        if (error == DJONEHUB_QMI_WMS_SUCCESS) {
-            parsed = djonehub_wms_parse_u8_response(
-                response, response_length, &result->status.registration,
-                &result->service_error);
-            if (parsed == 0) {
-                result->status.registration_available = 1U;
-            } else if (parsed == 1) {
-                /* Older WMS revisions may not implement 0x004a.  Protocol
-                 * discovery already proves that the service is available. */
-                result->status.registration = 0xffU;
-                result->service_error = 0U;
-                error = DJONEHUB_QMI_WMS_SUCCESS;
-            } else {
-                error = parse_error(parsed);
-            }
-        }
     }
     (void)pthread_mutex_unlock(&qmi_context.mutex);
-    memset(response, 0, sizeof(response));
     return error;
 }
 
@@ -295,6 +278,7 @@ enum djonehub_qmi_wms_error djonehub_qmi_wms_list(
     enum djonehub_qmi_wms_error error;
     size_t response_length = 0U;
     uint8_t tag;
+    int list_succeeded = 0;
 
     if (result == NULL || storage > 1U) {
         return DJONEHUB_QMI_WMS_INVALID_INPUT;
@@ -302,7 +286,66 @@ enum djonehub_qmi_wms_error djonehub_qmi_wms_list(
     memset(result, 0, sizeof(*result));
     (void)pthread_mutex_lock(&qmi_context.mutex);
     error = ensure_client_locked(&result->transport_error);
-    for (tag = 0U; error == DJONEHUB_QMI_WMS_SUCCESS && tag <= 3U; ++tag) {
+    /* Message tag is optional in WMS List Messages.  Start with the smallest
+     * request accepted across old modem IDL revisions: storage only, with a
+     * message-mode retry.  Filtering locally also avoids depending on tag TLV
+     * numbers that moved between older WMS schemas. */
+    if (error == DJONEHUB_QMI_WMS_SUCCESS) {
+        int include_mode;
+
+        for (include_mode = 0; include_mode <= 1 && !list_succeeded;
+             ++include_mode) {
+            struct wms_list_messages_req_v01 request_struct;
+            unsigned int encoded_length = 0U;
+            size_t request_length;
+            size_t parsed_count = 0U;
+            int parsed;
+            size_t index;
+
+            memset(&request_struct, 0, sizeof(request_struct));
+            request_struct.storage_type = storage;
+            request_struct.message_mode_valid = (uint8_t)include_mode;
+            request_struct.message_mode = 1;
+            parsed = qmi_context.api.message_encode(
+                qmi_context.client, 0, QMI_WMS_LIST_MESSAGES,
+                &request_struct, (unsigned int)sizeof(request_struct),
+                request, (unsigned int)sizeof(request), &encoded_length);
+            memset(&request_struct, 0, sizeof(request_struct));
+            if (parsed != QMI_NO_ERR || encoded_length > sizeof(request)) {
+                result->transport_error = parsed;
+                error = DJONEHUB_QMI_WMS_MALFORMED_RESPONSE;
+                break;
+            }
+            request_length = encoded_length;
+            error = send_locked(QMI_WMS_LIST_MESSAGES, request,
+                                request_length, response, &response_length,
+                                result);
+            if (error != DJONEHUB_QMI_WMS_SUCCESS) {
+                break;
+            }
+            parsed = djonehub_wms_parse_list_response(
+                response, response_length, parsed_messages,
+                DJONEHUB_WMS_MAX_MESSAGES, &parsed_count,
+                &result->service_error);
+            if (parsed == 1) {
+                continue;
+            }
+            if (parsed != 0) {
+                error = parse_error(parsed);
+                break;
+            }
+            for (index = 0U; index < parsed_count; ++index) {
+                if (append_unique(result, &parsed_messages[index]) != 0) {
+                    error = DJONEHUB_QMI_WMS_LIMIT_EXCEEDED;
+                    break;
+                }
+            }
+            list_succeeded = error == DJONEHUB_QMI_WMS_SUCCESS;
+        }
+    }
+    for (tag = 0U;
+         !list_succeeded && error == DJONEHUB_QMI_WMS_SUCCESS && tag <= 3U;
+         ++tag) {
         static const uint8_t types[] = {0x11U, 0x02U};
         size_t type_index;
         int succeeded = 0;
@@ -348,6 +391,12 @@ enum djonehub_qmi_wms_error djonehub_qmi_wms_list(
         if (!succeeded && error == DJONEHUB_QMI_WMS_SUCCESS) {
             error = DJONEHUB_QMI_WMS_SERVICE;
         }
+    }
+    if (!list_succeeded && error == DJONEHUB_QMI_WMS_SUCCESS && tag > 3U) {
+        list_succeeded = 1;
+    }
+    if (!list_succeeded && error == DJONEHUB_QMI_WMS_SUCCESS) {
+        error = DJONEHUB_QMI_WMS_SERVICE;
     }
     (void)pthread_mutex_unlock(&qmi_context.mutex);
     memset(request, 0, sizeof(request));
