@@ -27,7 +27,36 @@ struct ProductCallPhaseOfflineTest {
         expect(.recovering("控制请求超时"), state: "控制请求超时")
         verifyAudioLifecycleHints()
         verifyMediaRecoveryGate()
+        verifyActiveCallDurationTracker()
         print("ProductCallPhaseOfflineTest: PASS")
+    }
+
+    private static func verifyActiveCallDurationTracker() {
+        let clock = ContinuousClock()
+        let start = clock.now
+        var tracker = ActiveCallDurationTracker()
+        precondition(tracker.update(phase: .ready, now: start) == 0)
+        precondition(tracker.update(phase: .active(1), now: start) == 0)
+        precondition(tracker.update(
+            phase: .active(1),
+            now: start.advanced(by: .seconds(65))
+        ) == 65)
+        precondition(tracker.update(
+            phase: .recovering("test"),
+            now: start.advanced(by: .seconds(70))
+        ) == 70)
+        precondition(tracker.update(
+            phase: .active(1),
+            now: start.advanced(by: .seconds(75))
+        ) == 75)
+        precondition(tracker.update(
+            phase: .active(2),
+            now: start.advanced(by: .seconds(80))
+        ) == 0)
+        precondition(tracker.update(
+            phase: .ready,
+            now: start.advanced(by: .seconds(90))
+        ) == 0)
     }
 
     private static func verifyMediaRecoveryGate() {

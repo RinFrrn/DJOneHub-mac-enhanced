@@ -176,6 +176,10 @@ struct DJOneHubRootView: View {
             }
             LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
             LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
+            if case .active = lifecycle.phase {
+                LabeledContent("通话时长", value: callDurationText)
+            }
+            LabeledContent("媒体恢复", value: "\(callAudio.recoveryGeneration) 次")
             LabeledContent("本地回铃", value: callAudio.isLocalRingbackEnabled ? "待命" : "关闭")
             LabeledContent(
                 "链路修复",
@@ -184,6 +188,10 @@ struct DJOneHubRootView: View {
             LabeledContent(
                 "播放恢复",
                 value: "重缓冲 \(callAudio.downlinkMetrics.rebufferEvents) · 队列丢弃 \(callAudio.downlinkMetrics.queueDroppedFrames)"
+            )
+            LabeledContent(
+                "序号状态",
+                value: "丢弃 \(callAudio.downlinkMetrics.droppedPackets) · 重置 \(callAudio.downlinkMetrics.sequenceResets)"
             )
 
             VStack(alignment: .leading, spacing: 6) {
@@ -223,6 +231,17 @@ struct DJOneHubRootView: View {
 
     private var trimmedDialNumber: String {
         voiceControl.dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var callDurationText: String {
+        let totalSeconds = lifecycle.activeCallDurationSeconds
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%02llu:%02llu:%02llu", hours, minutes, seconds)
+        }
+        return String(format: "%02llu:%02llu", minutes, seconds)
     }
 
     private var phaseColor: Color {

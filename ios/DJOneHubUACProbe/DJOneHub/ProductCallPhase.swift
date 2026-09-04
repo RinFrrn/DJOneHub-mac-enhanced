@@ -31,6 +31,42 @@ struct StatusConfirmedMediaRecoveryGate {
     }
 }
 
+struct ActiveCallDurationTracker {
+    private var callID: UInt8?
+    private var startedAt: ContinuousClock.Instant?
+
+    mutating func update(
+        phase: ProductCallPhase,
+        now: ContinuousClock.Instant
+    ) -> UInt64 {
+        switch phase {
+        case .active(let activeCallID):
+            if callID != activeCallID || startedAt == nil {
+                callID = activeCallID
+                startedAt = now
+                return 0
+            }
+            return elapsedSeconds(at: now)
+        case .connecting, .recovering:
+            return elapsedSeconds(at: now)
+        default:
+            reset()
+            return 0
+        }
+    }
+
+    mutating func reset() {
+        callID = nil
+        startedAt = nil
+    }
+
+    private func elapsedSeconds(at now: ContinuousClock.Instant) -> UInt64 {
+        guard let startedAt else { return 0 }
+        let seconds = startedAt.duration(to: now).components.seconds
+        return seconds > 0 ? UInt64(seconds) : 0
+    }
+}
+
 enum ProductCallPhase: Equatable {
     case needsPairing
     case needsControlPairing

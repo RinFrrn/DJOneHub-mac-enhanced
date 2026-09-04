@@ -4,6 +4,7 @@ import Foundation
 final class CallLifecycleCoordinator: ObservableObject {
     @Published private(set) var phase: ProductCallPhase = .connecting
     @Published private(set) var hasStarted = false
+    @Published private(set) var activeCallDurationSeconds: UInt64 = 0
 
     private let voiceControl: VoiceControlModel
     private let callAudio: CallAudioCoordinator
@@ -11,6 +12,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     private var audioStartRequested = false
     private var handledAudioRecoveryGeneration: UInt64
     private var mediaRecoveryGate = StatusConfirmedMediaRecoveryGate()
+    private var callDurationTracker = ActiveCallDurationTracker()
     private var nextStatusAttempt = ContinuousClock.now
     private var nextAudioStartAttempt = ContinuousClock.now
 
@@ -47,6 +49,8 @@ final class CallLifecycleCoordinator: ObservableObject {
         lifecycleTask = nil
         audioStartRequested = false
         mediaRecoveryGate.reset()
+        callDurationTracker.reset()
+        activeCallDurationSeconds = 0
         if callAudio.isRunning || callAudio.hasActiveRequest || callAudio.isAwaitingRecovery {
             callAudio.stop()
         }
@@ -109,7 +113,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     }
 
     private func updatePhaseAndAudio() {
-        phase = ProductCallPhase.derive(
+        let derivedPhase = ProductCallPhase.derive(
             isConfigured: voiceControl.isConfigured,
             canControlCalls: voiceControl.canControlCalls,
             isBusy: voiceControl.isBusy,
@@ -117,12 +121,22 @@ final class CallLifecycleCoordinator: ObservableObject {
             calls: voiceControl.calls,
             stateText: voiceControl.stateText
         )
+        if phase != derivedPhase {
+            phase = derivedPhase
+        }
+        let durationSeconds = callDurationTracker.update(
+            phase: derivedPhase,
+            now: ContinuousClock.now
+        )
+        if activeCallDurationSeconds != durationSeconds {
+            activeCallDurationSeconds = durationSeconds
+        }
 
-        let shouldPrepareAudio = voiceControl.canControlCalls && phase.shouldPrepareCallAudio
-        let shouldEnableUplink = voiceControl.canControlCalls && phase.shouldEnableUplink
-        let shouldEnableDownlink = voiceControl.canControlCalls && phase.shouldEnableDownlink
+        let shouldPrepareAudio = voiceControl.canControlCalls && derivedPhase.shouldPrepareCallAudio
+        let shouldEnableUplink = voiceControl.canControlCalls && derivedPhase.shouldEnableUplink
+        let shouldEnableDownlink = voiceControl.canControlCalls && derivedPhase.shouldEnableDownlink
         let shouldGenerateLocalRingback = voiceControl.canControlCalls
-            && phase.shouldGenerateLocalRingback(calls: voiceControl.calls)
+            && derivedPhase.shouldGenerateLocalRingback(calls: voiceControl.calls)
         synchronizeMediaRecoveryGate()
         if voiceControl.shouldPollStatus {
             callAudio.markControlRecoveredIfNeeded()
@@ -157,7 +171,7 @@ final class CallLifecycleCoordinator: ObservableObject {
             nextAudioStartAttempt = ContinuousClock.now
             if callAudio.isRunning || callAudio.hasActiveRequest || callAudio.isAwaitingRecovery {
                 let reason: String?
-                switch phase {
+                switch derivedPhase {
                 case .connecting, .recovering:
                     reason = "控制链路中断，本地 PCM 已停止；重新认证 STATUS 并确认仍在通话后才会恢复"
                 default:
