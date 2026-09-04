@@ -22,6 +22,7 @@ struct CallHistoryEntry: Identifiable, Codable, Equatable, Sendable {
     var connectedAt: Date?
     var endedAt: Date?
     var outcome: CallHistoryOutcome?
+    var recordingFilename: String?
 
     var duration: TimeInterval {
         guard let connectedAt, let endedAt else { return 0 }
@@ -49,7 +50,8 @@ final class CallHistoryStore: ObservableObject {
             startedAt: Date(),
             connectedAt: nil,
             endedAt: nil,
-            outcome: nil
+            outcome: nil,
+            recordingFilename: nil
         )
         entries.insert(entry, at: 0)
         persist()
@@ -68,6 +70,13 @@ final class CallHistoryStore: ObservableObject {
               entries[index].endedAt == nil else { return }
         entries[index].endedAt = Date()
         entries[index].outcome = outcome
+        persist()
+    }
+
+    func attachRecording(filename: String, to id: UUID) {
+        guard filename == URL(fileURLWithPath: filename).lastPathComponent,
+              let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].recordingFilename = filename
         persist()
     }
 

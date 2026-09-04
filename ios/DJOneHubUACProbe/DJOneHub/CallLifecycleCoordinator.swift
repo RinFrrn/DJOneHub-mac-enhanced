@@ -122,6 +122,11 @@ final class CallLifecycleCoordinator: ObservableObject {
         updatePhaseAndAudio()
     }
 
+    func attachRecording(_ url: URL) {
+        guard let trackedHistoryID else { return }
+        history.attachRecording(filename: url.lastPathComponent, to: trackedHistoryID)
+    }
+
     private func tick(clock: ContinuousClock) {
         updatePhaseAndAudio()
 

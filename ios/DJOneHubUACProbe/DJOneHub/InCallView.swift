@@ -1,3 +1,4 @@
+import AVFAudio
 import SwiftUI
 
 struct InCallView: View {
@@ -150,7 +151,9 @@ struct SettingsView: View {
     @Binding var isConfirmingUnpair: Bool
     let dismiss: () -> Void
 
-    @State private var recordings: [URL] = []
+    @StateObject private var recordingPlayer = CallRecordingPlayer()
+    @State private var recordings: [CallRecordingInfo] = []
+    @State private var recordingPendingDeletion: CallRecordingInfo?
 
     var body: some View {
         NavigationStack {
@@ -179,11 +182,21 @@ struct SettingsView: View {
                     if recordings.isEmpty {
                         Text("暂无录音").foregroundStyle(.secondary)
                     } else {
-                        ForEach(recordings, id: \.self) { url in
-                            ShareLink(item: url) {
-                                Label(recordingTitle(url), systemImage: "waveform")
+                        ForEach(recordings) { recording in
+                            RecordingRow(
+                                recording: recording,
+                                isPlaying: recordingPlayer.isPlaying(recording),
+                                onTogglePlayback: { recordingPlayer.toggle(recording) }
+                            )
+                            .swipeActions {
+                                Button("删除", role: .destructive) {
+                                    recordingPendingDeletion = recording
+                                }
                             }
                         }
+                    }
+                    if let error = recordingPlayer.errorText {
+                        Text(error).font(.footnote).foregroundStyle(.red)
                     }
                     Text("录音为 8 kHz、16-bit、双声道 WAV：左声道是本机麦克风，右声道是对端语音。文件仅保存在本机且不进入 iCloud 备份。")
                         .font(.footnote)
@@ -220,15 +233,136 @@ struct SettingsView: View {
             }
             .onAppear { reloadRecordings() }
             .onChange(of: callAudio.lastRecordingURL) { _, _ in reloadRecordings() }
+            .onDisappear { recordingPlayer.stop() }
+            .alert("删除这段录音？", isPresented: isConfirmingRecordingDeletion) {
+                Button("删除", role: .destructive, action: deletePendingRecording)
+                Button("取消", role: .cancel) { recordingPendingDeletion = nil }
+            } message: {
+                Text("删除后无法恢复，对应通话记录仍会保留。")
+            }
         }
     }
 
     private func reloadRecordings() {
-        recordings = CallRecordingController.recordings()
+        recordings = CallRecordingController.recordingItems()
     }
 
-    private func recordingTitle(_ url: URL) -> String {
-        url.deletingPathExtension().lastPathComponent
-            .replacingOccurrences(of: "DJOneHub-", with: "")
+    private var isConfirmingRecordingDeletion: Binding<Bool> {
+        Binding(
+            get: { recordingPendingDeletion != nil },
+            set: { if !$0 { recordingPendingDeletion = nil } }
+        )
+    }
+
+    private func deletePendingRecording() {
+        guard let recording = recordingPendingDeletion else { return }
+        recordingPlayer.stop(ifPlaying: recording)
+        do {
+            try CallRecordingController.delete(recording)
+            recordingPendingDeletion = nil
+            reloadRecordings()
+        } catch {
+            recordingPlayer.report(error)
+            recordingPendingDeletion = nil
+        }
+    }
+}
+
+struct RecordingRow: View {
+    let recording: CallRecordingInfo
+    let isPlaying: Bool
+    let onTogglePlayback: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onTogglePlayback) {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPlaying ? "暂停录音" : "播放录音")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(recording.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.body.weight(.medium))
+                Text("\(phoneDurationText(recording.duration)) · \(fileSizeText)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            ShareLink(item: recording.url) {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .accessibilityLabel("分享录音")
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var fileSizeText: String {
+        ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file)
+    }
+}
+
+@MainActor
+final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published private(set) var playingURL: URL?
+    @Published private(set) var isPlayingNow = false
+    @Published private(set) var errorText: String?
+
+    private var player: AVAudioPlayer?
+
+    func isPlaying(_ recording: CallRecordingInfo) -> Bool {
+        isPlayingNow && playingURL == recording.url
+    }
+
+    func toggle(_ recording: CallRecordingInfo) {
+        if playingURL == recording.url, let player {
+            if player.isPlaying {
+                player.pause()
+                isPlayingNow = false
+            } else {
+                isPlayingNow = player.play()
+            }
+            return
+        }
+
+        stop()
+        do {
+            let player = try AVAudioPlayer(contentsOf: recording.url)
+            player.delegate = self
+            player.prepareToPlay()
+            self.player = player
+            playingURL = recording.url
+            isPlayingNow = player.play()
+            errorText = isPlayingNow ? nil : "无法播放这段录音"
+        } catch {
+            report(error)
+        }
+    }
+
+    func stop(ifPlaying recording: CallRecordingInfo) {
+        guard playingURL == recording.url else { return }
+        stop()
+    }
+
+    func stop() {
+        player?.stop()
+        player = nil
+        playingURL = nil
+        isPlayingNow = false
+    }
+
+    func report(_ error: Error) {
+        stop()
+        errorText = error.localizedDescription
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        self.player = nil
+        playingURL = nil
+        isPlayingNow = false
+        if !flag { errorText = "录音播放中断" }
     }
 }

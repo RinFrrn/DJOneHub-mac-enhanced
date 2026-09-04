@@ -186,10 +186,12 @@ final class CallAudioCoordinator: ObservableObject {
         downlinkLevel = 0
     }
 
-    func startRecording() {
-        guard isRunning, isMediaEnabled, !isRecording else { return }
+    @discardableResult
+    func startRecording() -> URL? {
+        guard isRunning, isMediaEnabled, !isRecording else { return nil }
         do {
-            lastRecordingURL = try recordingController.start()
+            let url = try recordingController.start()
+            lastRecordingURL = url
             recordingErrorText = ""
             recordingElapsedSeconds = 0
             isRecording = true
@@ -201,8 +203,10 @@ final class CallAudioCoordinator: ObservableObject {
                     self.recordingElapsedSeconds &+= 1
                 }
             }
+            return url
         } catch {
             recordingErrorText = error.localizedDescription
+            return nil
         }
     }
 

@@ -9,6 +9,8 @@ struct CallRecordingControllerOfflineTest {
 
         let recorder = CallRecordingController(recordingsDirectory: directory)
         let url = try recorder.start()
+        precondition(url.lastPathComponent.hasPrefix("DJOneHub-"))
+        precondition(!url.lastPathComponent.contains("formatter.string"), "filename interpolation failed")
         let uplink = pcmFrame(sample: 0x1234)
         let downlink = pcmFrame(sample: -0x1234)
         recorder.appendUplink(uplink)
@@ -24,6 +26,14 @@ struct CallRecordingControllerOfflineTest {
         precondition(littleEndianUInt32(data, offset: 40) == 512)
         precondition(data[44] == 0x34 && data[45] == 0x12, "uplink is not channel 1")
         precondition(data[46] == 0xCC && data[47] == 0xED, "downlink is not channel 2")
+
+        let info = try unwrap(CallRecordingController.recordingInfo(for: url))
+        precondition(info.fileSize == Int64(data.count))
+        precondition(abs(info.duration - 0.016) < 0.000_001, "unexpected duration: \(info.duration)")
+
+        let secondURL = try recorder.start()
+        _ = try recorder.stop()
+        precondition(secondURL != url, "recording filenames must be unique")
         print("call recording offline test passed")
     }
 
@@ -42,5 +52,12 @@ struct CallRecordingControllerOfflineTest {
             | (UInt32(data[offset + 1]) << 8)
             | (UInt32(data[offset + 2]) << 16)
             | (UInt32(data[offset + 3]) << 24)
+    }
+
+    private static func unwrap<T>(_ value: T?) throws -> T {
+        guard let value else {
+            throw NSError(domain: "CallRecordingControllerOfflineTest", code: 1)
+        }
+        return value
     }
 }

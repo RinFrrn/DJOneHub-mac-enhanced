@@ -138,6 +138,16 @@ xcrun swiftc \
 /tmp/djonehub-pairing-bundle-test
 ```
 
+通话录音离线测试覆盖唯一文件名、WAV 头、双声道交织、时长和连续创建：
+
+```sh
+xcrun swiftc \
+  ios/DJOneHubUACProbe/DJOneHubUACProbe/Audio/CallRecordingController.swift \
+  ios/DJOneHubUACProbe/Tests/CallRecordingControllerOfflineTest.swift \
+  -o /tmp/djonehub-call-recording-test
+/tmp/djonehub-call-recording-test
+```
+
 ## 构建
 
 无需签名的编译检查：

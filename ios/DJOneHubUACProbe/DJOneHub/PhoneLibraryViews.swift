@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecentsView: View {
     @EnvironmentObject private var history: CallHistoryStore
+    @State private var selectedRecording: CallRecordingInfo?
     let onDial: (String) -> Void
     let onSettings: () -> Void
 
@@ -17,13 +18,26 @@ struct RecentsView: View {
                 } else {
                     List {
                         ForEach(history.entries) { entry in
-                            Button {
-                                if let number = entry.number { onDial(number) }
-                            } label: {
-                                CallHistoryRow(entry: entry)
+                            HStack(spacing: 8) {
+                                Button {
+                                    if let number = entry.number { onDial(number) }
+                                } label: {
+                                    CallHistoryRow(entry: entry)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(entry.number == nil)
+
+                                if let recording = recording(for: entry) {
+                                    Button {
+                                        selectedRecording = recording
+                                    } label: {
+                                        Image(systemName: "waveform.circle.fill")
+                                            .font(.title2)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("打开通话录音")
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .disabled(entry.number == nil)
                             .swipeActions {
                                 Button("删除", role: .destructive) { history.remove(entry.id) }
                             }
@@ -34,7 +48,68 @@ struct RecentsView: View {
             }
             .navigationTitle("最近通话")
             .toolbar { ProductToolbar(onSettings: onSettings) }
+            .sheet(item: $selectedRecording) { recording in
+                RecordingPlaybackView(recording: recording)
+            }
         }
+    }
+
+    private func recording(for entry: CallHistoryEntry) -> CallRecordingInfo? {
+        guard let filename = entry.recordingFilename else { return nil }
+        return CallRecordingController.recording(named: filename)
+    }
+}
+
+private struct RecordingPlaybackView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var player = CallRecordingPlayer()
+    let recording: CallRecordingInfo
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer()
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 88))
+                    .foregroundStyle(.tint)
+                Text(recording.createdAt.formatted(date: .long, time: .shortened))
+                    .font(.title3.weight(.semibold))
+                Text("\(phoneDurationText(recording.duration)) · \(fileSizeText)")
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Button {
+                    player.toggle(recording)
+                } label: {
+                    Label(
+                        player.isPlaying(recording) ? "暂停" : "播放",
+                        systemImage: player.isPlaying(recording) ? "pause.fill" : "play.fill"
+                    )
+                    .frame(minWidth: 120)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                if let error = player.errorText {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+                ShareLink(item: recording.url) {
+                    Label("分享录音", systemImage: "square.and.arrow.up")
+                }
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("通话录音")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .onDisappear { player.stop() }
+        }
+    }
+
+    private var fileSizeText: String {
+        ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file)
     }
 }
 

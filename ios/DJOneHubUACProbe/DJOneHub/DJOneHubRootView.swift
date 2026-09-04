@@ -82,7 +82,11 @@ struct DJOneHubRootView: View {
             isPresented: $isConfirmingRecording,
             titleVisibility: .visible
         ) {
-            Button("开始录音") { callAudio.startRecording() }
+            Button("开始录音") {
+                if let url = callAudio.startRecording() {
+                    lifecycle.attachRecording(url)
+                }
+            }
             Button("取消", role: .cancel) {}
         } message: {
             Text("录音会将你的声音和对方声音保存为仅在本机可见的 WAV 文件。请先确认已取得必要同意并遵守当地法律。")

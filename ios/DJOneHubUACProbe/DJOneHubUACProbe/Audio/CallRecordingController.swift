@@ -1,5 +1,15 @@
 import Foundation
 
+struct CallRecordingInfo: Identifiable, Equatable, Sendable {
+    let url: URL
+    let createdAt: Date
+    let fileSize: Int64
+    let duration: TimeInterval
+
+    var id: URL { url }
+    var filename: String { url.lastPathComponent }
+}
+
 enum CallRecordingError: Error, LocalizedError {
     case alreadyRecording
     case cannotCreateDirectory
@@ -47,7 +57,7 @@ final class CallRecordingController: @unchecked Sendable {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let filename = "DJOneHub-(formatter.string(from: Date()))-(UUID().uuidString.prefix(8)).wav"
+            let filename = "DJOneHub-\(formatter.string(from: Date()))-\(UUID().uuidString.prefix(8)).wav"
             let url = directory.appendingPathComponent(filename, isDirectory: false)
             guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
                 throw CocoaError(.fileWriteUnknown)
@@ -88,6 +98,10 @@ final class CallRecordingController: @unchecked Sendable {
     }
 
     static func recordings() -> [URL] {
+        recordingItems().map(\.url)
+    }
+
+    static func recordingItems() -> [CallRecordingInfo] {
         guard let directory = try? recordingsDirectory() else { return [] }
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
         let urls = (try? FileManager.default.contentsOfDirectory(
@@ -97,11 +111,41 @@ final class CallRecordingController: @unchecked Sendable {
         )) ?? []
         return urls
             .filter { $0.pathExtension.lowercased() == "wav" }
-            .sorted {
-                let left = try? $0.resourceValues(forKeys: keys).contentModificationDate
-                let right = try? $1.resourceValues(forKeys: keys).contentModificationDate
-                return (left ?? .distantPast) > (right ?? .distantPast)
-            }
+            .compactMap(recordingInfo(for:))
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    static func recording(named filename: String) -> CallRecordingInfo? {
+        guard filename == URL(fileURLWithPath: filename).lastPathComponent,
+              filename.lowercased().hasSuffix(".wav"),
+              let directory = try? recordingsDirectory() else { return nil }
+        return recordingInfo(for: directory.appendingPathComponent(filename, isDirectory: false))
+    }
+
+    static func recordingInfo(for url: URL) -> CallRecordingInfo? {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .creationDateKey, .fileSizeKey]
+        guard let values = try? url.resourceValues(forKeys: keys),
+              let rawSize = values.fileSize,
+              rawSize >= 44 else { return nil }
+        let dataBytes = rawSize - 44
+        let bytesPerSecond = Int(sampleRate) * Int(channelCount) * Int(bitsPerSample / 8)
+        guard bytesPerSecond > 0 else { return nil }
+        return CallRecordingInfo(
+            url: url,
+            createdAt: values.creationDate ?? values.contentModificationDate ?? .distantPast,
+            fileSize: Int64(rawSize),
+            duration: TimeInterval(dataBytes) / TimeInterval(bytesPerSecond)
+        )
+    }
+
+    static func delete(_ recording: CallRecordingInfo) throws {
+        let directory = try recordingsDirectory().standardizedFileURL
+        let target = recording.url.standardizedFileURL
+        guard target.deletingLastPathComponent() == directory,
+              target.pathExtension.lowercased() == "wav" else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        try FileManager.default.removeItem(at: target)
     }
 
     private enum Direction {
