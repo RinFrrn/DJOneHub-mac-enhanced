@@ -133,6 +133,9 @@ pairing 和通话自动启停收敛成正式
   已从磁盘删除，一次性请求完成后正常退出。随后增加持久开发控制模式：为支持模块在
   Mac/iPhone 间换接，control marker 与 key 会保留并在每次上电恢复 daemon/PCM bridge；
   只有 Mac 卸载接口会清理模块侧凭据和启动链接。它没有生产首次信任根，不能称为生产配对。
+- 正式 App 的控制重连状态已完成真机拔插验收：拔除模块后先处于进行中的“正在连接模块”，
+  连接请求确认失败后进入“正在恢复连接”，不再让陈旧 call snapshot 维持拨号/通话 UI；
+  模块重新插入并启动后自动认证 STATUS，保留既有配对直接恢复“可以拨号”。
 - 实机发现 LaunchAgent 直接读取 Downloads 的新 ARM 文件会被 macOS TCC 卡在 `open(2)`，
   且后台进程无法可靠展示授权窗。安装器现由交互式终端校验 Actions 清单并把固定范围的
   ARM 文件缓存到 DJOneHub 的 Application Support；后端只读该缓存并再次执行固定哈希
