@@ -146,34 +146,43 @@ private struct CallHistoryRow: View {
     let entry: CallHistoryEntry
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: entry.direction == .outgoing
-                  ? "phone.arrow.up.right" : "phone.arrow.down.left")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(entry.outcome == .missed ? .red : .secondary)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.number ?? "未知号码")
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(spacing: 12) {
+                Image(systemName: entry.direction == .outgoing
+                      ? "phone.arrow.up.right" : "phone.arrow.down.left")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(entry.outcome == .missed ? .red : .primary)
-                Text(outcomeText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(entry.startedAt, style: .relative)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if entry.duration >= 1 {
-                    Text(phoneDurationText(entry.duration))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                    .foregroundStyle(isUnsuccessful ? .red : .secondary)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.number ?? "未知号码")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isUnsuccessful ? .red : .primary)
+                    Text(outcomeText)
+                        .font(.subheadline)
+                        .foregroundStyle(isUnsuccessful ? .red : .secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(callRelativeTime(entry.startedAt, relativeTo: context.date))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if entry.duration >= 1 {
+                        Text(phoneDurationText(entry.duration))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
+            .contentShape(Rectangle())
+            .padding(.vertical, 5)
         }
-        .contentShape(Rectangle())
-        .padding(.vertical, 5)
+    }
+
+    private var isUnsuccessful: Bool {
+        switch entry.outcome {
+        case .missed, .rejected, .canceled, .failed: return true
+        case .completed, nil: return false
+        }
     }
 
     private var outcomeText: String {
@@ -186,6 +195,20 @@ private struct CallHistoryRow: View {
         case nil: return "进行中"
         }
     }
+}
+
+private func callRelativeTime(_ date: Date, relativeTo now: Date) -> String {
+    let elapsed = max(0, now.timeIntervalSince(date))
+    if elapsed < 60 { return "刚刚" }
+    if Calendar.current.isDateInToday(date) {
+        if elapsed < 3_600 { return "\(max(1, Int(elapsed / 60)))分钟前" }
+        return "\(max(1, Int(elapsed / 3_600)))小时前"
+    }
+    if Calendar.current.isDateInYesterday(date) { return "昨天" }
+    if Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: now) {
+        return date.formatted(.dateTime.month().day())
+    }
+    return date.formatted(.dateTime.year().month().day())
 }
 
 struct ContactsView: View {

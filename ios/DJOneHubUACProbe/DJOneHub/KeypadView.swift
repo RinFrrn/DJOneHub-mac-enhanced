@@ -39,6 +39,8 @@ struct ConnectionPill: View {
 struct KeypadView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @AppStorage(PhoneProductPreferences.automaticCallRecording)
+    private var automaticCallRecordingEnabled = false
 
     let onCall: () -> Void
     let onSettings: () -> Void
@@ -125,6 +127,11 @@ struct KeypadView: View {
                     .opacity(displayNumber.isEmpty ? 0 : 1)
                     .accessibilityHidden(displayNumber.isEmpty)
                 }
+
+                Toggle("自动录音", isOn: $automaticCallRecordingEnabled)
+                    .font(.subheadline.weight(.medium))
+                    .fixedSize()
+                    .accessibilityHint("开启后，每次电话接通时自动开始本地录音")
                 Spacer(minLength: 4)
             }
             .navigationBarTitleDisplayMode(.inline)

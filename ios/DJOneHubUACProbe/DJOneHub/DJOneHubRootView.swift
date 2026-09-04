@@ -11,12 +11,15 @@ struct DJOneHubRootView: View {
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var contacts: ContactsModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @AppStorage(PhoneProductPreferences.automaticCallRecording)
+    private var automaticCallRecordingEnabled = false
 
     @State private var selectedTab: PhoneTab = .keypad
     @State private var isConfirmingDial = false
     @State private var isConfirmingUnpair = false
     @State private var isConfirmingRecording = false
     @State private var isShowingSettings = false
+    @State private var suppressedAutomaticRecordingCallID: UInt8?
 
     var body: some View {
         ZStack {
@@ -57,6 +60,12 @@ struct DJOneHubRootView: View {
                 contacts.loadIfAuthorized()
             }
         }
+        .onChange(of: lifecycle.phase) { _, newPhase in
+            handleCallPhaseForAutomaticRecording(newPhase)
+        }
+        .onChange(of: callAudio.isMediaEnabled) { _, _ in
+            startAutomaticRecordingIfNeeded()
+        }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(
                 isConfirmingUnpair: $isConfirmingUnpair,
@@ -83,9 +92,7 @@ struct DJOneHubRootView: View {
             titleVisibility: .visible
         ) {
             Button("开始录音") {
-                if let url = callAudio.startRecording() {
-                    lifecycle.attachRecording(url)
-                }
+                beginRecording()
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -123,7 +130,41 @@ struct DJOneHubRootView: View {
     private func showSettings() { isShowingSettings = true }
 
     private func toggleRecording() {
-        callAudio.isRecording ? callAudio.stopRecording() : (isConfirmingRecording = true)
+        if callAudio.isRecording {
+            if automaticCallRecordingEnabled, case .active(let callID) = lifecycle.phase {
+                suppressedAutomaticRecordingCallID = callID
+            }
+            callAudio.stopRecording()
+        } else {
+            isConfirmingRecording = true
+        }
+    }
+
+    private func beginRecording() {
+        if let url = callAudio.startRecording() {
+            lifecycle.attachRecording(url)
+        }
+    }
+
+    private func handleCallPhaseForAutomaticRecording(_ phase: ProductCallPhase) {
+        switch phase {
+        case .active:
+            startAutomaticRecordingIfNeeded()
+        case .ready, .needsPairing, .needsControlPairing:
+            suppressedAutomaticRecordingCallID = nil
+        default:
+            break
+        }
+    }
+
+    private func startAutomaticRecordingIfNeeded() {
+        guard automaticCallRecordingEnabled,
+              case .active(let callID) = lifecycle.phase,
+              suppressedAutomaticRecordingCallID != callID,
+              callAudio.isRunning,
+              callAudio.isMediaEnabled,
+              !callAudio.isRecording else { return }
+        beginRecording()
     }
 
     private func importPairing(_ result: Result<[URL], Error>) {

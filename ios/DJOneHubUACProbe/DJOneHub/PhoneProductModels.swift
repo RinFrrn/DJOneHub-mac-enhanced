@@ -1,6 +1,10 @@
 import Contacts
 import Foundation
 
+enum PhoneProductPreferences {
+    static let automaticCallRecording = "automaticCallRecordingEnabled"
+}
+
 enum CallHistoryDirection: String, Codable, Sendable {
     case outgoing
     case incoming
