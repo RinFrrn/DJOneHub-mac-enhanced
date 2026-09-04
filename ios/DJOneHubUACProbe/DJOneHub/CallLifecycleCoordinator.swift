@@ -5,9 +5,11 @@ final class CallLifecycleCoordinator: ObservableObject {
     @Published private(set) var phase: ProductCallPhase = .connecting
     @Published private(set) var hasStarted = false
     @Published private(set) var activeCallDurationSeconds: UInt64 = 0
+    @Published private(set) var isMuted = false
 
     private let voiceControl: VoiceControlModel
     private let callAudio: CallAudioCoordinator
+    private let history: CallHistoryStore
     private var lifecycleTask: Task<Void, Never>?
     private var audioStartRequested = false
     private var handledAudioRecoveryGeneration: UInt64
@@ -15,13 +17,22 @@ final class CallLifecycleCoordinator: ObservableObject {
     private var callDurationTracker = ActiveCallDurationTracker()
     private var nextStatusAttempt = ContinuousClock.now
     private var nextAudioStartAttempt = ContinuousClock.now
+    private var trackedHistoryID: UUID?
+    private var trackedDirection: CallHistoryDirection?
+    private var trackedWasConnected = false
+    private var trackedUserEnded = false
 
     private let normalStatusPollInterval: Duration = .seconds(1)
     private let setupStatusPollInterval: Duration = .milliseconds(250)
 
-    init(voiceControl: VoiceControlModel, callAudio: CallAudioCoordinator) {
+    init(
+        voiceControl: VoiceControlModel,
+        callAudio: CallAudioCoordinator,
+        history: CallHistoryStore
+    ) {
         self.voiceControl = voiceControl
         self.callAudio = callAudio
+        self.history = history
         handledAudioRecoveryGeneration = callAudio.recoveryGeneration
     }
 
@@ -51,6 +62,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         mediaRecoveryGate.reset()
         callDurationTracker.reset()
         activeCallDurationSeconds = 0
+        isMuted = false
         if callAudio.isRunning || callAudio.hasActiveRequest || callAudio.isAwaitingRecovery {
             callAudio.stop()
         }
@@ -75,6 +87,15 @@ final class CallLifecycleCoordinator: ObservableObject {
     }
 
     func dial() {
+        if trackedHistoryID == nil {
+            trackedDirection = .outgoing
+            trackedHistoryID = history.begin(
+                direction: .outgoing,
+                number: voiceControl.dialNumber
+            )
+            trackedWasConnected = false
+            trackedUserEnded = false
+        }
         prepareAudioForUserAction()
         nextStatusAttempt = .now
         voiceControl.dial()
@@ -89,8 +110,15 @@ final class CallLifecycleCoordinator: ObservableObject {
     }
 
     func end(callID: UInt8) {
+        trackedUserEnded = true
         nextStatusAttempt = .now
         voiceControl.end(callID: callID)
+        updatePhaseAndAudio()
+    }
+
+    func toggleMute() {
+        guard case .active = phase else { return }
+        isMuted.toggle()
         updatePhaseAndAudio()
     }
 
@@ -121,6 +149,7 @@ final class CallLifecycleCoordinator: ObservableObject {
             calls: voiceControl.calls,
             stateText: voiceControl.stateText
         )
+        synchronizeCallHistory(with: derivedPhase)
         if phase != derivedPhase {
             phase = derivedPhase
         }
@@ -133,7 +162,9 @@ final class CallLifecycleCoordinator: ObservableObject {
         }
 
         let shouldPrepareAudio = voiceControl.canControlCalls && derivedPhase.shouldPrepareCallAudio
-        let shouldEnableUplink = voiceControl.canControlCalls && derivedPhase.shouldEnableUplink
+        let shouldEnableUplink = voiceControl.canControlCalls
+            && derivedPhase.shouldEnableUplink
+            && !isMuted
         let shouldEnableDownlink = voiceControl.canControlCalls && derivedPhase.shouldEnableDownlink
         let shouldGenerateLocalRingback = voiceControl.canControlCalls
             && derivedPhase.shouldGenerateLocalRingback(calls: voiceControl.calls)
@@ -180,6 +211,43 @@ final class CallLifecycleCoordinator: ObservableObject {
                 callAudio.stop(reason: reason)
             }
         }
+    }
+
+    private func synchronizeCallHistory(with derivedPhase: ProductCallPhase) {
+        if trackedHistoryID == nil,
+           let callID = derivedPhase.callID,
+           let call = voiceControl.calls.first(where: { $0.id == callID }) {
+            let direction: CallHistoryDirection = call.direction == 2 ? .incoming : .outgoing
+            trackedDirection = direction
+            trackedHistoryID = history.begin(direction: direction, number: nil)
+            trackedWasConnected = false
+            trackedUserEnded = false
+        }
+
+        if case .active = derivedPhase,
+           let trackedHistoryID,
+           !trackedWasConnected {
+            trackedWasConnected = true
+            history.markConnected(trackedHistoryID)
+        }
+
+        guard case .ready = derivedPhase,
+              let trackedHistoryID,
+              let trackedDirection else { return }
+        let outcome: CallHistoryOutcome
+        if trackedWasConnected {
+            outcome = .completed
+        } else if trackedDirection == .incoming {
+            outcome = trackedUserEnded ? .rejected : .missed
+        } else {
+            outcome = trackedUserEnded ? .canceled : .failed
+        }
+        history.finish(trackedHistoryID, outcome: outcome)
+        self.trackedHistoryID = nil
+        self.trackedDirection = nil
+        trackedWasConnected = false
+        trackedUserEnded = false
+        isMuted = false
     }
 
     private func synchronizeMediaRecoveryGate() {

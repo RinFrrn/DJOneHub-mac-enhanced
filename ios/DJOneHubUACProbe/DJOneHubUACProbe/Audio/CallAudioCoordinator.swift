@@ -21,6 +21,10 @@ final class CallAudioCoordinator: ObservableObject {
     @Published private(set) var inputLevel: Double = 0
     @Published private(set) var downlinkLevel: Double = 0
     @Published private(set) var inputFormatText = "—"
+    @Published private(set) var isRecording = false
+    @Published private(set) var recordingElapsedSeconds: UInt64 = 0
+    @Published private(set) var lastRecordingURL: URL?
+    @Published private(set) var recordingErrorText = ""
 
     private let session = AVAudioSession.sharedInstance()
     private var engine: AVAudioEngine?
@@ -40,6 +44,8 @@ final class CallAudioCoordinator: ObservableObject {
     private var interruptedRouteSettleTask: Task<Void, Never>?
     private var interruptedRouteRevision: UInt64 = 0
     private var interruptedRouteRetryNotBefore: ContinuousClock.Instant?
+    private let recordingController = CallRecordingController()
+    private var recordingTimerTask: Task<Void, Never>?
 
     init() {
         observeAudioSession()
@@ -48,6 +54,8 @@ final class CallAudioCoordinator: ObservableObject {
     deinit {
         routeSettleTask?.cancel()
         interruptedRouteSettleTask?.cancel()
+        recordingTimerTask?.cancel()
+        try? recordingController.stop()
         for observer in notificationObservers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -157,6 +165,7 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     func stop(reason: String? = nil) {
+        stopRecording()
         resetRouteRecoveryTracking()
         startGeneration &+= 1
         hasActiveRequest = false
@@ -175,6 +184,42 @@ final class CallAudioCoordinator: ObservableObject {
         detailText = reason ?? "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
         inputLevel = 0
         downlinkLevel = 0
+    }
+
+    func startRecording() {
+        guard isRunning, isMediaEnabled, !isRecording else { return }
+        do {
+            lastRecordingURL = try recordingController.start()
+            recordingErrorText = ""
+            recordingElapsedSeconds = 0
+            isRecording = true
+            recordingTimerTask?.cancel()
+            recordingTimerTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled, let self, self.isRecording else { return }
+                    self.recordingElapsedSeconds &+= 1
+                }
+            }
+        } catch {
+            recordingErrorText = error.localizedDescription
+        }
+    }
+
+    func stopRecording() {
+        guard isRecording || recordingController.isRecording else { return }
+        recordingTimerTask?.cancel()
+        recordingTimerTask = nil
+        do {
+            if let url = try recordingController.stop() {
+                lastRecordingURL = url
+            }
+            recordingErrorText = ""
+        } catch {
+            recordingErrorText = error.localizedDescription
+        }
+        isRecording = false
+        recordingElapsedSeconds = 0
     }
 
     func markControlRecoveredIfNeeded() {
@@ -348,7 +393,8 @@ final class CallAudioCoordinator: ObservableObject {
         downlinkPlayer: DownlinkPCMPlayer? = nil,
         generation: UInt64
     ) -> PCMTransport {
-        PCMTransport(
+        let recorder = recordingController
+        return PCMTransport(
             pairingKey: pairingKey,
             sessionID: sessionID,
             mediaEnabled: mediaEnabled,
@@ -375,8 +421,12 @@ final class CallAudioCoordinator: ObservableObject {
                     self.inputLevel = peak
                 }
             },
+            onUplinkFrame: { pcm in
+                recorder.appendUplink(pcm)
+            },
             onDownlink: { [weak self] sequence, pcm, frames in
                 let peak = Self.normalizedPCM16Peak(pcm)
+                recorder.appendDownlink(pcm)
                 // Each pipeline captures its own player. The player's serial
                 // queue rejects frames after stop(), so audio packets stay off
                 // MainActor while stale UI updates are generation-gated below.
@@ -588,6 +638,7 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func pauseForRouteRecovery(reason: String) {
         guard hasAudioResources else { return }
+        stopRecording()
         startGeneration &+= 1
         isRunning = false
         isMediaEnabled = false
@@ -693,6 +744,7 @@ final class CallAudioCoordinator: ObservableObject {
             resetRouteRecoveryTracking()
             isInterrupted = true
             if isRunning || engine != nil || pipeline != nil {
+                stopRecording()
                 startGeneration &+= 1
                 isRunning = false
                 isMediaEnabled = false
@@ -733,6 +785,7 @@ final class CallAudioCoordinator: ObservableObject {
     private func handleMediaServicesReset() {
         let needsRecovery = isRunning || engine != nil || pipeline != nil
         resetRouteRecoveryTracking()
+        stopRecording()
         startGeneration &+= 1
         isRunning = false
         isMediaEnabled = false

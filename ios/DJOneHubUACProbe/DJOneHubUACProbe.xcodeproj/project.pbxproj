@@ -21,6 +21,7 @@
 		A10000000000000000000012 /* DownlinkPlaybackMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */; };
 		A10000000000000000000013 /* DownlinkPlayoutQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */; };
 		A10000000000000000000017 /* AudioRouteRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* AudioRouteRecoveryState.swift */; };
+		A10000000000000000000018 /* CallRecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* CallRecordingController.swift */; };
 		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
 		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
 		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
@@ -36,6 +37,11 @@
 		B10000000000000000000013 /* DownlinkPlaybackMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */; };
 		B10000000000000000000014 /* DownlinkPlayoutQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */; };
 		B10000000000000000000015 /* AudioRouteRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* AudioRouteRecoveryState.swift */; };
+		B10000000000000000000016 /* CallRecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* CallRecordingController.swift */; };
+		B10000000000000000000017 /* PhoneProductModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* PhoneProductModels.swift */; };
+		B10000000000000000000018 /* KeypadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* KeypadView.swift */; };
+		B10000000000000000000019 /* PhoneLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* PhoneLibraryViews.swift */; };
+		B1000000000000000000001A /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* InCallView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,12 +62,17 @@
 		A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkPlaybackMetrics.swift; sourceTree = "<group>"; };
 		A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkPlayoutQueueState.swift; sourceTree = "<group>"; };
 		A20000000000000000000017 /* AudioRouteRecoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteRecoveryState.swift; sourceTree = "<group>"; };
+		A20000000000000000000018 /* CallRecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordingController.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
 		B20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000000000000000000005 /* DJOneHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DJOneHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000006 /* ProductCallPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCallPhase.swift; sourceTree = "<group>"; };
+		B20000000000000000000007 /* PhoneProductModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneProductModels.swift; sourceTree = "<group>"; };
+		B20000000000000000000008 /* KeypadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeypadView.swift; sourceTree = "<group>"; };
+		B20000000000000000000009 /* PhoneLibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneLibraryViews.swift; sourceTree = "<group>"; };
+		B2000000000000000000000A /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,6 +129,7 @@
 				A20000000000000000000003 /* AudioProbeModel.swift */,
 				A20000000000000000000017 /* AudioRouteRecoveryState.swift */,
 				A20000000000000000000011 /* CallAudioCoordinator.swift */,
+				A20000000000000000000018 /* CallRecordingController.swift */,
 				A20000000000000000000012 /* DownlinkJitterBuffer.swift */,
 				A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */,
 				A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */,
@@ -154,6 +166,10 @@
 				B20000000000000000000002 /* DJOneHubRootView.swift */,
 				B20000000000000000000003 /* CallLifecycleCoordinator.swift */,
 				B20000000000000000000006 /* ProductCallPhase.swift */,
+				B20000000000000000000007 /* PhoneProductModels.swift */,
+				B20000000000000000000008 /* KeypadView.swift */,
+				B20000000000000000000009 /* PhoneLibraryViews.swift */,
+				B2000000000000000000000A /* InCallView.swift */,
 				B20000000000000000000004 /* Info.plist */,
 			);
 			path = DJOneHub;
@@ -269,6 +285,7 @@
 				A10000000000000000000012 /* DownlinkPlaybackMetrics.swift in Sources */,
 				A10000000000000000000013 /* DownlinkPlayoutQueueState.swift in Sources */,
 				A10000000000000000000017 /* AudioRouteRecoveryState.swift in Sources */,
+				A10000000000000000000018 /* CallRecordingController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -291,6 +308,11 @@
 				B10000000000000000000013 /* DownlinkPlaybackMetrics.swift in Sources */,
 				B10000000000000000000014 /* DownlinkPlayoutQueueState.swift in Sources */,
 				B10000000000000000000015 /* AudioRouteRecoveryState.swift in Sources */,
+				B10000000000000000000016 /* CallRecordingController.swift in Sources */,
+				B10000000000000000000017 /* PhoneProductModels.swift in Sources */,
+				B10000000000000000000018 /* KeypadView.swift in Sources */,
+				B10000000000000000000019 /* PhoneLibraryViews.swift in Sources */,
+				B1000000000000000000001A /* InCallView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

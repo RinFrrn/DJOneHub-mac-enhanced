@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于通过 USB 有线网络连接 DJOneHub 蜂窝模块并控制电话。</string>
+	<key>NSContactsUsageDescription</key>
+	<string>用于从通讯录选择号码并通过 DJOneHub 蜂窝模块拨打电话。通讯录不会上传。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于在蜂窝通话中发送你的语音。</string>
 	<key>UIApplicationSceneManifest</key>

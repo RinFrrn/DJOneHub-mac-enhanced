@@ -7,6 +7,7 @@ final class PCMTransport: @unchecked Sendable {
     private let sessionID: UInt32
     private let onState: @Sendable (String) -> Void
     private let onProgress: @Sendable (UInt64, Double) -> Void
+    private let onUplinkFrame: @Sendable (Data) -> Void
     private let onDownlink: @Sendable (UInt32, Data, UInt64) -> Void
     private let onError: @Sendable (String) -> Void
     private var connection: NWConnection?
@@ -27,6 +28,7 @@ final class PCMTransport: @unchecked Sendable {
         mediaEnabled: Bool = true,
         onState: @escaping @Sendable (String) -> Void,
         onProgress: @escaping @Sendable (UInt64, Double) -> Void,
+        onUplinkFrame: @escaping @Sendable (Data) -> Void = { _ in },
         onDownlink: @escaping @Sendable (UInt32, Data, UInt64) -> Void,
         onError: @escaping @Sendable (String) -> Void
     ) {
@@ -35,6 +37,7 @@ final class PCMTransport: @unchecked Sendable {
         self.mediaEnabled = mediaEnabled
         self.onState = onState
         self.onProgress = onProgress
+        self.onUplinkFrame = onUplinkFrame
         self.onDownlink = onDownlink
         self.onError = onError
     }
@@ -106,6 +109,7 @@ final class PCMTransport: @unchecked Sendable {
                 pendingPCM.removeFirst(UplinkAudioProtocol.pcmBytes)
                 if sendFrameLocked(frame) {
                     frames &+= 1
+                    onUplinkFrame(frame)
                 }
             }
             onProgress(frames, peak)
