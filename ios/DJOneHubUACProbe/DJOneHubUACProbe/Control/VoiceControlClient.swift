@@ -24,6 +24,7 @@ final class VoiceControlModel: ObservableObject {
     private var requestTask: Task<Void, Never>?
     private var requestWatchdogTask: Task<Void, Never>?
     private var requestGeneration = 0
+    private var requestArbitration = VoiceControlRequestArbitration()
 
     var isConfigured: Bool { client != nil }
     var canControlCalls: Bool { client != nil && access == .controlSession }
@@ -173,8 +174,10 @@ final class VoiceControlModel: ObservableObject {
     private func clearConfiguration(preservingModuleList: Bool) {
         requestTask?.cancel()
         requestWatchdogTask?.cancel()
+        requestGeneration &+= 1
         requestTask = nil
         requestWatchdogTask = nil
+        requestArbitration.reset()
         client = nil
         mediaPairingKey = nil
         keyStore = nil
@@ -241,6 +244,7 @@ final class VoiceControlModel: ObservableObject {
             success: nil,
             reportFailure: false,
             updateSnapshotDescriptionOnSuccess: true,
+            priority: .backgroundStatus,
             operation: {
                 try await client.status(connectTimeout: .seconds(3))
             },
@@ -319,15 +323,23 @@ final class VoiceControlModel: ObservableObject {
         success: String?,
         reportFailure: Bool = true,
         updateSnapshotDescriptionOnSuccess: Bool = false,
+        priority: VoiceControlRequestPriority = .foreground,
         operation: @escaping @Sendable () async throws -> VoiceControlResult,
         enablePollingOnSuccess: Bool = false,
         disablePollingOnFailure: Bool = false,
         onSuccess: (@MainActor @Sendable (VoiceControlResult) -> Void)? = nil
     ) {
-        guard !isBusy else { return }
+        let decision = requestArbitration.begin(priority)
+        guard decision != .reject else { return }
+        if decision == .preemptBackground {
+            requestTask?.cancel()
+            requestWatchdogTask?.cancel()
+            requestTask = nil
+            requestWatchdogTask = nil
+        }
         requestGeneration &+= 1
         let generation = requestGeneration
-        isBusy = true
+        isBusy = requestArbitration.isForegroundBusy
         if let state {
             stateText = state
             detailText = ""
@@ -339,12 +351,18 @@ final class VoiceControlModel: ObservableObject {
             await MainActor.run {
                 guard let self,
                       self.requestGeneration == generation,
-                      self.isBusy else { return }
+                      self.requestArbitration.activePriority == priority else { return }
                 self.requestTask?.cancel()
                 self.requestTask = nil
-                self.isBusy = false
-                self.stateText = "控制请求超时"
-                self.detailText = "模块控制端口未在 24 秒内响应；请检查 iPhone USB 网卡和模块供电"
+                self.requestArbitration.finish(priority)
+                self.isBusy = self.requestArbitration.isForegroundBusy
+                if disablePollingOnFailure {
+                    self.shouldPollStatus = false
+                }
+                if reportFailure {
+                    self.stateText = "控制请求超时"
+                    self.detailText = "模块控制端口未在 24 秒内响应；请检查 iPhone USB 网卡和模块供电"
+                }
             }
         }
         requestTask = Task { [weak self] in
@@ -354,7 +372,8 @@ final class VoiceControlModel: ObservableObject {
                 await MainActor.run {
                     guard let self, self.requestGeneration == generation else { return }
                     self.requestWatchdogTask?.cancel()
-                    self.isBusy = false
+                    self.requestArbitration.finish(priority)
+                    self.isBusy = self.requestArbitration.isForegroundBusy
                     if result.operation == .status {
                         self.statusSuccessGeneration &+= 1
                     }
@@ -381,7 +400,8 @@ final class VoiceControlModel: ObservableObject {
                 await MainActor.run {
                     guard let self, self.requestGeneration == generation else { return }
                     self.requestWatchdogTask?.cancel()
-                    self.isBusy = false
+                    self.requestArbitration.finish(priority)
+                    self.isBusy = self.requestArbitration.isForegroundBusy
                     if disablePollingOnFailure {
                         self.shouldPollStatus = false
                     }

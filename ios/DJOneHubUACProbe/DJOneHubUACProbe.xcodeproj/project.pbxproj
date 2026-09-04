@@ -22,6 +22,7 @@
 		A10000000000000000000013 /* DownlinkPlayoutQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */; };
 		A10000000000000000000017 /* AudioRouteRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* AudioRouteRecoveryState.swift */; };
 		A10000000000000000000018 /* CallRecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* CallRecordingController.swift */; };
+		A10000000000000000000019 /* VoiceControlRequestArbitration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* VoiceControlRequestArbitration.swift */; };
 		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
 		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
 		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
@@ -42,6 +43,7 @@
 		B10000000000000000000018 /* KeypadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* KeypadView.swift */; };
 		B10000000000000000000019 /* PhoneLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* PhoneLibraryViews.swift */; };
 		B1000000000000000000001A /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* InCallView.swift */; };
+		B1000000000000000000001B /* VoiceControlRequestArbitration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* VoiceControlRequestArbitration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +65,7 @@
 		A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkPlayoutQueueState.swift; sourceTree = "<group>"; };
 		A20000000000000000000017 /* AudioRouteRecoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteRecoveryState.swift; sourceTree = "<group>"; };
 		A20000000000000000000018 /* CallRecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordingController.swift; sourceTree = "<group>"; };
+		A20000000000000000000019 /* VoiceControlRequestArbitration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlRequestArbitration.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
@@ -154,6 +157,7 @@
 			children = (
 				A20000000000000000000007 /* VoiceControlProtocol.swift */,
 				A20000000000000000000008 /* VoiceControlClient.swift */,
+				A20000000000000000000019 /* VoiceControlRequestArbitration.swift */,
 				A20000000000000000000009 /* PairingKeyStore.swift */,
 			);
 			path = Control;
@@ -286,6 +290,7 @@
 				A10000000000000000000013 /* DownlinkPlayoutQueueState.swift in Sources */,
 				A10000000000000000000017 /* AudioRouteRecoveryState.swift in Sources */,
 				A10000000000000000000018 /* CallRecordingController.swift in Sources */,
+				A10000000000000000000019 /* VoiceControlRequestArbitration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -313,6 +318,7 @@
 				B10000000000000000000018 /* KeypadView.swift in Sources */,
 				B10000000000000000000019 /* PhoneLibraryViews.swift in Sources */,
 				B1000000000000000000001A /* InCallView.swift in Sources */,
+				B1000000000000000000001B /* VoiceControlRequestArbitration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
