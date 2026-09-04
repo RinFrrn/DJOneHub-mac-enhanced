@@ -12,6 +12,15 @@ on:
       - "module/djonehub_voice_daemon.c"
       - "module/djonehub_voice_daemon_policy.h"
       - "module/djonehub_voice_daemon_policy_test.c"
+      - "module/djonehub_sms_daemon.c"
+      - "module/djonehub_sms_protocol.c"
+      - "module/djonehub_sms_protocol.h"
+      - "module/djonehub_sms_protocol_test.c"
+      - "module/djonehub_qmi_wms_engine.c"
+      - "module/djonehub_qmi_wms_engine.h"
+      - "module/djonehub_wms_codec.c"
+      - "module/djonehub_wms_codec.h"
+      - "module/djonehub_wms_codec_test.c"
       - "module/djonehub_control_protocol.c"
       - "module/djonehub_control_protocol.h"
       - "module/djonehub_control_protocol_test.c"
@@ -29,6 +38,7 @@ on:
       - "outputs/module/qdc507_incall_card.new.ko"
       - "outputs/module/qdc507_incall_card.new.ko.sha256"
       - "scripts/build_djonehubd_armel.sh"
+      - "scripts/build_sms_daemon_armel.sh"
       - "scripts/build_pcm_bridge_armel.sh"
       - "scripts/build_qdc507_incall_card.sh"
       - ".github/workflows/build-djonehubd.yml"
@@ -132,6 +142,44 @@ jobs:
             module/djonehub_voice_daemon_policy_test.c \
             -o outputs/module/djonehub-voice-daemon-policy-test
           outputs/module/djonehub-voice-daemon-policy-test
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_sms_protocol.c \
+            module/djonehub_sms_protocol_test.c \
+            -o outputs/module/djonehub-sms-protocol-test
+          outputs/module/djonehub-sms-protocol-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_sms_protocol.c \
+            module/djonehub_sms_protocol_test.c \
+            -o outputs/module/djonehub-sms-protocol-test-sanitized
+          outputs/module/djonehub-sms-protocol-test-sanitized
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_wms_codec.c \
+            module/djonehub_wms_codec_test.c \
+            -o outputs/module/djonehub-wms-codec-test
+          outputs/module/djonehub-wms-codec-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehub_wms_codec.c \
+            module/djonehub_wms_codec_test.c \
+            -o outputs/module/djonehub-wms-codec-test-sanitized
+          outputs/module/djonehub-wms-codec-test-sanitized
           zig cc \
             -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
             -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
@@ -167,6 +215,19 @@ jobs:
             module/djonehub_control_protocol.c module/djonehub_crypto.c \
             module/djonehub_voice_codec.c module/djonehub_voice_policy.c -ldl \
             -o outputs/module/djonehub-voice-daemon.armv7.unstripped
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_sms_daemon.c \
+            module/djonehub_qmi_wms_engine.c module/djonehub_wms_codec.c \
+            module/djonehub_sms_protocol.c module/djonehub_crypto.c \
+            -ldl -pthread \
+            -o outputs/module/djonehub-sms-daemon.armv7.unstripped
           arm-linux-gnueabi-strip --strip-unneeded \
             -o outputs/module/djonehub-qmi-probe.armv7 \
             outputs/module/djonehub-qmi-probe.armv7.unstripped
@@ -176,6 +237,9 @@ jobs:
           arm-linux-gnueabi-strip --strip-unneeded \
             -o outputs/module/djonehub-voice-daemon.armv7 \
             outputs/module/djonehub-voice-daemon.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-sms-daemon.armv7 \
+            outputs/module/djonehub-sms-daemon.armv7.unstripped
           audit_qmi_binary() {
             binary=$1
             file "$binary"
@@ -213,9 +277,11 @@ jobs:
           audit_qmi_binary outputs/module/djonehub-qmi-probe.armv7
           audit_qmi_binary outputs/module/djonehub-qmi-voice-control.armv7
           audit_qmi_binary outputs/module/djonehub-voice-daemon.armv7
+          audit_qmi_binary outputs/module/djonehub-sms-daemon.armv7
           (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
           (cd outputs/module && sha256sum djonehub-qmi-voice-control.armv7 > djonehub-qmi-voice-control.armv7.sha256)
           (cd outputs/module && sha256sum djonehub-voice-daemon.armv7 > djonehub-voice-daemon.armv7.sha256)
+          (cd outputs/module && sha256sum djonehub-sms-daemon.armv7 > djonehub-sms-daemon.armv7.sha256)
           cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
 
           qmi_probe=dynamically linked ARMv7 EABI5 soft-float, glibc <= 2.7
@@ -227,6 +293,8 @@ jobs:
           voice_daemon_auth=fresh 32-byte challenge + full HMAC-SHA256 request and response tags
           voice_daemon_scope=fixed status/dial/answer/end only; no shell, AT passthrough, or arbitrary QMI
           voice_daemon_deployment=development one-shot boot arming only; production persistence is not approved
+          sms_daemon=authenticated fixed-operation QMI WMS gateway on 192.168.225.1:45752
+          sms_daemon_scope=status/list/read/send-raw/delete; no shell, AT passthrough, or arbitrary QMI
           EOF
 
       - name: Build authenticated uplink PCM bridge

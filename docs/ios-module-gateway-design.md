@@ -9,6 +9,8 @@
 ### 1.0 控制平面当前进度（2026-09-04）
 
 QDC507 当前 ECM 地址固定为 `192.168.225.1`，认证 voice daemon 监听 TCP `45750`。
+短信认证网关使用独立 TCP `45752` 和独立协议魔数；设计、固定 WMS 操作及实机验收
+顺序见 [qdc507-sms-gateway.md](qdc507-sms-gateway.md)。
 现有一次性候选已在 Mac 侧完成真实来电 `STATUS`、`ANSWER`、`END` 验收；最近一次
 `STATUS` 部署结果明确为 `authenticated=true`、`one_shot=true`、`persistent=false`。
 这只证明控制面，不代表 iOS 双向通话媒体已经完成。
