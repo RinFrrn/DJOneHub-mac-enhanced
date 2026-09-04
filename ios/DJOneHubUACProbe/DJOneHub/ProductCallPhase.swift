@@ -106,6 +106,16 @@ enum ProductCallPhase: Equatable {
         if isBusy, stateText.hasPrefix("挂断中") {
             return .ending
         }
+        // Once STATUS polling has failed, call snapshots are no longer
+        // authoritative. Do not keep presenting or driving audio from a stale
+        // dialing/active state while the control connection is being restored.
+        if !shouldPollStatus {
+            if isBusy { return .connecting }
+            let reason = stateText.contains("失败") || stateText.contains("超时")
+                ? stateText
+                : "等待 USB ECM 和模块服务重新响应"
+            return .recovering(reason)
+        }
         if let call = calls.first(where: { $0.state == 0x03 }) {
             return .active(call.id)
         }
@@ -118,15 +128,6 @@ enum ProductCallPhase: Equatable {
         if let call = calls.first(where: { [UInt8(0x01), 0x04, 0x05, 0x0A].contains($0.state) }) {
             return .dialing(call.id)
         }
-        if isBusy, !shouldPollStatus {
-            return .connecting
-        }
-        if shouldPollStatus {
-            return .ready
-        }
-        let reason = stateText.contains("失败") || stateText.contains("超时")
-            ? stateText
-            : "等待 USB ECM 和模块服务重新响应"
-        return .recovering(reason)
+        return .ready
     }
 }

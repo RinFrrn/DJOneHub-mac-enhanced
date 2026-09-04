@@ -8,13 +8,18 @@ struct ProductCallPhaseOfflineTest {
         expect(.connecting, busy: true)
         expect(.ready, busy: true, polling: true)
         expect(.placingCall, busy: true, state: "拨号中…")
-        expect(.incoming(2), calls: [call(2, state: 0x02)])
+        expect(.incoming(2), polling: true, calls: [call(2, state: 0x02)])
         expect(.answering(2), busy: true, calls: [call(2, state: 0x02)], state: "接听中…")
-        expect(.dialing(3), calls: [call(3, state: 0x05)])
-        expect(.dialing(3), calls: [call(3, state: 0x0A)])
-        expect(.active(4), calls: [call(4, state: 0x03), call(2, state: 0x02)])
+        expect(.dialing(3), polling: true, calls: [call(3, state: 0x05)])
+        expect(.dialing(3), polling: true, calls: [call(3, state: 0x0A)])
+        expect(.active(4), polling: true, calls: [call(4, state: 0x03), call(2, state: 0x02)])
         expect(.ending, busy: true, calls: [call(4, state: 0x03)], state: "挂断中…")
-        expect(.ending, calls: [call(4, state: 0x08)])
+        expect(.ending, polling: true, calls: [call(4, state: 0x08)])
+        expect(
+            .recovering("等待 USB ECM 和模块服务重新响应"),
+            calls: [call(4, state: 0x03)],
+            state: "模块已响应 STATUS"
+        )
         expect(
             .recovering("等待 USB ECM 和模块服务重新响应"),
             state: "模块已响应 STATUS"
