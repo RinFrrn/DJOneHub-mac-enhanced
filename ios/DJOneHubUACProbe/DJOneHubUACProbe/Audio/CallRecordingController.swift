@@ -35,6 +35,7 @@ final class CallRecordingController: @unchecked Sendable {
     static let channelCount: UInt16 = 2
     static let bitsPerSample: UInt16 = 16
     static let frameBytes = 256
+    static let uplinkRecordingGain: Int32 = 24
 
     private let queue = DispatchQueue(label: "DJOneHub.CallRecording")
     private let directoryOverride: URL?
@@ -81,7 +82,7 @@ final class CallRecordingController: @unchecked Sendable {
     }
 
     func appendUplink(_ pcm: Data) {
-        append(pcm, direction: .uplink)
+        append(Self.applyUplinkRecordingGain(pcm), direction: .uplink)
     }
 
     func appendDownlink(_ pcm: Data) {
@@ -146,6 +147,27 @@ final class CallRecordingController: @unchecked Sendable {
             throw CocoaError(.fileNoSuchFile)
         }
         try FileManager.default.removeItem(at: target)
+    }
+
+    /// The iPhone voice-chat input is deliberately conservative before the
+    /// module/network AGC. Raise only the WAV's local channel so playback is
+    /// balanced without changing the PCM sent to the modem.
+    static func applyUplinkRecordingGain(_ pcm: Data) -> Data {
+        guard pcm.count.isMultiple(of: 2) else { return pcm }
+        var amplified = Data(capacity: pcm.count)
+        for offset in stride(from: 0, to: pcm.count, by: 2) {
+            let raw = UInt16(pcm[offset]) | (UInt16(pcm[offset + 1]) << 8)
+            let sample = Int32(Int16(bitPattern: raw))
+            let scaled = max(
+                Int32(Int16.min),
+                min(Int32(Int16.max), sample * uplinkRecordingGain)
+            )
+            var littleEndian = Int16(scaled).littleEndian
+            Swift.withUnsafeBytes(of: &littleEndian) {
+                amplified.append(contentsOf: $0)
+            }
+        }
+        return amplified
     }
 
     private enum Direction {
