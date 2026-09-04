@@ -1,5 +1,36 @@
 import Foundation
 
+struct StatusConfirmedMediaRecoveryGate {
+    private(set) var minimumStatusGeneration: UInt64?
+
+    var isOpen: Bool { minimumStatusGeneration == nil }
+
+    mutating func requireNewStatus(after generation: UInt64) {
+        minimumStatusGeneration = generation &+ 1
+    }
+
+    mutating func observeStatusGeneration(_ generation: UInt64) {
+        guard let minimumStatusGeneration,
+              generation >= minimumStatusGeneration else { return }
+        self.minimumStatusGeneration = nil
+    }
+
+    mutating func observeControlState(
+        isStatusPollingHealthy: Bool,
+        statusGeneration: UInt64
+    ) {
+        guard isStatusPollingHealthy else {
+            requireNewStatus(after: statusGeneration)
+            return
+        }
+        observeStatusGeneration(statusGeneration)
+    }
+
+    mutating func reset() {
+        minimumStatusGeneration = nil
+    }
+}
+
 enum ProductCallPhase: Equatable {
     case needsPairing
     case needsControlPairing

@@ -11,6 +11,7 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var access: VoiceControlAccess?
     @Published private(set) var calls: [VoiceCallSnapshot] = []
     @Published private(set) var shouldPollStatus = false
+    @Published private(set) var statusSuccessGeneration: UInt64 = 0
     @Published private(set) var moduleUSBAudioEnabled: Bool?
     @Published private(set) var didAttemptUSBAudioQuery = false
     @Published var dialNumber = ""
@@ -354,6 +355,9 @@ final class VoiceControlModel: ObservableObject {
                     guard let self, self.requestGeneration == generation else { return }
                     self.requestWatchdogTask?.cancel()
                     self.isBusy = false
+                    if result.operation == .status {
+                        self.statusSuccessGeneration &+= 1
+                    }
                     self.calls = result.calls.filter { $0.state != 0x09 }
                     if enablePollingOnSuccess {
                         self.shouldPollStatus = true

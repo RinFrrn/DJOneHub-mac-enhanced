@@ -26,7 +26,31 @@ struct ProductCallPhaseOfflineTest {
         )
         expect(.recovering("控制请求超时"), state: "控制请求超时")
         verifyAudioLifecycleHints()
+        verifyMediaRecoveryGate()
         print("ProductCallPhaseOfflineTest: PASS")
+    }
+
+    private static func verifyMediaRecoveryGate() {
+        var gate = StatusConfirmedMediaRecoveryGate()
+        precondition(gate.isOpen)
+        gate.requireNewStatus(after: 7)
+        precondition(!gate.isOpen)
+        precondition(gate.minimumStatusGeneration == 8)
+        gate.observeStatusGeneration(7)
+        precondition(!gate.isOpen)
+        gate.observeStatusGeneration(8)
+        precondition(gate.isOpen)
+        gate.requireNewStatus(after: 20)
+        gate.reset()
+        precondition(gate.isOpen)
+
+        gate.observeControlState(isStatusPollingHealthy: false, statusGeneration: 30)
+        precondition(!gate.isOpen)
+        precondition(gate.minimumStatusGeneration == 31)
+        gate.observeControlState(isStatusPollingHealthy: true, statusGeneration: 30)
+        precondition(!gate.isOpen)
+        gate.observeControlState(isStatusPollingHealthy: true, statusGeneration: 31)
+        precondition(gate.isOpen)
     }
 
     private static func verifyAudioLifecycleHints() {

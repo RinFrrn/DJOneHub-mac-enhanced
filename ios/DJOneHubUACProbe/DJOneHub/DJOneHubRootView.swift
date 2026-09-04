@@ -169,6 +169,11 @@ struct DJOneHubRootView: View {
     private var audioSection: some View {
         Section("通话音频") {
             LabeledContent("PCM", value: callAudio.stateText)
+            if !callAudio.detailText.isEmpty {
+                Text(callAudio.detailText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
             LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
             LabeledContent("本地回铃", value: callAudio.isLocalRingbackEnabled ? "待命" : "关闭")

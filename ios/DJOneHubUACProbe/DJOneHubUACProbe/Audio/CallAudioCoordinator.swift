@@ -85,13 +85,15 @@ final class CallAudioCoordinator: ObservableObject {
         let downlinkPlayer = makeDownlinkPlayer(
             player: player,
             format: outputFormat,
-            mediaEnabled: false
+            mediaEnabled: false,
+            generation: generation
         )
         let pipeline = makePipeline(
             pairingKey: pairingKey,
             sessionID: sessionID,
             mediaEnabled: false,
-            downlinkPlayer: downlinkPlayer
+            downlinkPlayer: downlinkPlayer,
+            generation: generation
         )
         self.pipeline = pipeline
         self.downlinkPlayer = downlinkPlayer
@@ -108,6 +110,7 @@ final class CallAudioCoordinator: ObservableObject {
                       self.startGeneration == generation,
                       self.hasActiveRequest else { return }
                 guard granted else {
+                    self.startGeneration &+= 1
                     self.tearDownAudio(deactivateSession: false)
                     self.hasActiveRequest = false
                     self.stateText = "麦克风权限被拒绝"
@@ -115,6 +118,7 @@ final class CallAudioCoordinator: ObservableObject {
                     return
                 }
                 guard !self.isInterrupted else {
+                    self.startGeneration &+= 1
                     self.tearDownAudio(deactivateSession: false)
                     self.hasActiveRequest = false
                     self.stateText = "系统音频暂时不可用"
@@ -138,7 +142,7 @@ final class CallAudioCoordinator: ObservableObject {
         applyMediaState(uplink: uplink, downlink: downlink)
     }
 
-    func stop() {
+    func stop(reason: String? = nil) {
         startGeneration &+= 1
         tearDownAudio(deactivateSession: true)
         hasActiveRequest = false
@@ -151,10 +155,18 @@ final class CallAudioCoordinator: ObservableObject {
         desiredDownlinkEnabled = false
         desiredLocalRingbackEnabled = false
         isTestTone = false
-        stateText = "已停止"
-        detailText = "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
+        stateText = reason == nil ? "已停止" : "连接中断，PCM 已停止"
+        detailText = reason ?? "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
         inputLevel = 0
         downlinkLevel = 0
+    }
+
+    func markControlRecoveredIfNeeded() {
+        guard !isRunning,
+              !hasActiveRequest,
+              stateText == "连接中断，PCM 已停止" else { return }
+        stateText = "连接已恢复"
+        detailText = "已重新认证模块通话状态；当前没有需要恢复的 PCM 会话"
     }
 
     private func tearDownAudio(deactivateSession: Bool) {
@@ -183,6 +195,7 @@ final class CallAudioCoordinator: ObservableObject {
             return
         }
         startGeneration &+= 1
+        let generation = startGeneration
         desiredUplinkEnabled = true
         desiredDownlinkEnabled = true
         desiredLocalRingbackEnabled = false
@@ -191,7 +204,11 @@ final class CallAudioCoordinator: ObservableObject {
         while sessionID == 0 {
             sessionID = UInt32.random(in: 1 ... UInt32.max)
         }
-        let pipeline = makePipeline(pairingKey: pairingKey, sessionID: sessionID)
+        let pipeline = makePipeline(
+            pairingKey: pairingKey,
+            sessionID: sessionID,
+            generation: generation
+        )
         self.pipeline = pipeline
         sentFrames = 0
         receivedFrames = 0
@@ -293,6 +310,7 @@ final class CallAudioCoordinator: ObservableObject {
             downlinkPlayer.setLocalRingbackEnabled(localRingbackEnabled)
             applyMediaState(uplink: uplinkEnabled, downlink: downlinkEnabled)
         } catch {
+            startGeneration &+= 1
             pipeline?.stop()
             pipeline = nil
             converter = nil
@@ -318,7 +336,8 @@ final class CallAudioCoordinator: ObservableObject {
         pairingKey: Data,
         sessionID: UInt32,
         mediaEnabled: Bool = true,
-        downlinkPlayer: DownlinkPCMPlayer? = nil
+        downlinkPlayer: DownlinkPCMPlayer? = nil,
+        generation: UInt64
     ) -> PCMTransport {
         PCMTransport(
             pairingKey: pairingKey,
@@ -326,7 +345,9 @@ final class CallAudioCoordinator: ObservableObject {
             mediaEnabled: mediaEnabled,
             onState: { [weak self] state in
                 Task { @MainActor in
-                    guard let self, self.isRunning else { return }
+                    guard let self,
+                          self.startGeneration == generation,
+                          self.isRunning else { return }
                     if self.desiredUplinkEnabled && self.desiredDownlinkEnabled {
                         self.stateText = state
                     } else if self.desiredDownlinkEnabled {
@@ -338,23 +359,33 @@ final class CallAudioCoordinator: ObservableObject {
             },
             onProgress: { [weak self] frames, peak in
                 Task { @MainActor in
-                    guard let self, self.isRunning else { return }
+                    guard let self,
+                          self.startGeneration == generation,
+                          self.isRunning else { return }
                     self.sentFrames = frames
                     self.inputLevel = peak
                 }
             },
             onDownlink: { [weak self] sequence, pcm, frames in
                 let peak = Self.normalizedPCM16Peak(pcm)
+                // Each pipeline captures its own player. The player's serial
+                // queue rejects frames after stop(), so audio packets stay off
+                // MainActor while stale UI updates are generation-gated below.
                 downlinkPlayer?.enqueue(sequence: sequence, pcm: pcm)
                 Task { @MainActor in
-                    guard let self, self.isRunning, self.desiredDownlinkEnabled else { return }
+                    guard let self,
+                          self.startGeneration == generation,
+                          self.isRunning,
+                          self.desiredDownlinkEnabled else { return }
                     self.receivedFrames = frames
                     self.downlinkLevel = peak
                 }
             },
             onError: { [weak self] error in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self,
+                          self.startGeneration == generation,
+                          self.isRunning || self.hasActiveRequest else { return }
                     self.stop()
                     self.recoveryGeneration &+= 1
                     self.stateText = "PCM 发送失败，准备恢复"
@@ -367,7 +398,8 @@ final class CallAudioCoordinator: ObservableObject {
     private func makeDownlinkPlayer(
         player: AVAudioPlayerNode,
         format: AVAudioFormat,
-        mediaEnabled: Bool
+        mediaEnabled: Bool,
+        generation: UInt64
     ) -> DownlinkPCMPlayer {
         DownlinkPCMPlayer(
             player: player,
@@ -375,7 +407,9 @@ final class CallAudioCoordinator: ObservableObject {
             mediaEnabled: mediaEnabled,
             onMetrics: { [weak self] metrics in
                 Task { @MainActor in
-                    guard let self, self.isRunning else { return }
+                    guard let self,
+                          self.startGeneration == generation,
+                          self.isRunning else { return }
                     self.downlinkMetrics = metrics
                 }
             }
@@ -487,6 +521,7 @@ final class CallAudioCoordinator: ObservableObject {
         case .began:
             isInterrupted = true
             if isRunning || engine != nil || pipeline != nil {
+                startGeneration &+= 1
                 tearDownAudio(deactivateSession: false)
                 isRunning = false
                 isMediaEnabled = false
@@ -520,6 +555,7 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func handleMediaServicesReset() {
         let needsRecovery = isRunning || engine != nil || pipeline != nil
+        startGeneration &+= 1
         tearDownAudio(deactivateSession: false)
         isRunning = false
         isMediaEnabled = false

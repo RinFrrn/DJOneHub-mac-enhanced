@@ -10,6 +10,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     private var lifecycleTask: Task<Void, Never>?
     private var audioStartRequested = false
     private var handledAudioRecoveryGeneration: UInt64
+    private var mediaRecoveryGate = StatusConfirmedMediaRecoveryGate()
     private var nextStatusAttempt = ContinuousClock.now
     private var nextAudioStartAttempt = ContinuousClock.now
 
@@ -45,6 +46,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         lifecycleTask?.cancel()
         lifecycleTask = nil
         audioStartRequested = false
+        mediaRecoveryGate.reset()
         if callAudio.isRunning || callAudio.hasActiveRequest {
             callAudio.stop()
         }
@@ -55,6 +57,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         nextStatusAttempt = ContinuousClock.now
         nextAudioStartAttempt = ContinuousClock.now
         audioStartRequested = false
+        mediaRecoveryGate.reset()
         updatePhaseAndAudio()
     }
 
@@ -120,9 +123,9 @@ final class CallLifecycleCoordinator: ObservableObject {
         let shouldEnableDownlink = voiceControl.canControlCalls && phase.shouldEnableDownlink
         let shouldGenerateLocalRingback = voiceControl.canControlCalls
             && phase.shouldGenerateLocalRingback(calls: voiceControl.calls)
-        if handledAudioRecoveryGeneration != callAudio.recoveryGeneration {
-            handledAudioRecoveryGeneration = callAudio.recoveryGeneration
-            audioStartRequested = false
+        synchronizeMediaRecoveryGate()
+        if voiceControl.shouldPollStatus {
+            callAudio.markControlRecoveredIfNeeded()
         }
         if shouldPrepareAudio {
             guard !callAudio.isInterrupted else {
@@ -137,6 +140,7 @@ final class CallLifecycleCoordinator: ObservableObject {
                 )
             } else {
                 guard !audioStartRequested,
+                      mediaRecoveryGate.isOpen,
                       ContinuousClock.now >= nextAudioStartAttempt,
                       let key = voiceControl.pairingKeyForUplinkProbe() else { return }
                 audioStartRequested = true
@@ -152,13 +156,35 @@ final class CallLifecycleCoordinator: ObservableObject {
             audioStartRequested = false
             nextAudioStartAttempt = ContinuousClock.now
             if callAudio.isRunning || callAudio.hasActiveRequest {
-                callAudio.stop()
+                let reason: String?
+                switch phase {
+                case .connecting, .recovering:
+                    reason = "控制链路中断，本地 PCM 已停止；重新认证 STATUS 并确认仍在通话后才会恢复"
+                default:
+                    reason = nil
+                }
+                callAudio.stop(reason: reason)
             }
         }
     }
 
+    private func synchronizeMediaRecoveryGate() {
+        if handledAudioRecoveryGeneration != callAudio.recoveryGeneration {
+            handledAudioRecoveryGeneration = callAudio.recoveryGeneration
+            audioStartRequested = false
+            mediaRecoveryGate.requireNewStatus(after: voiceControl.statusSuccessGeneration)
+            nextStatusAttempt = .now
+        }
+        mediaRecoveryGate.observeControlState(
+            isStatusPollingHealthy: voiceControl.shouldPollStatus,
+            statusGeneration: voiceControl.statusSuccessGeneration
+        )
+    }
+
     private func prepareAudioForUserAction() {
+        synchronizeMediaRecoveryGate()
         guard voiceControl.canControlCalls,
+              mediaRecoveryGate.isOpen,
               !callAudio.isInterrupted,
               !callAudio.isRunning,
               !callAudio.hasActiveRequest,
