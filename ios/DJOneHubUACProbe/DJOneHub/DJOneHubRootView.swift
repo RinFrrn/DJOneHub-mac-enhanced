@@ -11,6 +11,7 @@ struct DJOneHubRootView: View {
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var contacts: ContactsModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @EnvironmentObject private var systemCalls: SystemCallCoordinator
     @StateObject private var sms = SMSControlModel()
     @AppStorage(PhoneProductPreferences.automaticCallRecording)
     private var automaticCallRecordingEnabled = false
@@ -42,8 +43,8 @@ struct DJOneHubRootView: View {
 
             if shouldPresentCallScreen {
                 InCallView(
-                    onAnswer: lifecycle.answer,
-                    onEnd: lifecycle.end,
+                    onAnswer: systemCalls.requestAnswer,
+                    onEnd: systemCalls.requestEnd,
                     onToggleMute: lifecycle.toggleMute,
                     onToggleRecording: toggleRecording
                 )
@@ -65,6 +66,7 @@ struct DJOneHubRootView: View {
             }
         }
         .onChange(of: lifecycle.phase) { _, newPhase in
+            systemCalls.synchronize(with: newPhase)
             handleCallPhaseForAutomaticRecording(newPhase)
         }
         .onChange(of: callAudio.isMediaEnabled) { _, _ in

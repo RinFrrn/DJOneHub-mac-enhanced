@@ -148,6 +148,7 @@ struct SettingsView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @EnvironmentObject private var systemCalls: SystemCallCoordinator
     @Binding var isConfirmingUnpair: Bool
     let dismiss: () -> Void
 
@@ -218,8 +219,18 @@ struct SettingsView: View {
                     )
                 }
 
+                Section("后台来电") {
+                    LabeledContent("CallKit", value: "已启用")
+                    LabeledContent("PushKit", value: systemCalls.pushStateText)
+                    if !systemCalls.hasVoIPToken {
+                        Text("如果一直无法取得 VoIP token，需要在 Apple Developer 中启用 Push Notifications，并使用包含 APNs entitlement 的 provisioning profile 重新签名。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
-                    Text("当前版本通过 USB ECM 控制 QDC507 并传输电话 PCM，不使用 USB Audio，也尚未接入 CallKit。")
+                    Text("当前版本通过 USB ECM 控制 QDC507 并传输电话 PCM，不使用 USB Audio。CallKit 本地来电链已接入，远程唤醒仍需 APNs Relay 和模块来电 indication。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

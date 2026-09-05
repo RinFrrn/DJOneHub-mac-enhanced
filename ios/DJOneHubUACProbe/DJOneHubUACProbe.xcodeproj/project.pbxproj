@@ -46,6 +46,8 @@
 		B1000000000000000000001A /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* InCallView.swift */; };
 		B1000000000000000000001B /* VoiceControlRequestArbitration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* VoiceControlRequestArbitration.swift */; };
 		B1000000000000000000001C /* SMSControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001A /* SMSControl.swift */; };
+		B1000000000000000000001D /* IncomingCallPushEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000B /* IncomingCallPushEvent.swift */; };
+		B1000000000000000000001E /* SystemCallCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* SystemCallCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -79,6 +81,8 @@
 		B20000000000000000000008 /* KeypadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeypadView.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* PhoneLibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneLibraryViews.swift; sourceTree = "<group>"; };
 		B2000000000000000000000A /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
+		B2000000000000000000000B /* IncomingCallPushEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomingCallPushEvent.swift; sourceTree = "<group>"; };
+		B2000000000000000000000C /* SystemCallCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCallCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +182,8 @@
 				B20000000000000000000008 /* KeypadView.swift */,
 				B20000000000000000000009 /* PhoneLibraryViews.swift */,
 				B2000000000000000000000A /* InCallView.swift */,
+				B2000000000000000000000B /* IncomingCallPushEvent.swift */,
+				B2000000000000000000000C /* SystemCallCoordinator.swift */,
 				B20000000000000000000004 /* Info.plist */,
 			);
 			path = DJOneHub;
@@ -325,6 +331,8 @@
 				B1000000000000000000001A /* InCallView.swift in Sources */,
 				B1000000000000000000001B /* VoiceControlRequestArbitration.swift in Sources */,
 				B1000000000000000000001C /* SMSControl.swift in Sources */,
+				B1000000000000000000001D /* IncomingCallPushEvent.swift in Sources */,
+				B1000000000000000000001E /* SystemCallCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

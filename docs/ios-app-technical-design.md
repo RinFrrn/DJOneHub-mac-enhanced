@@ -10,7 +10,9 @@ PCM。正式通话媒体不经过 USB UAC；iPhone/iPad 模式下模块关闭 UA
 挂断；进入 conversation 状态后自动启动双向 PCM，通话结束后自动释放麦克风、扬声器和
 网络资源。用户不再需要手动执行 STATUS、测试音或“开始 PCM”。
 
-当前阶段明确不接入 CallKit、PushKit，也不承诺 App 被杀死后的系统级来电唤醒。
+通话建立后的后台音频已经验证；系统级来电现进入 CallKit/PushKit 实施阶段。CallKit 本地
+来电上报与 PushKit 接收入口已接入，App 被长期挂起或终止后的可靠唤醒仍依赖模块来电
+indication、APNs Relay、Push Notifications entitlement 和真实 VoIP Push 的端到端闭环。
 
 ## 2. 已验证基线
 
@@ -59,6 +61,10 @@ PCM。正式通话媒体不经过 USB UAC；iPhone/iPad 模式下模块关闭 UA
 
 ```text
 DJOneHubApp
+  ├─ SystemCallCoordinator
+  │   ├─ PKPushRegistry (VoIP Push 唤醒入口)
+  │   ├─ CXProvider (系统来电界面)
+  │   └─ CXCallController (系统接听/拒接事务)
   └─ CallLifecycleCoordinator
       ├─ VoiceControlModel / VoiceControlClient (TCP 45750)
       ├─ CallAudioCoordinator
@@ -216,7 +222,18 @@ UAC 路由、原始 endpoint、完整日志和测试音继续只保留在 Probe�
 - 无 Mac 首次配对方案。
 - 隐私文案、图标、诊断导出、签名和 TestFlight。
 
-CallKit/PushKit 仅在 M1–M3 稳定后单独立项。
+### M6：系统级后台来电
+
+- 前台发现 QMI incoming/waiting 时上报 `CXProvider`，系统接听和拒接回调复用现有
+  `ANSWER/END` 白名单控制链。
+- `PKPushRegistry` 在 App 启动时注册 `.voIP`；VoIP payload 使用版本、模块标识、稳定
+  call UUID、模块 call ID、可选主叫号码和最多 5 分钟有效期的严格结构。
+- Push 唤醒后必须先向 CallKit 上报，再并行恢复 USB ECM 和认证 STATUS；模块 30 秒内
+  未确认该 call ID 时以 failed 结束系统来电，禁止把未经确认的 Push 放行到 PCM。
+- QDC507 改为监听 QMI Voice all-call-status indication，并通过不持有 APNs provider
+  私钥的加密 Relay 转发来电事件。
+- 当前开发 provisioning profile 不含 `aps-environment`；CallKit 本地链可真机验证，
+  VoIP token 和后台唤醒必须在 Apple Developer 后台启用 Push Notifications 并重新签名。
 
 ## 11. 验收门槛
 

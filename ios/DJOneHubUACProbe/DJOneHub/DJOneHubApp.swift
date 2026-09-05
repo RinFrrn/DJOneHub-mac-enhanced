@@ -8,6 +8,7 @@ struct DJOneHubApp: App {
     @StateObject private var history: CallHistoryStore
     @StateObject private var contacts: ContactsModel
     @StateObject private var lifecycle: CallLifecycleCoordinator
+    @StateObject private var systemCalls: SystemCallCoordinator
 
     init() {
         let voiceControl = VoiceControlModel()
@@ -18,13 +19,18 @@ struct DJOneHubApp: App {
         _callAudio = StateObject(wrappedValue: callAudio)
         _history = StateObject(wrappedValue: history)
         _contacts = StateObject(wrappedValue: contacts)
-        _lifecycle = StateObject(
-            wrappedValue: CallLifecycleCoordinator(
-                voiceControl: voiceControl,
-                callAudio: callAudio,
-                history: history
-            )
+        let lifecycle = CallLifecycleCoordinator(
+            voiceControl: voiceControl,
+            callAudio: callAudio,
+            history: history
         )
+        let systemCalls = SystemCallCoordinator(
+            voiceControl: voiceControl,
+            lifecycle: lifecycle
+        )
+        systemCalls.start()
+        _lifecycle = StateObject(wrappedValue: lifecycle)
+        _systemCalls = StateObject(wrappedValue: systemCalls)
     }
 
     var body: some Scene {
@@ -35,6 +41,7 @@ struct DJOneHubApp: App {
                 .environmentObject(history)
                 .environmentObject(contacts)
                 .environmentObject(lifecycle)
+                .environmentObject(systemCalls)
         }
     }
 }

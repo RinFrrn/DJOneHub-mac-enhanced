@@ -617,7 +617,11 @@ pairing.key
 - App 保持前台时完整接打电话。
 - 通话建立后允许进入后台并维持当前音频。
 
-可靠锁屏来电最终仍需要 APNs/PushKit 服务、MFi ExternalAccessory 后台能力，或接受只能在 App 活跃时接听的限制。CallKit 只负责系统通话 UI 和音频会话协调，不会自动访问外接基带。
+可靠锁屏来电采用 APNs/PushKit + CallKit 路线：QDC507 通过 QMI Voice indication 发现
+来电，受认证 Relay 发送 VoIP Push，iOS App 在 PushKit 回调内立即向 CallKit 上报，再
+恢复 USB ECM STATUS 和现有 PCM。CallKit 只负责系统通话 UI、动作和音频会话协调，
+不会自动访问外接基带。当前已完成 iOS CallKit 本地链和 PushKit 接收入口；模块 indication、
+Relay、APNs entitlement 与锁屏端到端验收仍待完成。
 
 ## 13. 备份要求
 
