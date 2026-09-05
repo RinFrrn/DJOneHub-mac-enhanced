@@ -143,7 +143,9 @@ struct ProductCallPhaseOfflineTest {
             direction: 0,
             mode: 0,
             multipart: 0,
-            als: 0
+            als: 0,
+            remoteNumberPresentation: nil,
+            remoteNumber: nil
         )
     }
 }

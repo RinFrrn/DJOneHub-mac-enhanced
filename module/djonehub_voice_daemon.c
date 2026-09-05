@@ -429,7 +429,7 @@ static int handle_client(int descriptor,
         return -1;
     }
     payload_length = (uint16_t)(((uint16_t)frame[8] << 8U) | frame[9]);
-    if (payload_length > DJONEHUB_CONTROL_MAX_PAYLOAD) {
+    if (payload_length > DJONEHUB_CONTROL_MAX_REQUEST_PAYLOAD) {
         memset(nonce, 0, sizeof(nonce));
         return -1;
     }

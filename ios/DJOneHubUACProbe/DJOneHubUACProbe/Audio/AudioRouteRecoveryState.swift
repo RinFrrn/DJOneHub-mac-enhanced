@@ -1,5 +1,24 @@
 import Foundation
 
+enum CallKitAudioOwnership {
+    case app, waitingForActivation, active
+
+    var isSystemManaged: Bool { self != .app }
+    var canStartMedia: Bool { self != .waitingForActivation }
+
+    mutating func begin() {
+        if self == .app { self = .waitingForActivation }
+    }
+
+    mutating func activate() {
+        if isSystemManaged { self = .active }
+    }
+
+    mutating func deactivate() {
+        if isSystemManaged { self = .waitingForActivation }
+    }
+}
+
 enum AudioRouteRecoveryDecision: Equatable {
     case ignore
     case requestRecovery

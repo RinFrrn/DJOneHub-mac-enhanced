@@ -76,6 +76,33 @@ struct VoiceControlProtocolOfflineTest {
         precondition(decoded.result?.calls[1].id == 2)
         precondition(decoded.result?.calls[1].state == 3)
 
+        var extendedPayload = Data([
+            0x01, 0x00, 0x00, 0x01,
+            0x01, 0x02, 0x00, 0x02, 0x05, 0x00, 0x00,
+            0x01, 0x00, 0x12,
+            0x01, 0x01, 0x00, 0x0E
+        ])
+        extendedPayload.append(Data("+8613800138000".utf8))
+        var extendedResponse = Data(hex: "444a4f4801030000002000000102030405060708")
+        extendedResponse.append(extendedPayload)
+        var authenticatedExtendedResponse = nonce
+        authenticatedExtendedResponse.append(extendedResponse)
+        extendedResponse.append(contentsOf: HMAC<SHA256>.authenticationCode(
+            for: authenticatedExtendedResponse,
+            using: SymmetricKey(data: key)
+        ))
+        let extended = try VoiceControlProtocol.decodeResponse(
+            pairingKey: key,
+            nonce: nonce,
+            frame: extendedResponse,
+            expectedRequestID: requestID,
+            expectedOperation: .status
+        )
+        precondition(extended.result?.calls.count == 1)
+        precondition(extended.result?.calls[0].remoteNumberPresentation == 0)
+        precondition(extended.result?.calls[0].presentedRemoteNumber == "+8613800138000")
+        precondition(extended.result?.calls[0].remotePartyDisplayText == "+8613800138000")
+
         var forbiddenResponse = Data(hex: "444a4f4801030700000000000102030405060708")
         var authenticatedForbidden = nonce
         authenticatedForbidden.append(forbiddenResponse)

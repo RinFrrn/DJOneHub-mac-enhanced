@@ -75,6 +75,27 @@ func TestVoiceDaemonReplyAuthenticationAndReplay(t *testing.T) {
 	}
 }
 
+func TestVoiceDaemonReplyWithRemotePartyNumber(t *testing.T) {
+	key, nonce := voiceDaemonTestMaterial()
+	payload := []byte{
+		voiceControlOpStatus, 0, 0, 1,
+		1, 2, 0, 2, 4, 0, 0,
+		voiceControlRemoteNumbersExt, 0, 18,
+		1, 1, 0, 14,
+	}
+	payload = append(payload, []byte("+8613800138000")...)
+	frame := voiceDaemonReplyFrameForTest(key, nonce, 100, payload)
+	reply, err := decodeVoiceDaemonReply(key, nonce, frame, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reply.Calls) != 1 || !reply.Calls[0].RemoteNumberPresent ||
+		reply.Calls[0].RemoteNumberPresentation != 0 ||
+		reply.Calls[0].RemoteNumber != "+8613800138000" {
+		t.Fatalf("remote party number lost: %#v", reply)
+	}
+}
+
 func TestValidateVoiceDaemonArtifactRejectsUnpinnedBinary(t *testing.T) {
 	err := validateVoiceDaemonArtifact(qmiVoiceProbeTestELF(2, 40))
 	if err == nil || !strings.Contains(err.Error(), "SHA-256 不匹配") {

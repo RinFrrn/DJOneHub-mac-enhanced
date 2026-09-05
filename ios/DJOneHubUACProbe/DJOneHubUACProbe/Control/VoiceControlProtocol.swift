@@ -42,6 +42,20 @@ struct VoiceCallSnapshot: Equatable, Sendable {
     let mode: UInt8
     let multipart: UInt8
     let als: UInt8
+    let remoteNumberPresentation: UInt8?
+    let remoteNumber: String?
+
+    var presentedRemoteNumber: String? {
+        guard remoteNumberPresentation == 0,
+              let remoteNumber,
+              !remoteNumber.isEmpty else { return nil }
+        return remoteNumber
+    }
+
+    var remotePartyDisplayText: String {
+        if let presentedRemoteNumber { return presentedRemoteNumber }
+        return remoteNumberPresentation == 1 ? "私人号码" : "未知号码"
+    }
 }
 
 struct VoiceControlResult: Equatable, Sendable {
@@ -66,7 +80,11 @@ enum VoiceControlProtocol {
     static let maxCalls = 8
     static let callRecordBytes = 7
     static let snapshotBaseBytes = 4
+    static let maxRemoteNumberBytes = 81
+    static let resultExtensionHeaderBytes = 3
+    static let remotePartyNumbersExtensionType: UInt8 = 1
     static let maxSnapshotBytes = snapshotBaseBytes + maxCalls * callRecordBytes
+        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes)
     static let maxPayloadBytes = 81
     static let maxDialBytes = 80
     static let maxResponseFrameBytes = headerBytes + maxSnapshotBytes + tagBytes
@@ -271,8 +289,8 @@ enum VoiceControlProtocol {
         }
 
         let count = Int(payload[3])
-        guard count <= maxCalls,
-              payload.count == snapshotBaseBytes + count * callRecordBytes else {
+        let fixedRecordsEnd = snapshotBaseBytes + count * callRecordBytes
+        guard count <= maxCalls, payload.count >= fixedRecordsEnd else {
             throw VoiceControlProtocolError.invalidSnapshot
         }
 
@@ -292,8 +310,76 @@ enum VoiceControlProtocol {
                 direction: payload[offset + 3],
                 mode: payload[offset + 4],
                 multipart: payload[offset + 5],
-                als: payload[offset + 6]
+                als: payload[offset + 6],
+                remoteNumberPresentation: nil,
+                remoteNumber: nil
             ))
+        }
+
+        var extensionOffset = fixedRecordsEnd
+        while extensionOffset < payload.count {
+            guard payload.count - extensionOffset >= resultExtensionHeaderBytes else {
+                throw VoiceControlProtocolError.invalidSnapshot
+            }
+            let extensionType = payload[extensionOffset]
+            let extensionLength = Int(readBE16(payload, extensionOffset + 1))
+            extensionOffset += resultExtensionHeaderBytes
+            guard extensionLength <= payload.count - extensionOffset else {
+                throw VoiceControlProtocolError.invalidSnapshot
+            }
+            let extensionEnd = extensionOffset + extensionLength
+            if extensionType == remotePartyNumbersExtensionType {
+                guard extensionLength >= 1 else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                let numberCount = Int(payload[extensionOffset])
+                extensionOffset += 1
+                guard numberCount <= maxCalls else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                var seenNumberCallIDs = Set<UInt8>()
+                for _ in 0..<numberCount {
+                    guard extensionEnd - extensionOffset >= 3 else {
+                        throw VoiceControlProtocolError.invalidSnapshot
+                    }
+                    let callID = payload[extensionOffset]
+                    let presentation = payload[extensionOffset + 1]
+                    let numberLength = Int(payload[extensionOffset + 2])
+                    extensionOffset += 3
+                    guard callID != 0,
+                          seenNumberCallIDs.insert(callID).inserted,
+                          numberLength <= maxRemoteNumberBytes,
+                          numberLength <= extensionEnd - extensionOffset,
+                          let callIndex = calls.firstIndex(where: { $0.id == callID }) else {
+                        throw VoiceControlProtocolError.invalidSnapshot
+                    }
+                    let numberData = payload.subdata(
+                        in: extensionOffset..<(extensionOffset + numberLength)
+                    )
+                    guard let number = String(data: numberData, encoding: .utf8),
+                          number.isEmpty || isSafeRemoteNumber(number) else {
+                        throw VoiceControlProtocolError.invalidSnapshot
+                    }
+                    let call = calls[callIndex]
+                    calls[callIndex] = VoiceCallSnapshot(
+                        id: call.id,
+                        state: call.state,
+                        type: call.type,
+                        direction: call.direction,
+                        mode: call.mode,
+                        multipart: call.multipart,
+                        als: call.als,
+                        remoteNumberPresentation: presentation,
+                        remoteNumber: number.isEmpty ? nil : number
+                    )
+                    extensionOffset += numberLength
+                }
+                guard extensionOffset == extensionEnd else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+            } else {
+                extensionOffset = extensionEnd
+            }
         }
 
         return VoiceControlResult(
@@ -302,6 +388,17 @@ enum VoiceControlProtocol {
             confirmed: payload[2] != 0,
             calls: calls
         )
+    }
+
+    private static func isSafeRemoteNumber(_ number: String) -> Bool {
+        let bytes = Array(number.utf8)
+        guard !bytes.isEmpty, bytes.count <= maxRemoteNumberBytes else { return false }
+        return bytes.enumerated().allSatisfy { index, byte in
+            (0x30...0x39).contains(byte)
+                || byte == 0x2A
+                || byte == 0x23
+                || (byte == 0x2B && index == 0 && bytes.count > 1)
+        }
     }
 
     private static func decodeHeader(_ frame: Data, expectedType: UInt8) throws -> Header {

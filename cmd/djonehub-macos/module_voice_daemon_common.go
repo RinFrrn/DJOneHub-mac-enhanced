@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	voiceDaemonExpectedSHA256         = "68c672e8d669b61d4e95a61b480cc503763f84b87bb7d50d1c88e4e191cf7c0e"
+	voiceDaemonExpectedSHA256         = "3a22dd1540cc8e33d9450c6cac850feb4197b786a60bad8cc510c051bbb6375a"
 	voiceSMSExpectedSHA256            = "61d314497a20a69fb7c762da9e9881d926ab5516f2bd5e3d8679a1ab76628f75"
 	voiceUplinkExpectedSHA256         = "052912efc5f9ef21ac891a5d2f9c457b3a3242f8423b17b3cb2f95418e982e48"
 	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
@@ -48,16 +48,19 @@ const (
 	voiceTestSessionPurpose           = "development-control-session"
 	voiceTestPairingValidity          = 30 * 24 * time.Hour
 
-	voiceControlMagic        = 0x444a4f48
-	voiceControlVersion      = 1
-	voiceControlFrameHello   = 1
-	voiceControlFrameRequest = 2
-	voiceControlFrameReply   = 3
-	voiceControlOpStatus     = 1
-	voiceControlHeaderBytes  = 20
-	voiceControlNonceBytes   = 32
-	voiceControlTagBytes     = 32
-	voiceControlMaxPayload   = 81
+	voiceControlMagic              = 0x444a4f48
+	voiceControlVersion            = 1
+	voiceControlFrameHello         = 1
+	voiceControlFrameRequest       = 2
+	voiceControlFrameReply         = 3
+	voiceControlOpStatus           = 1
+	voiceControlHeaderBytes        = 20
+	voiceControlNonceBytes         = 32
+	voiceControlTagBytes           = 32
+	voiceControlMaxRequestPayload  = 81
+	voiceControlMaxRemoteNumber    = 81
+	voiceControlMaxResponsePayload = 4 + 8*7 + 3 + 1 + 8*(3+voiceControlMaxRemoteNumber)
+	voiceControlRemoteNumbersExt   = 1
 )
 
 //go:embed module_prepare_incall_card.sh
@@ -108,13 +111,16 @@ func encodeDevelopmentPairingBundle(key []byte, purpose string, now time.Time) (
 }
 
 type voiceDaemonCall struct {
-	ID        byte `json:"id"`
-	State     byte `json:"state"`
-	Type      byte `json:"type"`
-	Direction byte `json:"direction"`
-	Mode      byte `json:"mode"`
-	Multipart byte `json:"multipart"`
-	ALS       byte `json:"als"`
+	ID                       byte   `json:"id"`
+	State                    byte   `json:"state"`
+	Type                     byte   `json:"type"`
+	Direction                byte   `json:"direction"`
+	Mode                     byte   `json:"mode"`
+	Multipart                byte   `json:"multipart"`
+	ALS                      byte   `json:"als"`
+	RemoteNumberPresent      bool   `json:"remote_number_present,omitempty"`
+	RemoteNumberPresentation byte   `json:"remote_number_presentation,omitempty"`
+	RemoteNumber             string `json:"remote_number,omitempty"`
 }
 
 type voiceDaemonReply struct {
@@ -224,7 +230,7 @@ func decodeVoiceDaemonReply(key, nonce, frame []byte, expectedRequestID uint64) 
 	var reply voiceDaemonReply
 	status, payloadLength, requestID, err := validateVoiceControlHeader(frame, voiceControlFrameReply)
 	if err != nil || len(key) != voiceControlTagBytes || len(nonce) != voiceControlNonceBytes ||
-		requestID == 0 || requestID != expectedRequestID || payloadLength > voiceControlMaxPayload {
+		requestID == 0 || requestID != expectedRequestID || payloadLength > voiceControlMaxResponsePayload {
 		return reply, errors.New("daemon 响应头无效")
 	}
 	unsignedLength := voiceControlHeaderBytes + int(payloadLength)
@@ -244,7 +250,8 @@ func decodeVoiceDaemonReply(key, nonce, frame []byte, expectedRequestID uint64) 
 		return reply, errors.New("daemon STATUS payload 无效")
 	}
 	count := int(payload[3])
-	if count > 8 || len(payload) != 4+count*7 {
+	fixedEnd := 4 + count*7
+	if count > 8 || len(payload) < fixedEnd {
 		return reply, errors.New("daemon call snapshot 长度无效")
 	}
 	reply.Operation = payload[0]
@@ -262,7 +269,79 @@ func decodeVoiceDaemonReply(key, nonce, frame []byte, expectedRequestID uint64) 
 			Direction: record[3], Mode: record[4], Multipart: record[5], ALS: record[6],
 		})
 	}
+	for offset := fixedEnd; offset < len(payload); {
+		if len(payload)-offset < 3 {
+			return voiceDaemonReply{}, errors.New("daemon call snapshot 扩展头不完整")
+		}
+		extensionType := payload[offset]
+		extensionLength := int(binary.BigEndian.Uint16(payload[offset+1 : offset+3]))
+		offset += 3
+		if extensionLength > len(payload)-offset {
+			return voiceDaemonReply{}, errors.New("daemon call snapshot 扩展长度无效")
+		}
+		extensionEnd := offset + extensionLength
+		if extensionType != voiceControlRemoteNumbersExt {
+			offset = extensionEnd
+			continue
+		}
+		if extensionLength < 1 {
+			return voiceDaemonReply{}, errors.New("daemon 主叫号码扩展为空")
+		}
+		numberCount := int(payload[offset])
+		offset++
+		if numberCount > 8 {
+			return voiceDaemonReply{}, errors.New("daemon 主叫号码数量无效")
+		}
+		numberCallIDs := make(map[byte]bool, numberCount)
+		for index := 0; index < numberCount; index++ {
+			if extensionEnd-offset < 3 {
+				return voiceDaemonReply{}, errors.New("daemon 主叫号码记录不完整")
+			}
+			callID := payload[offset]
+			presentation := payload[offset+1]
+			numberLength := int(payload[offset+2])
+			offset += 3
+			if callID == 0 || numberCallIDs[callID] || numberLength > voiceControlMaxRemoteNumber || numberLength > extensionEnd-offset {
+				return voiceDaemonReply{}, errors.New("daemon 主叫号码记录无效")
+			}
+			numberCallIDs[callID] = true
+			callIndex := -1
+			for candidate := range reply.Calls {
+				if reply.Calls[candidate].ID == callID {
+					callIndex = candidate
+					break
+				}
+			}
+			if callIndex < 0 {
+				return voiceDaemonReply{}, errors.New("daemon 主叫号码没有对应通话")
+			}
+			numberBytes := payload[offset : offset+numberLength]
+			if numberLength != 0 && !validVoiceDaemonRemoteNumber(numberBytes) {
+				return voiceDaemonReply{}, errors.New("daemon 主叫号码字符无效")
+			}
+			reply.Calls[callIndex].RemoteNumberPresent = true
+			reply.Calls[callIndex].RemoteNumberPresentation = presentation
+			reply.Calls[callIndex].RemoteNumber = string(numberBytes)
+			offset += numberLength
+		}
+		if offset != extensionEnd {
+			return voiceDaemonReply{}, errors.New("daemon 主叫号码扩展包含尾随数据")
+		}
+	}
 	return reply, nil
+}
+
+func validVoiceDaemonRemoteNumber(number []byte) bool {
+	if len(number) == 0 || len(number) > voiceControlMaxRemoteNumber {
+		return false
+	}
+	for index, value := range number {
+		if value >= '0' && value <= '9' || value == '*' || value == '#' || value == '+' && index == 0 && len(number) > 1 {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func voiceDaemonReplyFrameForTest(key, nonce []byte, requestID uint64, payload []byte) []byte {

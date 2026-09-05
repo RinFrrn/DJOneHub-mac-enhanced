@@ -246,7 +246,8 @@ service object `2/0x4d/6`。固定哈希 ARMv7 soft-float 探针成功初始化 
 
 - Dial Call `0x20`：号码使用 mandatory TLV `0x01`；
 - End Call `0x21`、Answer Call `0x22`：call ID 使用 mandatory TLV `0x01`；
-- Get All Call Info `0x2f`：call information 使用 TLV `0x10`，每条记录 7 字节；
+- Get All Call Info `0x2f`：call information 使用 TLV `0x10`，每条记录 7 字节；Remote
+  Party Number 使用可选 TLV `0x11`，按 call ID 关联并保留 presentation indicator；
 - 通用 QMI result 使用 TLV `0x02`，action response 的 call ID 使用 TLV `0x10`。
 
 必须注意：旧只读探针曾错误查找 call information TLV `0x01`。空闲响应没有 call
@@ -508,7 +509,10 @@ TCP 控制端口固定为 `192.168.225.1:45750`。候选协议使用紧凑二进
 DIAL 只允许 `+0123456789*#` 且 `+` 只能出现在首位；ANSWER/END payload 是一个非零
 call ID。USB_AUDIO 的空 payload 表示查询，单字节 `0/1` 表示关闭/开启
 `/sys/class/android_usb/f_audio/audio_enable`；设置前必须以新 QMI STATUS 确认无活动通话，
-且写后读回。STATUS-only 凭据不能执行该操作。响应只包含固定状态码、动作结果和最多 8 条定长 call snapshot。当前协议只做
+且写后读回。STATUS-only 凭据不能执行该操作。响应包含固定状态码、动作结果和最多 8 条
+定长 call snapshot；其后可附加 HMAC 覆盖的 TLV 扩展。Remote Party Number 扩展类型为
+`0x01`，值为记录数以及重复的 `call_id/presentation/length/number`。无号码时不发送扩展，
+因此原有固定响应字节保持不变；新版客户端同时接受旧响应。当前协议只做
 身份与完整性认证，不提供内容保密；电话号码不会进入蜂窝公网监听面，但同一 USB 链路
 上的明文可见性需在威胁模型中明确。如需保密，应在协议定稿前升级为具备 AEAD 的握手，
 而不是在 HMAC 帧外临时加可选加密。

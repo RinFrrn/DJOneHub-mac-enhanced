@@ -51,6 +51,48 @@ static int test_call_snapshot(void)
     return 0;
 }
 
+static int test_call_snapshot_with_remote_party_number(void)
+{
+    const uint8_t response[] = {
+        0x02U, 0x04U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x10U, 0x08U, 0x00U, 0x01U,
+        0x01U, 0x02U, 0x00U, 0x02U, 0x05U, 0x00U, 0x00U,
+        0x11U, 0x12U, 0x00U, 0x01U, 0x01U, 0x00U, 0x0EU,
+        (uint8_t)'+', (uint8_t)'8', (uint8_t)'6', (uint8_t)'1',
+        (uint8_t)'3', (uint8_t)'8', (uint8_t)'0', (uint8_t)'0',
+        (uint8_t)'1', (uint8_t)'3', (uint8_t)'8', (uint8_t)'0',
+        (uint8_t)'0', (uint8_t)'0'};
+    struct djonehub_voice_snapshot snapshot;
+    unsigned int service_error = 0U;
+
+    CHECK(djonehub_voice_parse_snapshot(response, sizeof(response), &snapshot,
+                                        &service_error) == 0);
+    CHECK(snapshot.count == 1U);
+    CHECK(snapshot.calls[0].remote_number_present == 1U);
+    CHECK(snapshot.calls[0].remote_number_presentation == 0U);
+    CHECK(snapshot.calls[0].remote_number_length == 14U);
+    CHECK(strcmp(snapshot.calls[0].remote_number, "+8613800138000") == 0);
+    return 0;
+}
+
+static int test_restricted_remote_party_number(void)
+{
+    const uint8_t response[] = {
+        0x02U, 0x04U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x10U, 0x08U, 0x00U, 0x01U,
+        0x01U, 0x02U, 0x00U, 0x02U, 0x05U, 0x00U, 0x00U,
+        0x11U, 0x04U, 0x00U, 0x01U, 0x01U, 0x01U, 0x00U};
+    struct djonehub_voice_snapshot snapshot;
+    unsigned int service_error = 0U;
+
+    CHECK(djonehub_voice_parse_snapshot(response, sizeof(response), &snapshot,
+                                        &service_error) == 0);
+    CHECK(snapshot.calls[0].remote_number_present == 1U);
+    CHECK(snapshot.calls[0].remote_number_presentation == 1U);
+    CHECK(snapshot.calls[0].remote_number_length == 0U);
+    return 0;
+}
+
 static int test_malformed_snapshot(void)
 {
     const uint8_t response[] = {
@@ -223,6 +265,8 @@ int main(void)
 {
     CHECK(test_empty_snapshot() == 0);
     CHECK(test_call_snapshot() == 0);
+    CHECK(test_call_snapshot_with_remote_party_number() == 0);
+    CHECK(test_restricted_remote_party_number() == 0);
     CHECK(test_malformed_snapshot() == 0);
     CHECK(test_rejected_call_records() == 0);
     CHECK(test_service_error() == 0);

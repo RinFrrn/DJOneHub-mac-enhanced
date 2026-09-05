@@ -4,6 +4,7 @@
 
 #define QMI_RESULT_TLV 0x02U
 #define QMI_CALL_INFORMATION_TLV 0x10U
+#define QMI_REMOTE_PARTY_NUMBER_TLV 0x11U
 #define QMI_CALL_ID_TLV 0x10U
 #define QMI_MANDATORY_INPUT_TLV 0x01U
 #define QMI_RESULT_SUCCESS 0U
@@ -84,6 +85,88 @@ static int parse_result(const uint8_t *response, size_t response_length,
     return 0;
 }
 
+static int valid_remote_number(const uint8_t *number, size_t length)
+{
+    size_t index;
+
+    if (number == NULL || length == 0U ||
+        length > DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES) {
+        return 0;
+    }
+    for (index = 0U; index < length; ++index) {
+        uint8_t character = number[index];
+
+        if ((character >= (uint8_t)'0' && character <= (uint8_t)'9') ||
+            character == (uint8_t)'*' || character == (uint8_t)'#' ||
+            (character == (uint8_t)'+' && index == 0U && length > 1U)) {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+static struct djonehub_voice_call *find_call(
+    struct djonehub_voice_snapshot *snapshot, uint8_t call_id)
+{
+    size_t index;
+
+    for (index = 0U; index < snapshot->count; ++index) {
+        if (snapshot->calls[index].id == call_id) {
+            return &snapshot->calls[index];
+        }
+    }
+    return NULL;
+}
+
+static int parse_remote_party_numbers(
+    const uint8_t *value, size_t value_length,
+    struct djonehub_voice_snapshot *snapshot)
+{
+    uint8_t seen[256];
+    size_t count;
+    size_t index;
+    size_t offset = 1U;
+
+    if (value == NULL || snapshot == NULL || value_length < 1U) {
+        return -1;
+    }
+    memset(seen, 0, sizeof(seen));
+    count = (size_t)value[0];
+    if (count > DJONEHUB_VOICE_MAX_CALLS) {
+        return -1;
+    }
+    for (index = 0U; index < count; ++index) {
+        struct djonehub_voice_call *call;
+        size_t number_length;
+        uint8_t call_id;
+
+        if (value_length - offset < 3U) {
+            return -1;
+        }
+        call_id = value[offset];
+        number_length = (size_t)value[offset + 2U];
+        if (number_length > value_length - offset - 3U || call_id == 0U ||
+            seen[call_id] != 0U) {
+            return -1;
+        }
+        seen[call_id] = 1U;
+        call = find_call(snapshot, call_id);
+        if (call == NULL) {
+            return -1;
+        }
+        call->remote_number_present = 1U;
+        call->remote_number_presentation = value[offset + 1U];
+        if (valid_remote_number(value + offset + 3U, number_length)) {
+            memcpy(call->remote_number, value + offset + 3U, number_length);
+            call->remote_number[number_length] = '\0';
+            call->remote_number_length = number_length;
+        }
+        offset += 3U + number_length;
+    }
+    return offset == value_length ? 0 : -1;
+}
+
 int djonehub_voice_parse_snapshot(const uint8_t *response,
                                   size_t response_length,
                                   struct djonehub_voice_snapshot *snapshot,
@@ -140,6 +223,17 @@ int djonehub_voice_parse_snapshot(const uint8_t *response,
                 return -1;
             }
         }
+    }
+    result = find_tlv(response, response_length,
+                      QMI_REMOTE_PARTY_NUMBER_TLV, &value, &value_length);
+    if (result == 0 &&
+        parse_remote_party_numbers(value, value_length, snapshot) != 0) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        return -1;
+    }
+    if (result < 0) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        return -1;
     }
     return 0;
 }

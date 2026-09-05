@@ -10,6 +10,13 @@
 
 ## 当前已通过真机验收的路线
 
+> 2026-09-05 回归待验收：用户已确认来电号码显示，但报告接听后双向无声。
+> 静态检查发现 CallKit 的 didActivate/didDeactivate 只更新显示变量，未连接 PCM
+> 生命周期。候选修复现将系统激活回调接入媒体恢复，并在 CallKit 管理会话时禁止
+> App 自行 setActive；接听前配置会话，激活后经新认证 STATUS 再启动媒体。
+> 音频所有权状态测试、iOS 签名构建及签名校验通过；已无线覆盖安装修复版并启动
+> 诊断控制台，待真机来电接听回归，不能将下文历史音频验收当作本版修复已通过。
+
 - 模块加载固定哈希 `qdc507_incall_card.ko`，在保留 SEC_AUX VoLTE hostless anchor
   的同时增加 `Voice Downlink Capture` 与 `Voice Farend Playback` backend。
 - 上行已实测：iPhone 内置麦克风 → USB ECM → HMAC UDP → Media1 playback →
@@ -159,6 +166,12 @@ pairing 和通话自动启停收敛成正式
   Address/Undefined Sanitizer 测试。该
   daemon 的上一固定哈希版本已完成 iPhone STATUS 网络闭环；新增权限模式需重新经过
   ARM CI 交叉编译、固定哈希更新和实机部署验收。
+- 来电号码链已补齐但仍待实机验收：QMI Voice `Get All Call Info (0x2f)` 解析可选
+  Remote Party Number TLV `0x11`，按 call ID 关联号码与 presentation indicator；认证
+  STATUS 响应以可选扩展传给 iOS。无号码时继续生成旧固定响应，新 iOS 同时兼容旧
+  daemon；允许展示的号码进入 CallKit/通话页/最近通话，限制主叫显示“私人号码”。
+  C、Go、Swift 离线协议测试和 iOS 真机签名构建已通过，下一步需在真实来电中确认
+  QDC507 返回的号码及 presentation，再验收 CallKit 显示。
 - 同一测试中，旧 macOS 通话观察器在 active 后仍会尝试启动 MaVo 音频桥，并因公开
   源码包不含私有模块语音运行时而失败；这不影响 QMI 控制成功，但说明控制面完成不能
   等同于 iOS 双向媒体完成。主动 Dial 尚未做真实号码验收。

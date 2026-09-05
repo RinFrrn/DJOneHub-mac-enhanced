@@ -100,7 +100,12 @@ struct InCallView: View {
 
     private var callTitle: String {
         let number = voiceControl.dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        if case .incoming = lifecycle.phase { return "未知号码" }
+        if let callID = lifecycle.phase.callID,
+           let call = voiceControl.calls.first(where: { $0.id == callID }) {
+            if call.direction == 2 || call.remoteNumberPresentation != nil {
+                return call.remotePartyDisplayText
+            }
+        }
         return number.isEmpty ? "蜂窝电话" : number
     }
 

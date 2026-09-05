@@ -109,6 +109,24 @@ final class CallLifecycleCoordinator: ObservableObject {
         updatePhaseAndAudio()
     }
 
+    func beginSystemCallAudio() { callAudio.beginSystemCallAudio() }
+    func prepareSystemCallAnswer() throws { try callAudio.prepareSystemCallAnswer() }
+    func systemCallAudioDidActivate() {
+        callAudio.systemCallAudioDidActivate()
+        audioStartRequested = false
+        nextStatusAttempt = .now
+        nextAudioStartAttempt = .now
+        updatePhaseAndAudio()
+    }
+    func systemCallAudioDidDeactivate() {
+        callAudio.systemCallAudioDidDeactivate()
+        audioStartRequested = false
+    }
+    func endSystemCallAudio() {
+        callAudio.endSystemCallAudio()
+        audioStartRequested = false
+    }
+
     func end(callID: UInt8) {
         trackedUserEnded = true
         nextStatusAttempt = .now
@@ -156,6 +174,9 @@ final class CallLifecycleCoordinator: ObservableObject {
         )
         synchronizeCallHistory(with: derivedPhase)
         if phase != derivedPhase {
+#if DEBUG
+            print("DJOneHubLifecycle phase \(String(describing: phase)) -> \(String(describing: derivedPhase))")
+#endif
             phase = derivedPhase
         }
         let durationSeconds = callDurationTracker.update(
@@ -178,7 +199,7 @@ final class CallLifecycleCoordinator: ObservableObject {
             callAudio.markControlRecoveredIfNeeded()
         }
         if shouldPrepareAudio {
-            guard !callAudio.isInterrupted else {
+            guard !callAudio.isInterrupted, callAudio.canStartSystemCallAudio else {
                 audioStartRequested = false
                 return
             }
@@ -224,7 +245,10 @@ final class CallLifecycleCoordinator: ObservableObject {
            let call = voiceControl.calls.first(where: { $0.id == callID }) {
             let direction: CallHistoryDirection = call.direction == 2 ? .incoming : .outgoing
             trackedDirection = direction
-            trackedHistoryID = history.begin(direction: direction, number: nil)
+            trackedHistoryID = history.begin(
+                direction: direction,
+                number: direction == .incoming ? call.presentedRemoteNumber : nil
+            )
             trackedWasConnected = false
             trackedUserEnded = false
         }
@@ -271,6 +295,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     private func prepareAudioForUserAction() {
         synchronizeMediaRecoveryGate()
         guard voiceControl.canControlCalls,
+              callAudio.canStartSystemCallAudio,
               mediaRecoveryGate.isOpen,
               !callAudio.isInterrupted,
               !callAudio.isRunning,

@@ -9,7 +9,30 @@ struct AudioRouteRecoveryStateOfflineTest {
         requestsOneRecoveryForASettledInvalidRoute()
         defersToAudioInterruptionRecovery()
         resetInvalidatesOutstandingChecks()
+        callKitActivationGatesMediaAcrossCalls()
         print("AudioRouteRecoveryStateOfflineTest: PASS")
+    }
+
+    private static func callKitActivationGatesMediaAcrossCalls() {
+        var state = CallKitAudioOwnership.app
+        precondition(state.canStartMedia && !state.isSystemManaged)
+        state.begin()
+        precondition(state.isSystemManaged && !state.canStartMedia)
+        state.activate()
+        precondition(state.canStartMedia && state.isSystemManaged)
+        state.begin() // A repeated incoming snapshot must not suspend a live call.
+        precondition(state.canStartMedia)
+        state.deactivate()
+        precondition(!state.canStartMedia && state.isSystemManaged)
+        state.activate()
+        precondition(state.canStartMedia)
+        state = .app
+        state.deactivate() // A late end callback must not block the next outgoing call.
+        precondition(state.canStartMedia && !state.isSystemManaged)
+        state.activate()
+        precondition(!state.isSystemManaged)
+        state.begin() // The next incoming call needs its own activation.
+        precondition(!state.canStartMedia)
     }
 
     private static func ignoresHealthyAndIdleRoutes() {

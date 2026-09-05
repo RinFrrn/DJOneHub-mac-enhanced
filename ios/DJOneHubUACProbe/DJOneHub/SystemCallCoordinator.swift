@@ -17,6 +17,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     private var callIDByUUID: [UUID: UInt8] = [:]
     private var uuidByCallID: [UInt8: UUID] = [:]
     private var callerByCallID: [UInt8: String] = [:]
+    private var presentationByCallID: [UInt8: UInt8] = [:]
     private var confirmedUUIDs: Set<UUID> = []
     private var answeredUUIDs: Set<UUID> = []
     private var locallyEndedCallIDs: Set<UInt8> = []
@@ -54,7 +55,13 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     func synchronize(with phase: ProductCallPhase) {
         switch phase {
         case .incoming(let callID):
-            ensureIncomingCall(callID: callID, caller: callerByCallID[callID], confirmed: true)
+            let call = voiceControl.calls.first { $0.id == callID }
+            ensureIncomingCall(
+                callID: callID,
+                caller: callerByCallID[callID] ?? call?.presentedRemoteNumber,
+                presentation: call?.remoteNumberPresentation,
+                confirmed: true
+            )
         case .answering(let callID), .active(let callID):
             guard let uuid = uuidByCallID[callID] else { return }
             confirm(uuid)
@@ -115,6 +122,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
                 uuid: event.callUUID,
                 callID: event.moduleCallID,
                 caller: event.callerNumber,
+                presentation: event.callerNumber == nil ? nil : 0,
                 confirmed: false,
                 completion: completion
             )
@@ -128,6 +136,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
         uuid: UUID? = nil,
         callID: UInt8,
         caller: String?,
+        presentation: UInt8? = nil,
         confirmed: Bool,
         completion: (() -> Void)? = nil
     ) {
@@ -136,31 +145,31 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
             return
         }
         if let existing = uuidByCallID[callID] {
+            let callerChanged = caller != nil && callerByCallID[callID] != caller
+            let presentationChanged = presentation != nil
+                && presentationByCallID[callID] != presentation
+            if callerChanged || presentationChanged {
+                if let caller { callerByCallID[callID] = caller }
+                if let presentation { presentationByCallID[callID] = presentation }
+                provider.reportCall(
+                    with: existing,
+                    updated: makeCallUpdate(caller: caller, presentation: presentation)
+                )
+            }
             if confirmed { confirm(existing) }
             completion?()
             return
         }
 
         let callUUID = uuid ?? UUID()
+        lifecycle.beginSystemCallAudio()
         callIDByUUID[callUUID] = callID
         uuidByCallID[callID] = callUUID
         if let caller { callerByCallID[callID] = caller }
+        if let presentation { presentationByCallID[callID] = presentation }
         if confirmed { confirm(callUUID) }
 
-        let update = CXCallUpdate()
-        if let caller, !caller.isEmpty {
-            update.remoteHandle = CXHandle(type: .phoneNumber, value: caller)
-            update.localizedCallerName = caller
-        } else {
-            update.remoteHandle = CXHandle(type: .generic, value: "DJOneHub")
-            update.localizedCallerName = "未知号码"
-        }
-        update.hasVideo = false
-        update.supportsDTMF = false
-        update.supportsGrouping = false
-        update.supportsHolding = false
-        update.supportsUngrouping = false
-
+        let update = makeCallUpdate(caller: caller, presentation: presentation)
         provider.reportNewIncomingCall(with: callUUID, update: update) { [weak self] error in
             Task { @MainActor in
                 guard let self else {
@@ -177,6 +186,23 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
                 completion?()
             }
         }
+    }
+
+    private func makeCallUpdate(caller: String?, presentation: UInt8?) -> CXCallUpdate {
+        let update = CXCallUpdate()
+        if let caller, !caller.isEmpty {
+            update.remoteHandle = CXHandle(type: .phoneNumber, value: caller)
+            update.localizedCallerName = caller
+        } else {
+            update.remoteHandle = CXHandle(type: .generic, value: "DJOneHub")
+            update.localizedCallerName = presentation == 1 ? "私人号码" : "未知号码"
+        }
+        update.hasVideo = false
+        update.supportsDTMF = false
+        update.supportsGrouping = false
+        update.supportsHolding = false
+        update.supportsUngrouping = false
+        return update
     }
 
     private func confirm(_ uuid: UUID) {
@@ -207,6 +233,8 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
         guard let callID = callIDByUUID.removeValue(forKey: uuid) else { return }
         uuidByCallID.removeValue(forKey: callID)
         callerByCallID.removeValue(forKey: callID)
+        presentationByCallID.removeValue(forKey: callID)
+        if callIDByUUID.isEmpty { lifecycle.endSystemCallAudio() }
     }
 }
 
@@ -259,14 +287,23 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
         callIDByUUID.removeAll()
         uuidByCallID.removeAll()
         callerByCallID.removeAll()
+        presentationByCallID.removeAll()
         confirmedUUIDs.removeAll()
         answeredUUIDs.removeAll()
         locallyEndedCallIDs.removeAll()
         isCallKitAudioActive = false
+        lifecycle.endSystemCallAudio()
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         guard let callID = callIDByUUID[action.callUUID] else {
+            action.fail()
+            return
+        }
+        do {
+            try lifecycle.prepareSystemCallAnswer()
+        } catch {
+            pushStateText = "无法配置系统通话音频：\(error.localizedDescription)"
             action.fail()
             return
         }
@@ -289,9 +326,11 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         isCallKitAudioActive = true
+        lifecycle.systemCallAudioDidActivate()
     }
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
         isCallKitAudioActive = false
+        lifecycle.systemCallAudioDidDeactivate()
     }
 }

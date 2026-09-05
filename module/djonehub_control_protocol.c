@@ -6,6 +6,7 @@
 #define FRAME_HELLO 1U
 #define FRAME_REQUEST 2U
 #define FRAME_RESPONSE 3U
+#define RESULT_EXTENSION_REMOTE_PARTY_NUMBERS 1U
 
 static void store_be16(uint8_t *output, uint16_t value)
 {
@@ -223,7 +224,7 @@ size_t djonehub_control_encode_request(
     if (key == NULL || nonce == NULL || output == NULL || request_id == 0U ||
         wire_operation == 0U ||
         !valid_operation_payload(operation, payload, payload_length) ||
-        payload_length > DJONEHUB_CONTROL_MAX_PAYLOAD) {
+        payload_length > DJONEHUB_CONTROL_MAX_REQUEST_PAYLOAD) {
         return 0U;
     }
     unsigned_length = DJONEHUB_CONTROL_HEADER_BYTES + payload_length;
@@ -255,7 +256,7 @@ int djonehub_control_decode_request(
         valid_header(frame, frame_length, FRAME_REQUEST, &payload_length,
                      &request_id) != 0 ||
         operation_from_wire(frame[6], &operation) != 0 || request_id == 0U ||
-        payload_length > DJONEHUB_CONTROL_MAX_PAYLOAD) {
+        payload_length > DJONEHUB_CONTROL_MAX_REQUEST_PAYLOAD) {
         return -1;
     }
     unsigned_length = DJONEHUB_CONTROL_HEADER_BYTES + (size_t)payload_length;
@@ -286,6 +287,8 @@ int djonehub_control_decode_request(
 static size_t encode_result_payload(const struct djonehub_control_result *result,
                                     uint8_t *output, size_t capacity)
 {
+    size_t extension_length = 1U;
+    size_t number_count = 0U;
     size_t required;
     size_t index;
 
@@ -293,6 +296,22 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         return 0U;
     }
     required = 4U + result->snapshot.count * 7U;
+    for (index = 0U; index < result->snapshot.count; ++index) {
+        const struct djonehub_voice_call *call = &result->snapshot.calls[index];
+
+        if (call->remote_number_present == 0U) {
+            continue;
+        }
+        if (call->remote_number_length >
+            DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES) {
+            return 0U;
+        }
+        ++number_count;
+        extension_length += 3U + call->remote_number_length;
+    }
+    if (number_count != 0U) {
+        required += 3U + extension_length;
+    }
     if (capacity < required || operation_to_wire(result->operation) == 0U) {
         return 0U;
     }
@@ -311,6 +330,30 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         record[4] = call->mode;
         record[5] = call->multipart;
         record[6] = call->als;
+    }
+    if (number_count != 0U) {
+        size_t offset = 4U + result->snapshot.count * 7U;
+
+        output[offset] = RESULT_EXTENSION_REMOTE_PARTY_NUMBERS;
+        store_be16(output + offset + 1U, (uint16_t)extension_length);
+        output[offset + 3U] = (uint8_t)number_count;
+        offset += 4U;
+        for (index = 0U; index < result->snapshot.count; ++index) {
+            const struct djonehub_voice_call *call =
+                &result->snapshot.calls[index];
+
+            if (call->remote_number_present == 0U) {
+                continue;
+            }
+            output[offset] = call->id;
+            output[offset + 1U] = call->remote_number_presentation;
+            output[offset + 2U] = (uint8_t)call->remote_number_length;
+            if (call->remote_number_length != 0U) {
+                memcpy(output + offset + 3U, call->remote_number,
+                       call->remote_number_length);
+            }
+            offset += 3U + call->remote_number_length;
+        }
     }
     return required;
 }
@@ -366,7 +409,7 @@ static int decode_result_payload(const uint8_t *payload, size_t length,
         return -1;
     }
     count = payload[3];
-    if (count > DJONEHUB_VOICE_MAX_CALLS || length != 4U + count * 7U) {
+    if (count > DJONEHUB_VOICE_MAX_CALLS || length < 4U + count * 7U) {
         return -1;
     }
     memset(result, 0, sizeof(*result));
@@ -387,6 +430,83 @@ static int decode_result_payload(const uint8_t *payload, size_t length,
         call->als = record[6];
         if (call->id == 0U) {
             return -1;
+        }
+    }
+    {
+        size_t offset = 4U + count * 7U;
+
+        while (offset < length) {
+            size_t extension_end;
+            size_t extension_length;
+            uint8_t extension_type;
+
+            if (length - offset < 3U) {
+                return -1;
+            }
+            extension_type = payload[offset];
+            extension_length = (size_t)load_be16(payload + offset + 1U);
+            offset += 3U;
+            if (extension_length > length - offset) {
+                return -1;
+            }
+            extension_end = offset + extension_length;
+            if (extension_type == RESULT_EXTENSION_REMOTE_PARTY_NUMBERS) {
+                uint8_t seen[256];
+                size_t number_count;
+                size_t number_index;
+
+                if (extension_length < 1U) {
+                    return -1;
+                }
+                memset(seen, 0, sizeof(seen));
+                number_count = (size_t)payload[offset++];
+                if (number_count > DJONEHUB_VOICE_MAX_CALLS) {
+                    return -1;
+                }
+                for (number_index = 0U; number_index < number_count;
+                     ++number_index) {
+                    struct djonehub_voice_call *call = NULL;
+                    size_t call_index;
+                    size_t number_length;
+                    uint8_t call_id;
+
+                    if (extension_end - offset < 3U) {
+                        return -1;
+                    }
+                    call_id = payload[offset];
+                    number_length = (size_t)payload[offset + 2U];
+                    if (number_length > extension_end - offset - 3U ||
+                        number_length >
+                            DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES ||
+                        call_id == 0U || seen[call_id] != 0U) {
+                        return -1;
+                    }
+                    seen[call_id] = 1U;
+                    for (call_index = 0U; call_index < count; ++call_index) {
+                        if (result->snapshot.calls[call_index].id == call_id) {
+                            call = &result->snapshot.calls[call_index];
+                            break;
+                        }
+                    }
+                    if (call == NULL) {
+                        return -1;
+                    }
+                    call->remote_number_present = 1U;
+                    call->remote_number_presentation = payload[offset + 1U];
+                    call->remote_number_length = number_length;
+                    if (number_length != 0U) {
+                        memcpy(call->remote_number, payload + offset + 3U,
+                               number_length);
+                    }
+                    call->remote_number[number_length] = '\0';
+                    offset += 3U + number_length;
+                }
+                if (offset != extension_end) {
+                    return -1;
+                }
+            } else {
+                offset = extension_end;
+            }
         }
     }
     return 0;

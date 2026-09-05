@@ -46,6 +46,62 @@ final class CallAudioCoordinator: ObservableObject {
     private var interruptedRouteRetryNotBefore: ContinuousClock.Instant?
     private let recordingController = CallRecordingController()
     private var recordingTimerTask: Task<Void, Never>?
+    private var callKitOwnership = CallKitAudioOwnership.app
+
+    var canStartSystemCallAudio: Bool { callKitOwnership.canStartMedia }
+
+    func beginSystemCallAudio() {
+        guard !callKitOwnership.isSystemManaged else { return }
+        callKitOwnership.begin()
+        suspendSystemCallAudio()
+        trace("CallKit owns session; waiting for didActivate")
+    }
+
+    func prepareSystemCallAnswer() throws {
+        // Configure the session before fulfilling CXAnswerCallAction. CallKit
+        // activates it; media starts only after didActivate and fresh STATUS.
+        try configureCallAudioSession()
+    }
+
+    func systemCallAudioDidActivate() {
+        guard callKitOwnership.isSystemManaged else { return }
+        callKitOwnership.activate()
+        resetRouteRecoveryTracking()
+        isInterrupted = false
+        trace("CallKit didActivate route=\(routeSummary)")
+        requestRecovery("CallKit 已激活音频，正在确认通话状态")
+    }
+
+    func systemCallAudioDidDeactivate() {
+        guard callKitOwnership.isSystemManaged else { return }
+        callKitOwnership.deactivate()
+        suspendSystemCallAudio()
+        trace("CallKit didDeactivate; media suspended")
+    }
+
+    func endSystemCallAudio() {
+        guard callKitOwnership.isSystemManaged else { return }
+        stop()
+        callKitOwnership = .app
+        isInterrupted = false
+        trace("CallKit session released")
+    }
+
+    private func suspendSystemCallAudio() {
+        resetRouteRecoveryTracking()
+        stopRecording()
+        startGeneration &+= 1
+        hasActiveRequest = false
+        isRunning = false
+        isMediaEnabled = false
+        isUplinkEnabled = false
+        isDownlinkEnabled = false
+        isLocalRingbackEnabled = false
+        isAwaitingRecovery = false
+        tearDownAudio(deactivateSession: false, clearOutputOverride: false)
+        stateText = "等待系统通话音频"
+        detailText = "CallKit 激活音频后恢复 PCM"
+    }
 
     init() {
         observeAudioSession()
@@ -67,8 +123,10 @@ final class CallAudioCoordinator: ObservableObject {
         downlinkEnabled: Bool = true,
         localRingbackEnabled: Bool = false
     ) {
+        trace("start requested uplink=\(uplinkEnabled) downlink=\(downlinkEnabled) ringback=\(localRingbackEnabled) route=\(routeSummary)")
         guard !isRunning,
               !hasActiveRequest,
+              callKitOwnership.canStartMedia,
               !isInterrupted,
               routeSettleTask == nil,
               !routeRecoveryState.isRecoveryPending else { return }
@@ -132,6 +190,7 @@ final class CallAudioCoordinator: ObservableObject {
                       self.startGeneration == generation,
                       self.hasActiveRequest else { return }
                 guard granted else {
+                    self.trace("microphone permission denied")
                     self.startGeneration &+= 1
                     self.tearDownAudio(deactivateSession: false)
                     self.hasActiveRequest = false
@@ -140,6 +199,7 @@ final class CallAudioCoordinator: ObservableObject {
                     return
                 }
                 guard !self.isInterrupted else {
+                    self.trace("start cancelled because audio session is interrupted")
                     self.startGeneration &+= 1
                     self.tearDownAudio(deactivateSession: false)
                     self.hasActiveRequest = false
@@ -165,6 +225,7 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     func stop(reason: String? = nil) {
+        trace("stop reason=\(reason ?? "normal") sent=\(sentFrames) received=\(receivedFrames)")
         stopRecording()
         resetRouteRecoveryTracking()
         startGeneration &+= 1
@@ -252,7 +313,7 @@ final class CallAudioCoordinator: ObservableObject {
         if clearOutputOverride {
             try? session.overrideOutputAudioPort(.none)
         }
-        if deactivateSession {
+        if deactivateSession && !callKitOwnership.isSystemManaged {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
@@ -260,6 +321,8 @@ final class CallAudioCoordinator: ObservableObject {
     func startTestTone(pairingKey: Data) {
         guard !isRunning,
               !hasActiveRequest,
+              callKitOwnership.canStartMedia,
+              !isInterrupted,
               routeSettleTask == nil,
               !routeRecoveryState.isRecoveryPending else { return }
         guard pairingKey.count == 32 else {
@@ -304,10 +367,13 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func startAuthorized(generation: UInt64) {
         guard !isInterrupted,
+              callKitOwnership.canStartMedia,
               startGeneration == generation,
               hasActiveRequest else { return }
         do {
+            trace("activating audio route before=\(routeSummary)")
             try activateBuiltInCallRoute()
+            trace("audio route activated after=\(routeSummary)")
 
             let engine = AVAudioEngine()
             let input = engine.inputNode
@@ -339,6 +405,7 @@ final class CallAudioCoordinator: ObservableObject {
             }
             engine.prepare()
             try engine.start()
+            trace("audio engine started input=\(inputFormat.sampleRate)Hz/\(inputFormat.channelCount)ch")
 
             self.engine = engine
             self.converter = converter
@@ -366,6 +433,7 @@ final class CallAudioCoordinator: ObservableObject {
             downlinkPlayer.setLocalRingbackEnabled(localRingbackEnabled)
             applyMediaState(uplink: uplinkEnabled, downlink: downlinkEnabled)
         } catch {
+            trace("audio start failed: \(error.localizedDescription) route=\(routeSummary)")
             resetRouteRecoveryTracking()
             startGeneration &+= 1
             pipeline?.stop()
@@ -377,7 +445,9 @@ final class CallAudioCoordinator: ObservableObject {
             networkFormat = nil
             engine = nil
             try? session.overrideOutputAudioPort(.none)
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            if !callKitOwnership.isSystemManaged {
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            }
             isRunning = false
             isMediaEnabled = false
             isUplinkEnabled = false
@@ -407,6 +477,7 @@ final class CallAudioCoordinator: ObservableObject {
                     guard let self,
                           self.startGeneration == generation,
                           self.isRunning else { return }
+                    self.trace("transport state=\(state)")
                     if self.desiredUplinkEnabled && self.desiredDownlinkEnabled {
                         self.stateText = state
                     } else if self.desiredDownlinkEnabled {
@@ -423,6 +494,9 @@ final class CallAudioCoordinator: ObservableObject {
                           self.isRunning else { return }
                     self.sentFrames = frames
                     self.inputLevel = peak
+                    if frames != 0, frames.isMultiple(of: 250) {
+                        self.trace("uplink frames=\(frames) peak=\(String(format: "%.3f", peak))")
+                    }
                 }
             },
             onUplinkFrame: { pcm in
@@ -442,6 +516,9 @@ final class CallAudioCoordinator: ObservableObject {
                           self.desiredDownlinkEnabled else { return }
                     self.receivedFrames = frames
                     self.downlinkLevel = peak
+                    if frames != 0, frames.isMultiple(of: 250) {
+                        self.trace("downlink frames=\(frames) peak=\(String(format: "%.3f", peak))")
+                    }
                 }
             },
             onError: { [weak self] error in
@@ -449,6 +526,7 @@ final class CallAudioCoordinator: ObservableObject {
                     guard let self,
                           self.startGeneration == generation,
                           self.isRunning || self.hasActiveRequest else { return }
+                    self.trace("transport error=\(error)")
                     self.stop()
                     self.requestRecovery(error)
                     self.stateText = "PCM 发送失败，准备恢复"
@@ -479,6 +557,9 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func applyMediaState(uplink: Bool, downlink: Bool) {
+        if isUplinkEnabled != uplink || isDownlinkEnabled != downlink {
+            trace("media applied uplink=\(uplink) downlink=\(downlink)")
+        }
         isUplinkEnabled = uplink
         isDownlinkEnabled = downlink
         isLocalRingbackEnabled = desiredLocalRingbackEnabled && downlink
@@ -586,6 +667,7 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func handleRouteChange(_ notification: Notification) {
         let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+        trace("route changed reason=\(Self.routeChangeReason(rawReason)) route=\(routeSummary) interrupted=\(isInterrupted)")
         if isInterrupted {
             let retryWindowIsOpen = interruptedRouteRetryNotBefore.map {
                 ContinuousClock.now >= $0
@@ -642,6 +724,7 @@ final class CallAudioCoordinator: ObservableObject {
 
     private func pauseForRouteRecovery(reason: String) {
         guard hasAudioResources else { return }
+        trace("pausing for route recovery reason=\(reason) route=\(routeSummary)")
         stopRecording()
         startGeneration &+= 1
         isRunning = false
@@ -676,7 +759,7 @@ final class CallAudioCoordinator: ObservableObject {
             && session.currentRoute.outputs.contains { $0.portType == .builtInSpeaker }
     }
 
-    private func activateBuiltInCallRoute() throws {
+    private func configureCallAudioSession() throws {
         try session.setCategory(
             .playAndRecord,
             mode: .voiceChat,
@@ -684,7 +767,11 @@ final class CallAudioCoordinator: ObservableObject {
         )
         try session.setPreferredSampleRate(48_000)
         try session.setPreferredIOBufferDuration(0.016)
-        try session.setActive(true)
+    }
+
+    private func activateBuiltInCallRoute() throws {
+        try configureCallAudioSession()
+        if !callKitOwnership.isSystemManaged { try session.setActive(true) }
         if let builtInMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try session.setPreferredInput(builtInMic)
         }
@@ -715,6 +802,8 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func retryInterruptedRoute(reason: String) {
+        // Do not compete with CallKit for activation while it owns the call.
+        guard !callKitOwnership.isSystemManaged else { return }
         do {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             try activateBuiltInCallRoute()
@@ -739,6 +828,7 @@ final class CallAudioCoordinator: ObservableObject {
     private func handleInterruption(_ notification: Notification) {
         guard let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
+        trace("interruption type=\(type.rawValue) route=\(routeSummary)")
 
         switch type {
         case .began:
@@ -808,6 +898,7 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func requestRecovery(_ reason: String) {
+        trace("recovery requested reason=\(reason)")
         recoveryGeneration &+= 1
         isAwaitingRecovery = true
         stateText = "等待恢复通话音频"
@@ -829,6 +920,18 @@ final class CallAudioCoordinator: ObservableObject {
         case .unknown: return "未知音频路由变化"
         @unknown default: return "未来音频路由变化 \(rawValue)"
         }
+    }
+
+    private var routeSummary: String {
+        let inputs = session.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        return "in=[\(inputs)] out=[\(outputs)]"
+    }
+
+    private func trace(_ message: String) {
+#if DEBUG
+        print("DJOneHubAudio \(message)")
+#endif
     }
 
     private static func canRetryInterruptedRoute(after rawValue: UInt) -> Bool {

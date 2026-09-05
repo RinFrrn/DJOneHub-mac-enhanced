@@ -211,6 +211,23 @@ static int test_response(void)
     CHECK(decoded.snapshot.count == 1U);
     CHECK(decoded.snapshot.calls[0].state == 3U);
 
+    encoded.snapshot.calls[0].remote_number_present = 1U;
+    encoded.snapshot.calls[0].remote_number_presentation = 0U;
+    encoded.snapshot.calls[0].remote_number_length = 14U;
+    memcpy(encoded.snapshot.calls[0].remote_number, "+8613800138000", 14U);
+    length = djonehub_control_encode_response(
+        key, nonce, DJONEHUB_CONTROL_OK, 46U, &encoded, frame,
+        sizeof(frame));
+    CHECK(length != 0U);
+    CHECK(djonehub_control_decode_response(key, nonce, frame, length, &status,
+                                           &request_id, &decoded) == 0);
+    CHECK(request_id == 46U);
+    CHECK(decoded.snapshot.calls[0].remote_number_present == 1U);
+    CHECK(decoded.snapshot.calls[0].remote_number_presentation == 0U);
+    CHECK(decoded.snapshot.calls[0].remote_number_length == 14U);
+    CHECK(strcmp(decoded.snapshot.calls[0].remote_number,
+                 "+8613800138000") == 0);
+
     memset(&encoded, 0, sizeof(encoded));
     encoded.operation = DJONEHUB_USB_AUDIO;
     encoded.action_call_id = 0U;

@@ -6,6 +6,7 @@
 
 #define DJONEHUB_VOICE_MAX_CALLS 8U
 #define DJONEHUB_VOICE_MAX_NUMBER_BYTES 81U
+#define DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES 81U
 
 struct djonehub_voice_call {
     uint8_t id;
@@ -15,6 +16,10 @@ struct djonehub_voice_call {
     uint8_t mode;
     uint8_t multipart;
     uint8_t als;
+    uint8_t remote_number_present;
+    uint8_t remote_number_presentation;
+    size_t remote_number_length;
+    char remote_number[DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES + 1U];
 };
 
 struct djonehub_voice_snapshot {

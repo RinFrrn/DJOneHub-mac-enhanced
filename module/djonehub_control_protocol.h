@@ -12,14 +12,17 @@
 #define DJONEHUB_CONTROL_HEADER_BYTES 20U
 #define DJONEHUB_CONTROL_NONCE_BYTES 32U
 #define DJONEHUB_CONTROL_TAG_BYTES 32U
-#define DJONEHUB_CONTROL_MAX_PAYLOAD DJONEHUB_VOICE_MAX_NUMBER_BYTES
+#define DJONEHUB_CONTROL_MAX_REQUEST_PAYLOAD DJONEHUB_VOICE_MAX_NUMBER_BYTES
 #define DJONEHUB_CONTROL_HELLO_BYTES                                      \
     (DJONEHUB_CONTROL_HEADER_BYTES + DJONEHUB_CONTROL_NONCE_BYTES)
+#define DJONEHUB_CONTROL_SNAPSHOT_BYTES                                  \
+    (4U + DJONEHUB_VOICE_MAX_CALLS * 7U + 3U + 1U +                     \
+     DJONEHUB_VOICE_MAX_CALLS *                                         \
+         (3U + DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES))
+#define DJONEHUB_CONTROL_MAX_PAYLOAD DJONEHUB_CONTROL_SNAPSHOT_BYTES
 #define DJONEHUB_CONTROL_MAX_FRAME_BYTES                                 \
     (DJONEHUB_CONTROL_HEADER_BYTES + DJONEHUB_CONTROL_MAX_PAYLOAD +       \
      DJONEHUB_CONTROL_TAG_BYTES)
-#define DJONEHUB_CONTROL_SNAPSHOT_BYTES                                  \
-    (4U + DJONEHUB_VOICE_MAX_CALLS * 7U)
 
 enum djonehub_control_status {
     DJONEHUB_CONTROL_OK = 0,
@@ -36,7 +39,7 @@ struct djonehub_control_request {
     enum djonehub_voice_operation operation;
     uint64_t request_id;
     size_t payload_length;
-    uint8_t payload[DJONEHUB_CONTROL_MAX_PAYLOAD];
+    uint8_t payload[DJONEHUB_CONTROL_MAX_REQUEST_PAYLOAD];
 };
 
 struct djonehub_control_result {

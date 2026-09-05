@@ -232,14 +232,22 @@ func voiceTestCheckLink(adb *adbClient) (string, error) {
 }
 
 func stopOwnedVoiceTestProcess(adb *adbClient, pidFile, binary string) error {
-	command := "if test -s '" + pidFile + "'; then " +
-		"read pid < '" + pidFile + "' || true; " +
-		"case \"$pid\" in ''|*[!0-9]*) true;; *) " +
-		"owned() { test -d \"/proc/$pid\" && " +
-		"test \"$(tr '\\000' '\\n' < \"/proc/$pid/cmdline\" 2>/dev/null | sed -n '1p')\" = '" + binary + "'; }; " +
-		"if owned; then kill -TERM \"$pid\" 2>/dev/null || true; " +
-		"attempt=0; while owned && test \"$attempt\" -lt 30; do sleep 0.1; attempt=$((attempt + 1)); done; " +
-		"owned && exit 1 || true; fi;; esac; fi; rm -f '" + pidFile + "'"
+	// A sudden power loss can remove /run before the process has exited, leaving
+	// an owned daemon alive without its PID file.  Scan /proc as a fallback and
+	// only signal processes whose argv[0] exactly matches our deployed binary.
+	command := "pids=''; for proc in /proc/[0-9]*; do " +
+		"test -r \"$proc/cmdline\" || continue; " +
+		"argv0=$(tr '\\000' '\\n' < \"$proc/cmdline\" 2>/dev/null | sed -n '1p'); " +
+		"if test \"$argv0\" = '" + binary + "'; then pid=${proc#/proc/}; " +
+		"case \"$pid\" in ''|*[!0-9]*) continue;; esac; pids=\"$pids $pid\"; fi; done; " +
+		"for pid in $pids; do kill -TERM \"$pid\" 2>/dev/null || true; done; " +
+		"attempt=0; while test \"$attempt\" -lt 30; do alive=0; for pid in $pids; do " +
+		"test -d \"/proc/$pid\" && " +
+		"test \"$(tr '\\000' '\\n' < \"/proc/$pid/cmdline\" 2>/dev/null | sed -n '1p')\" = '" + binary + "' && alive=1; done; " +
+		"test \"$alive\" = 0 && break; sleep 0.1; attempt=$((attempt + 1)); done; " +
+		"failed=0; for pid in $pids; do test ! -d \"/proc/$pid\" || " +
+		"test \"$(tr '\\000' '\\n' < \"/proc/$pid/cmdline\" 2>/dev/null | sed -n '1p')\" != '" + binary + "' || failed=1; done; " +
+		"test \"$failed\" = 0 && rm -f '" + pidFile + "'"
 	return sentinelShell(adb, command, 8*time.Second)
 }
 
@@ -474,7 +482,7 @@ func readVoiceControlFrame(connection net.Conn, expectedType byte) ([]byte, erro
 		return nil, err
 	}
 	_, payloadLength, _, err := validateVoiceControlHeader(header, expectedType)
-	if err != nil || payloadLength > voiceControlMaxPayload {
+	if err != nil || payloadLength > voiceControlMaxResponsePayload {
 		return nil, errors.New("控制响应帧头或长度无效")
 	}
 	extra := int(payloadLength)
