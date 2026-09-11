@@ -82,6 +82,9 @@ static struct qmi_voice_context qmi_context = {
 
 static void qmi_phase(const char *text)
 {
+#ifdef DJONEHUB_QMI_QUIET
+    (void)text;
+#else
     size_t length = 0U;
     ssize_t ignored;
 
@@ -91,6 +94,7 @@ static void qmi_phase(const char *text)
     do {
         ignored = write(STDERR_FILENO, text, length);
     } while (ignored < 0 && errno == EINTR);
+#endif
 }
 
 static int load_symbol(void *library, const char *name, void *target,

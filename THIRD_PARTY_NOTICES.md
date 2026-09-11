@@ -52,3 +52,18 @@ The source repository includes vendored dependencies under `third_party/` so the
 | multierr | `third_party/multierr/LICENSE.txt` |
 
 Dependencies fetched through Go modules retain their own licenses and copyright notices. This file is informational and does not replace any component's full license text.
+
+## Optional module notification sender
+
+`cmd/djonehub-notify` uses the following Go modules for standard Web Push. Their
+versions are pinned in `go.mod` / `go.sum`; no Bark client code is copied.
+
+| Component | License | Source |
+| --- | --- | --- |
+| webpush-go v1.4.0 | MIT | https://github.com/SherClockHolmes/webpush-go |
+| golang-jwt/jwt/v5 v5.2.1 | MIT | https://github.com/golang-jwt/jwt |
+| golang.org/x/crypto | BSD-3-Clause | https://go.googlesource.com/crypto |
+
+Distributions of the module sender must include the corresponding license texts
+alongside the binary. A CA certificate bundle, if supplied, retains its source's
+license and must be maintained separately from notification credentials.

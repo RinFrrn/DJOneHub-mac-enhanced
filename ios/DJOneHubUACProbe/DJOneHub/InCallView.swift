@@ -177,6 +177,15 @@ struct SettingsView: View {
                     Button(voiceControl.isConfigured ? "替换模块配对" : "导入模块配对") {
                         voiceControl.isImportingPairing = true
                     }
+                    if voiceControl.canControlCalls {
+                        NavigationLink {
+                            ModuleNotificationSettingsView(
+                                pairingKey: voiceControl.pairingKeyForUplinkProbe()
+                            )
+                        } label: {
+                            Label("提醒设置", systemImage: "bell.badge")
+                        }
+                    }
                     if voiceControl.isConfigured {
                         Button("删除 iPhone 本机配对", role: .destructive) {
                             isConfirmingUnpair = true
@@ -235,7 +244,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Text("当前版本通过 USB ECM 控制 QDC507 并传输电话 PCM，不使用 USB Audio。CallKit 本地来电链已接入，远程唤醒仍需 APNs Relay 和模块来电 indication。")
+                    Text("当前版本通过 USB ECM 控制 QDC507 并传输电话 PCM，不使用 USB Audio。Bark 与 Web Push 可在 App 未运行时提醒；要直接唤起原生 CallKit 接听页，仍需 VoIP APNs。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

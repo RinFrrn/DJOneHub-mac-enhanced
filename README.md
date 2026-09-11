@@ -17,6 +17,7 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 - [iOS 网关阶段 A 实施状态](docs/mavo-ios-gateway-implementation-status.md)
 - [iPhone USB Audio 真机探针](ios/DJOneHubUACProbe/README.md)
 - [QDC507 全量备份、EDL 排障与 SBL 恢复报告](docs/qdc507-backup-edl-sbl-recovery-report.md)
+- [模块端 Bark 与 Web Push 提醒](docs/module-notifications.md)
 
 主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.11 章节为准。
 

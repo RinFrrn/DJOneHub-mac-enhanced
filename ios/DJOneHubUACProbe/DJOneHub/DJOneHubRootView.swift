@@ -21,21 +21,40 @@ struct DJOneHubRootView: View {
     @State private var isConfirmingUnpair = false
     @State private var isConfirmingRecording = false
     @State private var isShowingSettings = false
+    @State private var isShowingNotificationSettings = false
+    @State private var openSettingsAfterNotificationDismiss = false
     @State private var suppressedAutomaticRecordingCallID: UInt8?
 
     var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
-                RecentsView(onDial: prepareNumber, onSettings: showSettings)
+                RecentsView(
+                    onDial: prepareNumber,
+                    onNotifications: showNotificationSettings,
+                    onSettings: showSettings
+                )
                     .tag(PhoneTab.recents)
                     .tabItem { Label("最近通话", systemImage: "clock.fill") }
-                ContactsView(onDial: prepareNumber, onSettings: showSettings)
+                ContactsView(
+                    onDial: prepareNumber,
+                    onNotifications: showNotificationSettings,
+                    onSettings: showSettings
+                )
                     .tag(PhoneTab.contacts)
                     .tabItem { Label("通讯录", systemImage: "person.crop.circle.fill") }
-                KeypadView(onCall: { isConfirmingDial = true }, onSettings: showSettings)
+                KeypadView(
+                    onCall: { isConfirmingDial = true },
+                    onNotifications: showNotificationSettings,
+                    onSettings: showSettings
+                )
                     .tag(PhoneTab.keypad)
                     .tabItem { Label("拨号键盘", systemImage: "circle.grid.3x3.fill") }
-                MessagesView(sms: sms, onRefresh: refreshSMS, onSettings: showSettings)
+                MessagesView(
+                    sms: sms,
+                    onRefresh: refreshSMS,
+                    onNotifications: showNotificationSettings,
+                    onSettings: showSettings
+                )
                     .tag(PhoneTab.messages)
                     .tabItem { Label("信息", systemImage: "message.fill") }
                     .badge(sms.unreadCount)
@@ -77,6 +96,26 @@ struct DJOneHubRootView: View {
                 isConfirmingUnpair: $isConfirmingUnpair,
                 dismiss: { isShowingSettings = false }
             )
+        }
+        .sheet(
+            isPresented: $isShowingNotificationSettings,
+            onDismiss: {
+                if openSettingsAfterNotificationDismiss {
+                    openSettingsAfterNotificationDismiss = false
+                    isShowingSettings = true
+                }
+            }
+        ) {
+            NavigationStack {
+                ModuleNotificationSettingsView(
+                    pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                    dismiss: { isShowingNotificationSettings = false },
+                    openModuleSettings: {
+                        openSettingsAfterNotificationDismiss = true
+                        isShowingNotificationSettings = false
+                    }
+                )
+            }
         }
         .fileImporter(
             isPresented: $voiceControl.isImportingPairing,
@@ -134,6 +173,8 @@ struct DJOneHubRootView: View {
     }
 
     private func showSettings() { isShowingSettings = true }
+
+    private func showNotificationSettings() { isShowingNotificationSettings = true }
 
     private func refreshSMS() {
         guard !sms.isLoading else { return }

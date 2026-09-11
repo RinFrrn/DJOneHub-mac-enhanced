@@ -25,6 +25,27 @@ $PROJECT_DIR/module/djonehub_sms_protocol.c
 $PROJECT_DIR/module/djonehub_crypto.c
 "
 
+BINARY_BASE=djonehub-sms-daemon
+AUDIT_LISTEN=192.168.225.1:45752
+AUDIT_SCOPE=status/list/read/send-raw/delete
+case ${DJONEHUB_QMI_BUILD_TARGET:-sms} in
+    sms) ;;
+    notify-monitor)
+        BINARY_BASE=djonehub-notify-monitor
+        AUDIT_LISTEN=none
+        AUDIT_SCOPE=read-only-voice-status-and-sms-list-read
+        SOURCES="
+$PROJECT_DIR/module/djonehub_notify_monitor.c
+$PROJECT_DIR/module/djonehub_qmi_voice_engine.c
+$PROJECT_DIR/module/djonehub_voice_codec.c
+$PROJECT_DIR/module/djonehub_voice_policy.c
+$PROJECT_DIR/module/djonehub_qmi_wms_engine.c
+$PROJECT_DIR/module/djonehub_wms_codec.c
+"
+        ;;
+    *) printf '%s\n' 'unknown QMI build target' >&2; exit 2 ;;
+esac
+
 require_tool()
 {
     command -v "$1" >/dev/null 2>&1 || {
@@ -59,6 +80,10 @@ audit_binary()
         printf '%s\n' 'QDC507 loader requires a SysV hash table' >&2
         return 1
     fi
+    if "$READELF" --dyn-syms --wide "$binary" | grep -Eq '[[:space:]](stdin|stdout|stderr)(@|$)'; then
+        printf '%s\n' 'standard-stream data relocation is incompatible with QDC507' >&2
+        return 1
+    fi
     "$READELF" --version-info "$binary" |
         grep -o 'GLIBC_[0-9][0-9.]*' |
         sort -u |
@@ -83,11 +108,14 @@ build_local()
     require_tool sha256sum
     mkdir -p "$OUT_DIR"
 
-    debug_binary="$OUT_DIR/djonehub-sms-daemon.armv7.debug"
-    release_binary="$OUT_DIR/djonehub-sms-daemon.armv7"
-    audit_report="$OUT_DIR/djonehub-sms-daemon.armv7.audit.txt"
-    checksum_file="$OUT_DIR/djonehub-sms-daemon.armv7.sha256"
+    debug_binary="$OUT_DIR/$BINARY_BASE.armv7.debug"
+    release_binary="$OUT_DIR/$BINARY_BASE.armv7"
+    audit_report="$OUT_DIR/$BINARY_BASE.armv7.audit.txt"
+    checksum_file="$OUT_DIR/$BINARY_BASE.armv7.sha256"
     common_flags="-std=c11 -O2 -g -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon -fno-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 -U_TIME_BITS -U_FILE_OFFSET_BITS -ffile-prefix-map=$PROJECT_DIR=/usr/src/djonehub -fdebug-prefix-map=$PROJECT_DIR=/usr/src/djonehub -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes -Wundef -Werror"
+    if [ "$BINARY_BASE" = djonehub-notify-monitor ]; then
+        common_flags="$common_flags -DDJONEHUB_QMI_QUIET"
+    fi
 
     # shellcheck disable=SC2086
     "$CC" $common_flags -pthread -fsyntax-only $SOURCES
@@ -101,8 +129,8 @@ build_local()
 
     {
         printf 'target=ARMv7 EABI5 soft-float\n'
-        printf 'listen=192.168.225.1:45752\n'
-        printf 'scope=status/list/read/send-raw/delete\n'
+        printf 'listen=%s\n' "$AUDIT_LISTEN"
+        printf 'scope=%s\n' "$AUDIT_SCOPE"
         printf 'arbitrary_at_or_qmi=false\n'
         printf 'maximum_glibc=2.22\n'
         for source in $SOURCES; do
@@ -133,6 +161,7 @@ build_container()
         -e OUT_DIR=/out \
         -e HOST_UID="$host_uid" \
         -e HOST_GID="$host_gid" \
+        -e DJONEHUB_QMI_BUILD_TARGET="${DJONEHUB_QMI_BUILD_TARGET:-sms}" \
         -v "$PROJECT_DIR:/src:ro" \
         -v "$OUT_DIR:/out" \
         "$BUILDER_IMAGE" sh -ec '

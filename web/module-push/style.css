@@ -1,0 +1,30 @@
+:root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fa; color: #172231; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: max(36px, env(safe-area-inset-top)) 22px max(32px, env(safe-area-inset-bottom)); }
+main { max-width: 500px; margin: 0 auto; }
+.mark { border-radius: 16px; }
+.eyebrow { color: #586577; font-size: 12px; font-weight: 650; letter-spacing: .16em; margin: 22px 0 12px; }
+h1 { font-size: clamp(32px, 8vw, 42px); letter-spacing: -.035em; line-height: 1.18; margin: 0 0 16px; }
+.intro { color: #536175; line-height: 1.7; margin-bottom: 28px; }
+section { background: #fff; border: 1px solid #e1e6ed; border-radius: 22px; padding: 24px; }
+h2 { margin: 0 0 18px; font-size: 20px; }
+ol { padding-left: 21px; font-size: 14px; line-height: 1.7; color: #536175; }
+li { margin-bottom: 10px; }
+label { display: block; margin: 24px 0 10px; font-size: 14px; font-weight: 600; }
+textarea { width: 100%; resize: vertical; border: 1px solid #cdd5e0; border-radius: 12px; padding: 12px; font: 14px ui-monospace, monospace; background: #f9fafc; color: inherit; overflow-wrap: anywhere; }
+textarea:focus-visible, button:focus-visible { outline: 3px solid #8db8ff; outline-offset: 3px; }
+.hint, .privacy { font-size: 12px; line-height: 1.7; color: #647286; }
+.privacy { padding: 4px 5px; margin-top: 22px; }
+button { min-height: 46px; width: 100%; border: 0; border-radius: 12px; background: #1463df; color: white; font: inherit; font-weight: 600; padding: 12px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+.actions { display: flex; gap: 10px; margin-top: 10px; }
+.secondary { background: #edf3fd; color: #195aba; font-size: 13px; }
+#status { font-size: 13px; line-height: 1.65; margin-bottom: 0; overflow-wrap: anywhere; }
+.text-button { background: transparent; color: #647286; font-size: 13px; font-weight: 400; }
+@media (prefers-color-scheme: dark) {
+  :root { background: #101722; color: #edf2f9; }
+  section { background: #192332; border-color: #2b3b50; }
+  .intro, ol, .eyebrow, .hint, .privacy, .text-button { color: #a8b7cb; }
+  textarea { background: #111b29; border-color: #405168; }
+  .secondary { background: #243b5d; color: #b0d0ff; }
+}

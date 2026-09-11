@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct ProductToolbar: ToolbarContent {
+    let onNotifications: () -> Void
     let onSettings: () -> Void
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button("提醒", systemImage: "bell.badge", action: onNotifications)
             Button("设置", systemImage: "gearshape", action: onSettings)
         }
     }
@@ -43,6 +45,7 @@ struct KeypadView: View {
     private var automaticCallRecordingEnabled = false
 
     let onCall: () -> Void
+    let onNotifications: () -> Void
     let onSettings: () -> Void
 
     private let keys: [(digit: String, letters: String)] = [
@@ -157,7 +160,7 @@ struct KeypadView: View {
                 ToolbarItem(placement: .principal) {
                     ConnectionPill()
                 }
-                ProductToolbar(onSettings: onSettings)
+                ProductToolbar(onNotifications: onNotifications, onSettings: onSettings)
             }
         }
     }
