@@ -1,466 +1,182 @@
-# DJOneHub
+# DJOneHub for iOS
 
-> 让大疆第一代 4G 模块成为 Mac 上长期可用的实体 SIM 终端。
+> 把大疆第一代 4G 模块接到 iPhone，在手机上使用模块中的 SIM 接打电话、查看短信。
 
-DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供短信、4G、GPS、eSIM、来电及通话控制，不修改模块固件。
+DJOneHub 是一个围绕 QDC507 模块开发的非官方项目。iOS App 通过 USB 网络直接与模块通信，电话控制和双向语音都在 iPhone 与模块之间完成，通话期间不需要 Mac 中转。
 
-## 文档导航
+项目目标是：**首次用 Mac 完成模块配置，之后只用 iPhone。** 当前已完成 iPhone 通话闭环，模块提醒和长期授权正在逐步接入；首次部署及现有开发配对的维护仍需要 Mac。
 
-- [当前版本与更新](#v1211通话建立阶段动态轮询)
-- [版本演进](#版本演进)
-- [下载与安装](#下载与平台状态)
-- [完整使用说明](#完整使用说明)
-- [常用命令](#常用命令)
-- [日志卸载与故障排查](#日志与本地数据)
-- [从源码构建](#从源码构建)
-- [iOS 模块侧电话网关设计](docs/ios-module-gateway-design.md)
-- [iOS 网关阶段 A 实施状态](docs/mavo-ios-gateway-implementation-status.md)
-- [iPhone USB Audio 真机探针](ios/DJOneHubUACProbe/README.md)
-- [QDC507 全量备份、EDL 排障与 SBL 恢复报告](docs/qdc507-backup-edl-sbl-recovery-report.md)
-- [模块端 Bark 与 Web Push 提醒](docs/module-notifications.md)
-- [iOS 通话音频设备切换计划（待实施）](docs/ios-call-audio-routing-plan.md)
-- [iOS 模块连接提速计划（待实施）](docs/ios-module-connection-speed-plan.md)
-- [模块长期授权与脱离 Mac：实现状态及迁移条件](docs/module-authorization-lifecycle.md)
+## 已经做到了什么
 
-主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.11 章节为准。
+### 在 iPhone 上接打电话
 
-## v1.2.11：通话建立阶段动态轮询
+- 拨号、接听、拒接和挂断，提供全屏来电与通话界面。
+- iPhone 内置麦克风与扬声器承载双向语音，无需手动启动音频探针。
+- 拨号和接听时自动预热音频；接通前不发送麦克风内容，接通后开启双向语音。
+- 支持上行静音、本地通话录音及自动录音选项，录音关联到通话记录。
+- 提供最近通话、通讯录、拨号键盘和信息四个主入口。
 
-v1.2.11 源码已更新；安装包发布状态请查看 [RinFrrn fork 的 Releases](https://github.com/RinFrrn/DJOneHub-mac-enhanced/releases)。
+**已有真机验证：** 主动拨号、来电接听与拒接、双向语音、连续重拨、通话中切换到其他 App、锁屏与解锁后持续通话，以及模块拔插后的重新连接。
 
-### 更快识别接通状态
+当前音频使用内置麦克风和扬声器。听筒、扬声器与蓝牙耳机的主动切换尚未完成，不能把“蓝牙连接不影响通话”理解为“已支持通过蓝牙耳机通话”。
 
-- 空闲及已接通阶段继续以 1 秒间隔查询 `AT+CLCC`，避免长期占用共享 AT 通道。
-- `dialing`、`alerting`、`incoming`、`waiting` 建链阶段临时提升为 250 毫秒轮询，减少蜂窝网络已经接通、App 尚未切换到通话中的等待时间。
-- `ATD`、`ATA` 和 `ATH` 成功后立即唤醒通话轮询器，不必等待当前定时器自然到期；重复唤醒会合并为一个待处理信号，避免并发发送 `AT+CLCC`。
-- 进入 `active` 或回到空闲后自动恢复 1 秒间隔。本轮只优化 Go 后端，不修改 `DJOneHubNotifier.app` 的 CoreAudio 启动顺序。
+### 断线后重新连接
 
-### 延续 v1.2.10 的可靠性约束
+App 会自动恢复已保存的开发配对并读取模块状态。模块断开后停止旧音频会话，重新上电后重新认证并读取真实通话状态，不沿用断开前的通话画面或音频会话。
 
-- 模块侧 MaVo/UAC 路由仍在拨号和响铃阶段提前预热，Mac 媒体循环仍只在 `active` 后开启。
-- 每通结束约 1.5 秒后拆除模块语音 helper，下一通重新预热，不跨独立通话复用可能失效的音频会话。
-- 已在 Apple Silicon + QDC507 实机验证呼出、呼入、连续来电和挂断后再次来电；补充动态间隔与唤醒合并测试，并通过 Go 全量测试和竞态检测。
+已完成断线识别和重连回归；首次连接与模块冷启动仍有等待时间，进一步提速见[连接优化计划](docs/ios-module-connection-speed-plan.md)。模块拔线导致断电时，不保证原有电话继续保持。
 
-## v1.2.10：通话首音与逐通话路由
+### 在手机上查看模块短信
 
-v1.2.10 建立了本轮通话可靠性的基础，其改动已完整保留在 v1.2.11；历史安装包状态可查看 [RinFrrn fork 的 Releases](https://github.com/RinFrrn/DJOneHub-mac-enhanced/releases)。
+“信息”页通过独立的短信网关读取 SIM 与模块存储中的短信，支持前台自动刷新、正文解析、未读提示和详情查看。
 
-### 通话首音优化
+**当前 iOS 页面只读。** 短信发送与删除虽然已有底层协议，尚未作为可用功能开放；长短信处理和更多运营商场景也需要继续验证。
 
-- 通话状态 `AT+CLCC` 轮询间隔由 3 秒缩短到 1 秒，减少网络已经接通、App 尚未识别为通话中的等待时间。
-- 在拨号成功以及 `dialing`、`alerting`、`incoming`、`waiting` 阶段异步预热模块侧 MaVo/UAC 路由，不再等到 `active` 后才开始通过 ADB 部署并启动语音链路。
-- Mac 麦克风、扬声器和 USB 媒体循环仍只在 `active` 后开启，避免响铃阶段提前采集或播放通话音频。
+### 模块自主发送来电、短信提醒
 
-### 逐通话路由可靠性
+模块端已实现 Bark 提醒，以及直接发送 Web Push 的实验路径。提醒任务运行在模块上，不要求 Mac 常驻或 DJOneHub App 一直处于前台。
 
-- QDC507 模块侧语音 helper 不再跨独立通话长时间复用。挂断后保留约 1.5 秒供原生音频宿主关闭 UAC，随后停止模块路由；下一通在拨号或响铃阶段重新预热。
-- 新通话会取消上一通尚未执行的延迟停止任务，避免旧计时器在新通话过程中关闭语音路由。
-- 增加预热状态去重和路由操作串行化保护，避免高频 `CLCC` 轮询、拨号和接听同时触发重复部署。
-- 补充预热状态与延迟停止取消的单元测试，并通过完整 Go 测试及通话后端竞态检测。
+在 iOS 的模块提醒页面中，可以：
 
-## v1.2.9：v1.2.5 — v1.2.9 更新汇总
+- 配置自己的 HTTPS Bark 服务地址，并发送测试提醒。
+- 分别选择来电是否显示号码、短信通知是否显示正文。
+- 设置来电提醒声音，停用 Bark，查看脱敏后的服务状态。
+- 导入自托管服务使用的 CA 证书。
+- 导入 Web Push 订阅文件并发起测试。
 
-[下载 v1.2.9](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.9)
+这套方案**不需要维护 DJOneHub 通知中转服务器**。Bark 仍使用用户选择的推送服务；Web Push 仍依赖浏览器推送服务及一个 HTTPS 静态订阅页面。模块和手机都需要联网。
 
-### 通话与首次启用
+默认提醒不包含来电号码和短信正文；启用相应选项后，这些内容会交给所选推送服务。普通通知用于提醒用户打开 App，**不等于 App 被终止后可以自动唤醒并锁屏接听**。Bark 的更多实际使用场景及 Web Push 的 iPhone 完整收件验证仍需补齐。
 
-- 独立 macOS App 集中管理拨号、接听、拒接、挂断、DTMF、通话记录、录音入口、短信、通讯录与设置；来电、短信提醒不需要网页常驻。
-- 新模块、原始 DJI 配置、旧 UAC 与其他工具留下的完整 USB 配置均可识别。启用前先备份，验证失败自动回滚。
-- 旧 UAC `…1,1,1,1,1,0,1` 已具备 USB Audio，不再强写 ADB 位，只补 IMS / VoLTE，避免模块返回 `OK` 但配置保持原样时误报失败。
-- USB 模式切换、模块重启和重新枚举期间的临时 `USBCFG ERROR` 会自动重试；重新连接后会读取实际配置，不会沿用旧“已就绪”状态。
+详见[模块提醒的配置、投递行为与验证范围](docs/module-notifications.md)。
 
-### 语音运行时
+## 当前状态
 
-- 首次在「设置 → 语音运行时」确认后，App 从固定上游获取指定版本并校验 SHA-256，缓存到本机；后续模块重启或重插可复用缓存。
-- 下载包含 Raw → GitHub Contents API → Raw 重试链路，并使用独立等待窗口，避免上游短暂失败或通用接口超时造成初始化中断。
-- 模块侧语音运行时不包含在源码、DMG、ZIP 或 Release 中。
-
-### iPhone / iPad 模式与发布包
-
-- 「设置 → 连接模式」可切换 iPhone / iPad 模式：仅关闭 USB Audio，保留 USB 4G、AT 与短信，避免移动设备占用系统音频输出；接回运行 DJOneHub 的 Mac 后会恢复完整音频接口。
-- 修复安装包误带入旧通知 App、设置页遗留固定版本号及连接模式入口缺失的问题。
-- v1.2.9 同步提供 macOS Universal（Apple Silicon + Intel）和 Windows x64（含 `DJOneHub.exe`）安装包；Windows 仍未完成真实模块验证。
-
-| 功能 | 说明 |
+| 能力 | 进展 |
 | --- | --- |
-| 电话 | 拨号、接听、拒接、挂断、DTMF、通话记录和录音入口。 |
-| 短信 | 收发短信、验证码预览；读取后可自动清理模块存储。 |
-| 通讯录 | 可同步本机通讯录，用姓名或号码拨号、发短信。 |
-| 网络与 GPS | USB 4G、Wi-Fi 优先、4G 兜底、GPS/GNSS 状态与菜单栏提示。 |
-| iPhone / iPad 模式 | 关闭 USB Audio、保留上网和短信；下次接回 Mac 自动恢复完整模式。 |
-| 模块工具 | eUICC Profile、AT 调试、网络诊断和初始化状态。 |
+| iPhone 拨号、接听、拒接、挂断与双向语音 | 已完成真机闭环 |
+| 已建立通话的后台音频、锁屏持续通话 | 已完成基线真机验证，更多中断和长时间压力场景待补充 |
+| 断线停止音频、模块重启后自动重连 | 已完成真机回归 |
+| 通话记录、通讯录、静音、本地录音 | 已实现 |
+| 短信收件与查看 | 已接入只读页面；发送、删除尚未开放 |
+| Bark 与 iOS 提醒配置 | 已实现，更多真机投递场景待验证 |
+| 模块直发 Web Push | 实验功能，完整端到端验收待完成 |
+| 听筒／扬声器／蓝牙耳机切换 | 已制定计划，待实施 |
+| 模块长期授权、恢复换机与撤销 | 授权核心和 iOS 客户端已实现，尚未替换旧通话配对 |
+| App 被挂起或终止后的系统级来电唤醒 | 尚未完成可靠闭环 |
+| 面向普通用户的首次配置向导 | 尚未完成 |
 
-## 版本演进
+CallKit／PushKit 已有接入代码，不能据此承诺系统电话级的后台来电能力。本文中的“后台通话”指已经接通后的音频持续运行。
 
-DJOneHub 从本机网页工具逐步演进为独立 macOS App。早期能力没有从仓库历史中删除，相关标签、安装包和完整说明仍可访问。
+## 如何开始
 
-| 版本 | 主要变化 | 历史入口 |
-| --- | --- | --- |
-| 初始预览 | 模块状态、短信、eSIM、USB 4G、AT 调试和本机网页管理。 | [最初提交](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/commit/1b8a33ff2ae115b4bb14919e695274cbed6e1f3f) |
-| v0.1.1-preview | 增加一键 DMG 安装包，保留菜单栏实时网速。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.1-preview) |
-| v0.1.2-preview | 移除菜单栏网速显示，保留 GPS 与 4G 状态。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.2-preview) |
-| v0.1.3-preview | 提供 Apple Silicon 与 Intel 通用安装包。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.3-preview) |
-| v0.1.4-preview | 增加 Windows x86-64 实验版。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.4-preview) |
-| v0.1.5-preview | 模块重连后自动续租 USB 4G DHCP。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.5-preview) |
-| v0.1.6-preview | 增加信号自检、自动找回和 USB 打开超时保护。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.6-preview) |
-| v0.1.7-preview | 在新 Mac 上自动创建、启用模块网卡并续租 DHCP。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v0.1.7-preview) |
-| v1.2.4 | 重构为独立 App，整合拨号、通话、短信、通讯录、设置和系统提醒。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.4) · [发布说明](docs/RELEASE_NOTES_v1.2.4.md) |
-| v1.2.5 — v1.2.8 | 增加语音运行时确认下载、移动设备模式，并持续修复首次启用与下载恢复。 | [Releases](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases) |
-| v1.2.9 | 修复 USB 配置识别、安装包混入旧通知 App 和连接模式入口问题。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.9) |
-| v1.2.10 | 提前预热 MaVo 通话路由、缩短通话状态检测，并恢复逐通话 helper 生命周期以避免后续来电无声。 | 已合并到 v1.2.11。 |
-| v1.2.11 | 建链阶段使用 250 毫秒动态轮询，并在拨号、接听和挂断命令后立即唤醒状态检测。 | 当前源码；Release 待发布。 |
+目前提供源码构建和开发部署流程，尚未形成面向普通用户的一键安装体验。
 
-v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/README-v0.1.7-preview.md`](docs/history/README-v0.1.7-preview.md)，可用于核对早期安装方式、界面和设计边界。
+### 准备设备
 
-## 接入原理与架构演进
+- 大疆第一代 4G 模块；当前实现和验证围绕 **QDC507**，其他型号或固件不保证兼容。
+- 可用的实体 SIM，以及支持当前模块语音业务的运营商网络。
+- 能通过 USB 数据连接模块的 iPhone、数据线及稳定供电。
+- 用于首次模块部署和 iOS App 构建签名的 Mac。
 
-大疆第一代 4G 模块会通过不同 USB 组合向主机暴露管理串口、USB 网卡和音频接口。DJOneHub 围绕模块已有接口工作，不刷写或替换模块固件。
+iOS 工程最低部署版本为 **iOS 17.0**；这不代表所有系统版本、iPhone 或转接器组合均已验证。
 
-早期 v0.1.x 主要通过本机网页管理模块：短信模式负责状态、短信、eSIM 和 AT，上网模式负责 USB 4G。切换模式时模块重新枚举，网页会短暂离线。
+### 首次配置与使用
 
-从 v1.2.4 起，核心能力逐步收拢到独立 macOS App：
+1. **先准备模块。** 使用开发部署流程安装匹配版本的电话、短信、音频和可选提醒服务，并配置适合 iPhone 的 USB 网络模式。当前通话方案关闭模块 USB Audio，使用 USB 网络传输语音。
+2. **构建并安装 iOS App。** 在 Xcode 打开下面的工程，选择 `DJOneHub` scheme，为真机配置签名团队。
+3. **导入开发控制配对。** 将该模块的 CONTROL 配对文件导入 App，再把模块换接到 iPhone。STATUS 只读配对不能用于拨号。
+4. **等待“可以拨号”。** 授予麦克风权限；使用通讯录时按需授予联系人权限，然后测试拨号和接听。
+5. **按需开启提醒。** 在模块提醒页面配置 Bark 或导入 Web Push 订阅，发送测试并确认手机实际收到。
 
-1. Go 后台负责 USB/AT、短信、网络、GPS、eSIM 和通话状态。
-2. 原生 macOS App 负责电话、短信、通讯录、设置和系统通知。
-3. Mac 双向通话使用模块 USB Audio，并按用户确认加载经过 SHA-256 校验的模块侧语音运行时。
-4. v1.2.6 增加 iPhone / iPad USB 组合；模块接回 Mac 后恢复完整音频接口。
-5. 每次高风险 USB 配置调整前保存实际配置，验证失败时恢复，避免把短暂重枚举误判为永久故障。
+模块准备会安装运行组件和启动配置，不是仅安装一个 iOS App 即可使用。详细部署与诊断见 [iOS 工程说明](ios/DJOneHubUACProbe/README.md)；其中 UAC Probe、STATUS 一次性测试等章节是开发诊断流程。
 
-本机 HTTP 服务只监听 `127.0.0.1:7575`。SIM、短信、联系人、录音和卡片资料不应离开用户设备。
+### 构建 iOS App
 
-## 界面预览
+```sh
+open ios/DJOneHubUACProbe/DJOneHubUACProbe.xcodeproj
+```
 
-> 以下均为真实界面截图；号码、联系人、头像、验证码和时间已遮蔽。
+工程包含两个 target：
 
-### 电话
-
-<p align="center">
-  <img src="docs/images/v1.2.4/dial-pad-empty.png" alt="拨号界面" width="31%" />
-  <img src="docs/images/v1.2.4/call-dialing.png" alt="正在拨号" width="31%" />
-  <img src="docs/images/v1.2.4/call-active.png" alt="通话中" width="31%" />
-</p>
-
-拨号、接听、拒接、挂断、DTMF、通话记录与录音入口统一在电话页。
-
-<p align="center">
-  <img src="docs/images/v1.2.4/call-history.png" alt="通话记录" width="48%" />
-  <img src="docs/images/v1.2.4/incoming-call-notification.png" alt="来电通知" width="38%" />
-</p>
-
-### 短信与通讯录
-
-<p align="center">
-  <img src="docs/images/v1.2.4/sms-compose.png" alt="短信编辑" width="45%" />
-  <img src="docs/images/v1.2.4/contacts.png" alt="通讯录" width="45%" />
-</p>
-
-短信支持收发、验证码预览和自动清理；通讯录可同步本机联系人并用于检索。
-
-<p align="center">
-  <img src="docs/images/v1.2.4/sms-notification.png" alt="短信通知" width="44%" />
-</p>
-
-### 设置与版本
-
-<p align="center">
-  <img src="docs/images/v1.2.4/about.png" alt="关于页" width="42%" />
-</p>
-
-## 下载与平台状态
-
-| 平台 | 包 | 当前状态 |
-| --- | --- | --- |
-| macOS 13+ | `DJOneHub-macOS-universal-v1.2.11.dmg` | 源码与 Apple Silicon 实机通话验证完成；Release 安装包待发布。包内应包含 arm64 + x86_64，Intel 尚未真机验证。 |
-| Windows x86-64 | `DJOneHub-Windows-amd64-v1.2.11.zip` | 可由当前源码构建；本轮通话音频优化仅适用于 macOS，Windows 仍未完成真实模块验证。 |
-
-Windows 目前不承诺模块功能可用；它不提供 macOS 专用的 USB AT/eSIM、USB 4G 自动策略、原生通知、MapKit 或双向通话音频。
-
-## macOS 安装
-
-1. 打开 DMG，运行“安装 DJOneHub.command”。
-2. 日常直接打开 DJOneHub App；也可在安装目录运行 `djonehub start`。
-
-本地服务只监听 `127.0.0.1:7575`。首次通话时，App 会请求麦克风权限。
-
-### 接入准备
-
-#### 硬件
-
-- 大疆第一代 4G 模块（USB 设备标识通常为 `2ca3:4006`）
-- 可正常使用的实体 SIM，或与当前实现兼容的实体 eUICC/eSIM 卡片
-- 支持数据传输的 USB-C 线缆
-- Apple Silicon 或 Intel Mac
-
-如果连接后 macOS 完全没有发现 USB 设备，应先排除仅支持充电的线缆、供电不足和转接器兼容问题。
-
-#### 系统
-
-- macOS 13 Ventura 或更新版本
-- Apple Silicon 已实机验证
-- Intel 包含在 Universal 构建中，但仍应结合真实设备验证模块连接与通话
-
-发行包已包含运行所需的 libusb。普通用户不需要安装 Homebrew、Go、Node.js 或其他开发环境。
-
-#### 模块指示灯
-
-| 状态 | 常见含义 |
+| Target | 用途 |
 | --- | --- |
-| 红色常亮 | 未插入 SIM 卡 |
-| 红色闪烁 | SIM 卡未被正常识别 |
-| 绿色常亮 | SIM 已识别，蜂窝信号通常较好 |
-| 绿色闪烁 | SIM 已识别，信号较弱或仍在注册 |
+| `DJOneHub` | 日常通话 App，本文介绍的 iOS 成果 |
+| `DJOneHubUACProbe` | USB Audio、网络和协议诊断工具 |
 
-不同固件的灯光行为可能不同，最终以 App 中的 SIM、信号和网络注册状态为准。
+当前开发配置下，两个 target 沿用同一 bundle ID，不适合同时安装。真机运行需要在 Xcode 中配置自己的签名。
 
-### 首次启动
-
-1. 将 SIM 或 eUICC 卡片插入模块。
-2. 使用支持数据传输的 USB 线连接模块与 Mac。
-3. 等待 macOS 完成 USB 枚举。
-4. 打开 DJOneHub App。
-5. 按设置页提示完成首次模块检查；启用语音运行时时应阅读来源和校验信息后再确认。
-
-后台服务默认只监听：
-
-```text
-http://127.0.0.1:7575
-```
-
-如需打开兼容管理网页，可执行：
+仅检查模拟器构建，可在仓库根目录执行：
 
 ```sh
-djonehub open
+xcodebuild \
+  -project ios/DJOneHubUACProbe/DJOneHubUACProbe.xcodeproj \
+  -scheme DJOneHub \
+  -configuration Debug \
+  -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
 ```
 
-### macOS 阻止打开时
+模拟器可以用于编译检查，不能代替真实模块的 USB 连接和通话测试。
 
-若 macOS 提示无法验证开发者，请打开“系统设置 → 隐私与安全性”，在对应安全提示处选择“仍要打开”。
+## 距离“以后完全不接 Mac”还有多远
 
-只有在安装包来自本项目 Release 且已核对 SHA-256 时，才可考虑移除隔离属性。不要对来源不明的 App、脚本或模块运行时执行该操作。
+已部署的模块可以换接 iPhone 后完成日常通话；提醒服务也能在模块上独立运行。**但当前通话使用的开发配对仍有 30 天期限**，换手机、撤销和恢复流程尚未全面产品化。
 
-### 历史 ZIP 安装方式
+新授权方案已实现独立模块身份、一次性绑定码、长期手机凭据、TLS 加密管理、恢复码换机和模块端撤销。iPhone 会先保存新凭据，再确认绑定生效，以支持中断后重试。
 
-v0.1.x 预览版曾提供 ZIP/命令行安装方式：完整解压后执行 `./install`，默认安装到 `/usr/local/libexec/djonehub` 并创建 `/usr/local/bin/djonehub`。该说明仅用于维护旧部署；新安装优先使用当前 DMG 内的“安装 DJOneHub.command”。
+这一方案目前默认关闭，还没有接入用户页面，也没有统一替代通话、短信、音频和提醒的旧授权。因此，新授权服务中的撤销不能代表旧通话密钥已失效。完成统一授权与实机验证后，才会接入首次配置向导。
 
-旧发行目录也支持免安装运行：保留完整目录并执行 `./djonehub start`。不要只复制单个可执行文件，因为运行时还依赖包内的 `bin`、`lib` 和资源目录。
+详见[长期授权实现状态与迁移条件](docs/module-authorization-lifecycle.md)。
 
-### 开发测试包快速更新
-
-反复验证 GitHub Actions 生成的 macOS ZIP 时，可把每次下载得到的
-`DJOneHub-macOS-universal-v1-*` 文件夹保留在“下载”目录，然后始终执行同一条命令：
-
-```sh
-./scripts/install-latest-macos-backend.sh
-```
-
-脚本会按修改时间选择最新 ZIP、验证旁边的 SHA-256 清单，并只替换当前用户
-DJOneHub App 使用的后端；Notifier、配置和现有 libusb 不受影响。更新失败时会自动
-恢复上一份后端。该脚本用于本仓库开发机的连续测试，不替代正式 DMG 安装流程。
-
-## 完整使用说明
-
-### 电话与通话
-
-- 电话页提供拨号、接听、拒接、挂断、DTMF、静音、通话记录和录音入口。
-- 来电与通话状态由 App 和本机后台共同维护，不要求网页常驻。
-- 双向通话依赖模块侧语音运行时、USB Audio、运营商 IMS/VoLTE 和当前 SIM 状态；控制命令成功不等于音频链路一定就绪。
-- 首次通话前请授予麦克风权限。出现单向无声时，应先检查设置页的通话支持、语音运行时和模块实际 USB 配置。
-
-### 短信
-
-- 支持接收、发送、自动轮询、验证码预览和模块旧短信清理。
-- 发送国际短信时应填写完整国际号码，例如 `+86138XXXXXXXX`。
-- 短信能否收发取决于套餐、漫游、网络注册、短信中心和模块固件兼容性。
-- 发布截图或日志前必须隐藏手机号、短信正文和验证码。
-
-### 通讯录
-
-App 可读取本机通讯录，用姓名或号码拨号、回拨和发送短信。通讯录数据保存在本机，不应随日志、Issue 或测试包上传。
-
-### eSIM 与卡片管理
-
-这里管理的是插入模块实体 SIM 卡槽的兼容 eUICC/eSIM 卡片，不是 Mac 内置 eSIM。主要能力包括：
-
-- 读取 EID、固件、空间和已安装 Profile
-- 下载、启用、改名和删除 Profile
-- 检测卡片通讯录兼容性
-- 将号码资料按 ICCID 关联保存
-
-> [!WARNING]
-> 下载、启用、改名和删除 Profile 都会写入实体卡片。操作过程中不要拔出模块或切换 USB 模式；删除通常不可撤销。
-
-不同 eUICC 产品即使遵循同一规范，也可能在证书链、SM-DP+、扩展 APDU 和运营商策略上存在差异。
-
-### USB 4G 与网络策略
-
-- DJOneHub 可识别模块 USB 网卡，并维持 Wi-Fi 优先、4G 兜底的本机网络策略。
-- 模块网卡通常获得 `192.168.225.x` 地址；实际接口名称和网络服务名称可能因系统与连接历史不同。
-- 页面流量只用于观察当前会话，不等同于运营商账单。
-- 代理软件可能按网络服务分别生效。切换到模块网卡后代理失效时，应检查系统代理、TUN/增强模式和 VPN 路由。
-- 手动关闭 4G 时，短信、AT 和来电控制是否保留取决于当前 USB 组合与模块 Agent 状态。
-
-### iPhone / iPad 模式
-
-该模式用于把模块交给移动设备使用：关闭 USB Audio，保留 USB 网络、AT 与短信相关接口。模式切换会导致 USB 重新枚举，应等待完成后再拔插。
-
-模块接回运行 DJOneHub 的 Mac 后，应用会尝试恢复完整 Mac 配置。恢复过程中短暂离线属于正常现象；若持续失败，应查看设置页显示的实际 USB 配置和后台日志，不要连续反复切换。
-
-### GPS / GNSS
-
-GPS 默认关闭。启用后定位结果只在本机读取和展示，停止后应同步清理菜单栏状态。室内、弱信号和首次冷启动可能需要更长时间。
-
-### AT 调试
-
-AT 调试可发送基础只读命令，例如：
+## 工作原理
 
 ```text
-AT
-AT+CSQ
-AT+COPS?
-AT+CPIN?
-AT+CNUM
+iPhone · DJOneHub
+    │
+    │ USB ECM 本地网络
+    │ 电话控制 / 双向 PCM / 短信读取 / 提醒配置
+    ▼
+QDC507 模块 ── SIM / 蜂窝网络 ── 电话与短信
+    │
+    └── 模块提醒服务 ── Bark 或 Web Push ── 手机通知
 ```
 
-AT 指令可能改变网络注册、PDP、USB 模式、短信存储和 SIM 状态。不了解作用的写入命令不要执行，也不要照搬来源不明的刷机指令。
+电话控制与媒体在本地 USB 链路上传输，Mac 不参与日常通话的数据转发。现有控制协议采用 HMAC 认证，**认证不等于传输加密**；新 TLS 授权管理通道尚未覆盖全部旧协议。
 
-## 常用命令
+本地录音保存为 WAV 文件。配对凭据使用 iPhone Keychain 保存；恢复资料、Bark 地址中的设备密钥和 Web Push 订阅文件均不应提交到仓库。
 
-```text
-djonehub start          启动并自动打开管理网页
-djonehub start --demo   启动无硬件演示模式
-djonehub stop           停止正在运行的程序
-djonehub status         查看运行状态
-djonehub logs           查看实时日志（Control+C 退出）
-djonehub open           打开管理网页
-```
+## 开发与文档
 
-DMG 安装版通常由 LaunchAgent 自动维护后台，日常优先使用 App。上述命令主要用于兼容安装、诊断和开发。
+- [iOS App 架构、音频链路与真机验收记录](docs/ios-app-technical-design.md)
+- [iOS 工程、模块部署与诊断](ios/DJOneHubUACProbe/README.md)
+- [短信网关与只读范围](docs/qdc507-sms-gateway.md)
+- [Bark / Web Push 模块提醒](docs/module-notifications.md)
+- [模块长期授权与迁移](docs/module-authorization-lifecycle.md)
+- [音频设备切换计划](docs/ios-call-audio-routing-plan.md)
+- [连接提速计划](docs/ios-module-connection-speed-plan.md)
+- [模块备份与恢复研究记录](docs/qdc507-backup-edl-sbl-recovery-report.md)
 
-建议停止 DJOneHub 后再拔出模块。如果直接拔出，后台会等待设备重新连接。
-
-## 日志与本地数据
-
-日志目录：
-
-```text
-~/Library/Logs/DJOneHub
-```
-
-运行状态、缓存和本地数据目录：
-
-```text
-~/Library/Application Support/DJOneHub
-```
-
-常见日志包括 `launchd.log`、`notifier.log` 和兼容命令行部署生成的 `djonehub.log`。日志可能包含号码、短信摘要、ICCID、EID、网络地址或模块状态，分享前必须脱敏。
-
-## 卸载
-
-当前 DMG 提供“卸载 DJOneHub.command”，应优先使用该脚本，以同时停止 LaunchAgent 并清理应用运行目录。
-
-旧 ZIP/命令行安装可先执行：
+授权与提醒相关测试：
 
 ```sh
-djonehub stop
-sudo rm -f /usr/local/bin/djonehub
-sudo rm -rf /usr/local/libexec/djonehub
+swift test --package-path ios/DJOneHubUACProbe
+go test -race ./internal/modulepairing ./internal/modulepush ./cmd/djonehub-pairing-prepare ./cmd/djonehub-notify
 ```
 
-如需一并删除本地日志和运行数据：
+其他控制协议、短信和音频离线测试见 iOS 工程说明。模块端 ARMv7 构建还需要匹配的工具链、运行库和产物校验；部分通话运行时不随仓库分发，详见[公开发布范围](OPEN_SOURCE_SCOPE.md)。
 
-```sh
-rm -rf "$HOME/Library/Logs/DJOneHub"
-rm -rf "$HOME/Library/Application Support/DJOneHub"
-```
+欢迎提交设备兼容性反馈、问题复现和改进建议。反馈时注明 iPhone 型号、iOS 版本、模块与固件信息，并隐藏电话号码、短信正文、验证码和所有密钥。
 
-删除本地数据不可恢复；如需保留录音、日志或配置，应先手动备份。
+## 来源与许可
 
-## 常见问题
+本项目基于原 VoHive 项目及模块研究工作继续开发，与 DJI、Quectel 或任何运营商不存在隶属或授权关系。感谢原作者 iniwex5、MaVo 及相关开源组件的贡献者。
 
-### 模块连接后没有反应
-
-先确认线缆支持数据传输，再检查系统 USB 信息、模块供电和 App 设置页。若系统能看到 `2ca3:4006` 但 AT 超时，应记录实际 USB 配置后再处理，不要仅凭“检测到 USB”判断模块已可用。
-
-### 切换模式后设备短暂消失
-
-USB 模式切换会触发重新枚举，短暂断开通常不是故障。等待系统重新识别；长时间未恢复时停止 App、重新插拔模块并查看日志。
-
-### 换卡或切换 Profile 后仍显示旧信息
-
-模块重新读取卡片和注册网络需要时间。刷新后仍未更新时，可在确认没有写卡任务后重启模块或重新插拔。
-
-### SIM 在手机中可用，但模块不能通话或收发短信
-
-手机与模块可能使用不同的运营商配置、MBN、IMS、VoLTE、漫游和短信中心。手机可用不代表模块固件一定兼容。
-
-### USB 4G 可连接但无法上网
-
-依次检查 SIM 数据能力、模块 PDP、USB 网卡地址、默认路由、DNS、VPN/TUN 和代理配置。取得 `192.168.225.x` 地址只说明本地 USB 网络建立，不代表蜂窝出口一定可用。
-
-### 代理或 VPN 开启后模块控制超时
-
-确认访问 `192.168.225.1` 的流量仍走模块 USB 网卡，而不是被 VPN 的 `utun` 路由接管。必要时暂时关闭 VPN 做对照，再检查按接口绑定和路由策略。
-
-### 能否用于其他型号的 4G 模块
-
-不能保证。USB 识别、端点、AT 接口、语音运行时和模式切换均围绕大疆第一代 4G 模块实现。
-
-## 当前限制
-
-- Windows 版本尚未完成真实 Windows + 模块全功能验证。
-- Intel Universal 包已构建，但仍需更多真实 Intel 设备验证。
-- 双向通话依赖外部模块语音运行时与具体运营商环境。
-- eSIM 兼容性取决于卡片、证书链、SM-DP+ 和运营商策略。
-- 不同模块批次、固件、SIM 和 macOS 版本的行为可能不同。
-- 流量统计仅供参考，不等同于运营商账单。
-
-## 通话与开源边界
-
-源码包含 macOS App、Go 后端、Windows 控制台、MaVo MIT 音频适配代码和构建脚本。
-
-Mac 双向通话仍需要模块侧语音运行时。该运行时**不随本仓库、Release、DMG 或 Windows ZIP 提供，也不会由 DJOneHub 镜像**。用户一次明确确认后，App 才会从固定上游来源获取指定版本，逐项校验 SHA-256 后保存到本机。上游文件、模块型号、固件、SIM 和运营商条件均可能影响双向语音可用性。
-
-请不要把未知来源的二进制提交到 Issue、PR 或衍生 Release。完整边界见 [OPEN_SOURCE_SCOPE.md](OPEN_SOURCE_SCOPE.md)。
-
-## 从源码构建
-
-```sh
-# macOS Universal
-scripts/package-macos-universal.sh v1.2.11
-scripts/build-dmg-universal.sh v1.2.11
-
-# Windows x86-64
-scripts/package-windows-amd64.sh v1.2.11
-```
-
-构建 macOS 包需要完整 Xcode、Go、`pkg-config` 与网络下载官方 libusb 源码。Windows 包在 Mac 上只能交叉编译，不能替代 Windows 真机验证。
-
-## 使用提醒
-
-- 使用蜂窝数据、短信、通话与 eSIM 前，请确认运营商协议、资费及当地法律要求。
-- GPS 默认关闭；定位信息仅在本机读取和展示。
-- 本项目不会上传 SIM、短信、联系人、录音或卡片资料。
-- 与 DJI、Quectel、运营商及 eSIM 厂商不存在隶属或授权关系。
-
-## 项目来源、许可证与致谢
-
-DJOneHub 是在研究大疆第一代 4G 模块和原 VoHive 项目的基础上继续开发的非官方工具。仓库包含基于原 VoHive 演进的代码，以及为 macOS USB 通信、设备热插拔、本机管理、短信、eSIM、网络诊断、原生通知和发行打包新增或修改的实现。
-
-本项目不代表 DJI、Quectel、任何运营商或 eSIM 卡片厂商。相关商标和产品名称归各自权利人所有。
-
-仓库继续遵循 [PolyForm Noncommercial License 1.0.0](LICENSE)，仅允许许可证定义的非商业用途。必须保留的上游声明：
+仓库采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。使用和分发请遵循仓库许可证及各第三方组件声明。
 
 ```text
 Required Notice: Copyright iniwex5 (https://github.com/iniwex5/vohive)
 ```
 
-随发行包提供的 libusb 1.0.30 使用 GNU Lesser General Public License v2.1 or later；其他组件遵循各自许可证。完整来源、第三方声明和公开边界见：
-
-- [LICENSE](LICENSE)
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- [OPEN_SOURCE_SCOPE.md](OPEN_SOURCE_SCOPE.md)
-- 各 `third_party` 目录中的许可证与声明
-
-感谢原 VoHive 项目及作者 iniwex5、libusb 与其他开源组件贡献者，以及参与大疆第一代 4G 模块研究、测试和资料分享的用户。
-
-如果 DJOneHub 对你有帮助，欢迎通过 Issue 分享兼容性结果、问题日志或改进建议。提交截图和日志前，请隐藏手机号、EID、ICCID、IMSI、短信验证码和其他隐私信息。
+相关说明：[第三方声明](THIRD_PARTY_NOTICES.md) · [公开发布范围](OPEN_SOURCE_SCOPE.md)。
