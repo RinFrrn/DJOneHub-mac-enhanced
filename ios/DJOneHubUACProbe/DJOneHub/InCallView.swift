@@ -10,6 +10,7 @@ struct InCallView: View {
     let onEnd: (UInt8) -> Void
     let onToggleMute: () -> Void
     let onToggleRecording: () -> Void
+    @State private var isShowingAudioRoutes = false
 
     var body: some View {
         ZStack {
@@ -52,7 +53,19 @@ struct InCallView: View {
                     }
                 } else {
                     Spacer()
-                    HStack(spacing: 34) {
+                    HStack(spacing: 22) {
+                        CallActionButton(
+                            title: callAudio.selectedAudioRoute?.compactTitle ?? "音频",
+                            systemImage: callAudio.selectedAudioRoute?.systemImage ?? "speaker.wave.2",
+                            color: .white.opacity(0.18),
+                            action: {
+                                callAudio.refreshAvailableAudioRoutes()
+                                isShowingAudioRoutes = true
+                            }
+                        )
+                        .disabled(!isActive || !callAudio.canSelectAudioRoute)
+                        .opacity(isActive && callAudio.canSelectAudioRoute ? 1 : 0.45)
+
                         CallActionButton(
                             title: "静音",
                             systemImage: lifecycle.isMuted ? "mic.slash.fill" : "mic.fill",
@@ -79,6 +92,13 @@ struct InCallView: View {
                             .foregroundStyle(.red)
                     }
 
+                    if !callAudio.audioRouteErrorText.isEmpty {
+                        Text(callAudio.audioRouteErrorText)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                    }
+
                     if let callID = lifecycle.phase.callID {
                         CallActionButton(title: "挂断", systemImage: "phone.down.fill", color: .red) {
                             onEnd(callID)
@@ -90,6 +110,20 @@ struct InCallView: View {
                 Spacer(minLength: 30)
             }
             .padding(.horizontal, 28)
+        }
+        .confirmationDialog(
+            "选择音频设备",
+            isPresented: $isShowingAudioRoutes,
+            titleVisibility: .visible
+        ) {
+            ForEach(callAudio.availableAudioRoutes) { route in
+                Button(audioRouteTitle(route)) {
+                    callAudio.selectAudioRoute(route)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("切换时会短暂重新建立通话音频。")
         }
     }
 
@@ -122,6 +156,10 @@ struct InCallView: View {
         case .ending: return "正在挂断…"
         default: return lifecycle.phase.title
         }
+    }
+
+    private func audioRouteTitle(_ route: CallAudioRoute) -> String {
+        callAudio.isSelectedAudioRoute(route) ? "✓ \(route.title)" : route.title
     }
 }
 
@@ -340,6 +378,8 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
 
     private var player: AVAudioPlayer?
     private var progressTask: Task<Void, Never>?
+    private var playbackTask: Task<Void, Never>?
+    private var playbackGeneration: UInt64 = 0
 
     func isPlaying(_ recording: CallRecordingInfo) -> Bool {
         isPlayingNow && playingURL == recording.url
@@ -350,6 +390,35 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     func toggle(_ recording: CallRecordingInfo) {
+        playbackTask?.cancel()
+        playbackGeneration &+= 1
+        let generation = playbackGeneration
+        playbackTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                // prepareToPlay/play implicitly activate the session synchronously
+                // when it is inactive. Activate explicitly before either call.
+                let session = AVAudioSession.sharedInstance()
+                if #available(iOS 27.0, *) {
+                    guard try await session.activate(options: []) else {
+                        throw NSError(domain: "CallRecordingPlayer", code: 1,
+                                      userInfo: [NSLocalizedDescriptionKey: "无法启用录音播放音频"])
+                    }
+                } else {
+                    try await Task.detached(priority: .userInitiated) {
+                        try AVAudioSession.sharedInstance().setActive(true)
+                    }.value
+                }
+                guard !Task.isCancelled, self.playbackGeneration == generation else { return }
+                self.toggleActivatedRecording(recording)
+            } catch {
+                guard !Task.isCancelled, self.playbackGeneration == generation else { return }
+                self.report(error)
+            }
+        }
+    }
+
+    private func toggleActivatedRecording(_ recording: CallRecordingInfo) {
         if playingURL == recording.url, let player {
             if player.isPlaying {
                 player.pause()
@@ -368,7 +437,6 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
         do {
             let player = try AVAudioPlayer(contentsOf: recording.url)
             player.delegate = self
-            player.prepareToPlay()
             self.player = player
             playingURL = recording.url
             currentTime = 0
@@ -394,6 +462,9 @@ final class CallRecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     func stop() {
+        playbackGeneration &+= 1
+        playbackTask?.cancel()
+        playbackTask = nil
         progressTask?.cancel()
         progressTask = nil
         player?.stop()

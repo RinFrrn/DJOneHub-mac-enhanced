@@ -153,9 +153,14 @@ final class ContactsModel: ObservableObject {
     @Published private(set) var phones: [ContactPhone] = []
 
     private let store = CNContactStore()
+    private var contactLoadTask: Task<Void, Never>?
 
     init() {
         updateAuthorizationState()
+    }
+
+    deinit {
+        contactLoadTask?.cancel()
     }
 
     func loadIfAuthorized() {
@@ -194,51 +199,63 @@ final class ContactsModel: ObservableObject {
             state = .denied
         case .restricted:
             state = .restricted
+        case .limited:
+            loadContacts()
         @unknown default:
-            if Self.isLimited(status) {
-                loadContacts()
-            } else {
-                state = .restricted
-            }
+            state = .restricted
         }
     }
 
     private func loadContacts() {
         state = .loading
-        do {
-            let keys: [CNKeyDescriptor] = [
-                CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
-                CNContactPhoneNumbersKey as CNKeyDescriptor
-            ]
-            let request = CNContactFetchRequest(keysToFetch: keys)
-            request.sortOrder = .userDefault
-            var result: [ContactPhone] = []
-            try store.enumerateContacts(with: request) { contact, _ in
-                let formatted = CNContactFormatter.string(from: contact, style: .fullName)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let name = formatted?.nilIfEmpty ?? "未命名联系人"
-                for (index, labeledValue) in contact.phoneNumbers.enumerated() {
-                    let number = Self.dialableNumber(labeledValue.value.stringValue)
-                    guard !number.isEmpty else { continue }
-                    let label = CNLabeledValue<NSString>.localizedString(
-                        forLabel: labeledValue.label ?? CNLabelPhoneNumberMain
-                    )
-                    result.append(ContactPhone(
-                        id: "\(contact.identifier):\(index)",
-                        contactName: name,
-                        label: label,
-                        number: number
-                    ))
-                }
+        contactLoadTask?.cancel()
+        contactLoadTask = Task { [weak self] in
+            let loader = Task.detached(priority: .userInitiated) {
+                try Self.fetchContacts()
             }
-            phones = result
-            state = .available
-        } catch {
-            state = .failed(error.localizedDescription)
+            do {
+                let result = try await loader.value
+                guard !Task.isCancelled else { return }
+                self?.phones = result
+                self?.state = .available
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.state = .failed(error.localizedDescription)
+            }
         }
     }
 
-    private static func dialableNumber(_ input: String) -> String {
+    nonisolated private static func fetchContacts() throws -> [ContactPhone] {
+        let store = CNContactStore()
+        let keys: [CNKeyDescriptor] = [
+            CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
+            CNContactPhoneNumbersKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keys)
+        request.sortOrder = .userDefault
+        var result: [ContactPhone] = []
+        try store.enumerateContacts(with: request) { contact, _ in
+            let formatted = CNContactFormatter.string(from: contact, style: .fullName)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = formatted?.nilIfEmpty ?? "未命名联系人"
+            for (index, labeledValue) in contact.phoneNumbers.enumerated() {
+                let number = dialableNumber(labeledValue.value.stringValue)
+                guard !number.isEmpty else { continue }
+                let label = CNLabeledValue<NSString>.localizedString(
+                    forLabel: labeledValue.label ?? CNLabelPhoneNumberMain
+                )
+                result.append(ContactPhone(
+                    id: "\(contact.identifier):\(index)",
+                    contactName: name,
+                    label: label,
+                    number: number
+                ))
+            }
+        }
+        return result
+    }
+
+    nonisolated private static func dialableNumber(_ input: String) -> String {
         var result = ""
         for character in input {
             if character.isNumber || character == "*" || character == "#" {
@@ -256,6 +273,7 @@ final class ContactsModel: ObservableObject {
         }
         return false
     }
+
 }
 
 private extension String {

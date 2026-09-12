@@ -2335,9 +2335,11 @@ static int run_uplink_media_session(
         goto cleanup;
     }
     session->downlink_resample_available = 0U;
-    if (pthread_create(&downlink_thread_id, NULL, incall_downlink_thread,
-                       session) != 0) {
-        log_message("error", "could not start in-call downlink worker");
+    int downlink_thread_error = pthread_create(&downlink_thread_id, NULL,
+                                               incall_downlink_thread, session);
+    if (downlink_thread_error != 0) {
+        log_message("error", "could not start in-call downlink worker: %s (%d)",
+                    strerror(downlink_thread_error), downlink_thread_error);
         goto cleanup;
     }
     downlink_started = 1;

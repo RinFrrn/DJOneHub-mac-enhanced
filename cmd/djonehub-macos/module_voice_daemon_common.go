@@ -490,9 +490,9 @@ remove_ephemeral_key() {
                     test "$(tr '\000' '\n' < "/proc/$uplink_pid/cmdline" 2>/dev/null | sed -n '1p')" = "$uplink"
             }
             if test "$start_uplink" = 1; then
-                LD_LIBRARY_PATH=/usr/lib "$uplink" --uplink-listener \
+                (ulimit -s 256 || exit 1; export LD_LIBRARY_PATH=/usr/lib; exec "$uplink" --uplink-listener \
                     --listen-address 192.168.225.1 --audio-port 45751 \
-                    --token-file "$key" --interface bridge0 >>"$log" 2>&1 &
+                    --token-file "$key" --interface bridge0) >>"$log" 2>&1 &
                 uplink_pid=$!
                 printf '%s\n' "$uplink_pid" >"$uplink_pidfile"
             fi
