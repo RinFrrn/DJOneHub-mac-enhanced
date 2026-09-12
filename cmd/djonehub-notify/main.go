@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/iniwex5/vohive/internal/modulepairing"
 	"github.com/iniwex5/vohive/internal/modulepush"
 )
 
@@ -54,6 +56,7 @@ func run() (runErr error) {
 	monitor := flag.String("monitor", "/usrdata/djonehub/notify/djonehub-notify-monitor.armv7", "read-only QMI monitor executable")
 	controlAddress := flag.String("control-address", "192.168.225.1:45753", "authenticated iOS configuration listener")
 	pairingKey := flag.String("pairing-key", "/usrdata/djonehub/voice-test/pairing.key", "existing module control pairing key")
+	pairingRegistry := flag.String("experimental-pairing-registry", "", "opt-in TLS authorization registry; does not migrate legacy call/media authorization")
 	flag.Parse()
 	if *logFile != "" {
 		if err := os.MkdirAll(filepath.Dir(*logFile), 0700); err != nil {
@@ -166,6 +169,32 @@ func run() (runErr error) {
 		}
 		fmt.Printf("Push service accepted test (%d). Confirm receipt on the phone.\n", result.Code)
 		return nil
+	}
+	if *pairingRegistry != "" {
+		store, err := modulepairing.Open(*pairingRegistry)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		if _, err := store.TLSConfig(); err != nil {
+			return err
+		}
+		listener, err := net.Listen("tcp4", net.JoinHostPort(modulepairing.Host, strconv.Itoa(modulepairing.Port)))
+		if err != nil {
+			return errors.New("cannot listen for module authorization")
+		}
+		defer listener.Close()
+		managedContext, cancel := context.WithCancel(ctx)
+		defer cancel()
+		results := make(chan error, 2)
+		go func() { results <- (modulepairing.Server{Store: store}).Serve(managedContext, listener) }()
+		go func() {
+			results <- serveManaged(managedContext, sender, *monitor, *statePath, *controlAddress, *pairingKey, *configPath)
+		}()
+		first := <-results
+		cancel()
+		<-results
+		return first
 	}
 	return serveManaged(ctx, sender, *monitor, *statePath, *controlAddress, *pairingKey, *configPath)
 }
