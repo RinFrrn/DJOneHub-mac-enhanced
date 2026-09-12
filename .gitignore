@@ -7,6 +7,7 @@
 **/.build/
 **/dist/
 /djonehub-macos
+/outputs/module/djonehub-notify*
 **/.build-stale/
 backups/
 .cache/
@@ -21,6 +22,8 @@ backups/
 .idea/
 .vscode/
 *.swp
+**/xcuserdata/
+*.xcuserstate
 
 # Frontend dependencies are not used by the native DJOneHub page
 node_modules/

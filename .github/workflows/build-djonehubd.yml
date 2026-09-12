@@ -1,0 +1,341 @@
+name: Build module control sentinel
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "module/djonehubd.c"
+      - "module/djonehub_qmi_probe.c"
+      - "module/djonehub_qmi_voice_control.c"
+      - "module/djonehub_qmi_voice_engine.c"
+      - "module/djonehub_qmi_voice_engine.h"
+      - "module/djonehub_voice_daemon.c"
+      - "module/djonehub_voice_daemon_policy.h"
+      - "module/djonehub_voice_daemon_policy_test.c"
+      - "module/djonehub_sms_daemon.c"
+      - "module/djonehub_sms_protocol.c"
+      - "module/djonehub_sms_protocol.h"
+      - "module/djonehub_sms_protocol_test.c"
+      - "module/djonehub_qmi_wms_engine.c"
+      - "module/djonehub_qmi_wms_engine.h"
+      - "module/djonehub_wms_codec.c"
+      - "module/djonehub_wms_codec.h"
+      - "module/djonehub_wms_codec_test.c"
+      - "module/djonehub_control_protocol.c"
+      - "module/djonehub_control_protocol.h"
+      - "module/djonehub_control_protocol_test.c"
+      - "module/djonehub_crypto.c"
+      - "module/djonehub_crypto.h"
+      - "module/djonehub_voice_codec.c"
+      - "module/djonehub_voice_codec.h"
+      - "module/djonehub_voice_codec_test.c"
+      - "module/djonehub_voice_policy.c"
+      - "module/djonehub_voice_policy.h"
+      - "module/mavo_pcm_bridge.c"
+      - "module/mavo_pcm_resampler.h"
+      - "module/mavo_pcm_resampler_test.c"
+      - "module/qdc507_incall_card.c"
+      - "outputs/module/qdc507_incall_card.new.ko"
+      - "outputs/module/qdc507_incall_card.new.ko.sha256"
+      - "scripts/build_djonehubd_armel.sh"
+      - "scripts/build_sms_daemon_armel.sh"
+      - "scripts/build_pcm_bridge_armel.sh"
+      - "scripts/build_qdc507_incall_card.sh"
+      - ".github/workflows/build-djonehubd.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install ARMv7 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
+            libc6-dev-armel-cross linux-libc-dev-armel-cross
+
+      - name: Install Zig cross linker
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
+
+      - name: Build static ARMv7 sentinel
+        run: |
+          set -euxo pipefail
+          mkdir -p outputs/module
+          arm-linux-gnueabi-gcc \
+            -std=c11 -O2 -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon \
+            -static -fno-pie -no-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+            -U_TIME_BITS -U_FILE_OFFSET_BITS \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehubd.c -o outputs/module/djonehubd.armv7.static
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehubd.armv7 \
+            outputs/module/djonehubd.armv7.static
+          file outputs/module/djonehubd.armv7
+          readelf --file-header outputs/module/djonehubd.armv7
+          readelf --arch-specific outputs/module/djonehubd.armv7
+          readelf --program-headers outputs/module/djonehubd.armv7
+          test "$(readelf --file-header outputs/module/djonehubd.armv7 | grep -c 'Class:.*ELF32')" -eq 1
+          test "$(readelf --file-header outputs/module/djonehubd.armv7 | grep -c 'Machine:.*ARM')" -eq 1
+          test "$(readelf --arch-specific outputs/module/djonehubd.armv7 | grep -c 'Tag_CPU_arch: v7')" -eq 1
+          if readelf --arch-specific outputs/module/djonehubd.armv7 | grep -q 'Tag_ABI_VFP_args:.*VFP registers'; then
+            echo 'error: sentinel unexpectedly uses the hard-float ABI' >&2
+            exit 1
+          fi
+          if readelf --program-headers outputs/module/djonehubd.armv7 | grep -q INTERP; then
+            echo 'error: sentinel is not static' >&2
+            exit 1
+          fi
+          (cd outputs/module && sha256sum djonehubd.armv7 > djonehubd.armv7.sha256)
+          cat > outputs/module/BUILD-METADATA.txt <<'EOF'
+          target=ARMv7 EABI5 soft-float
+          link=static (CI portability sentinel; not the production daemon)
+          listen=192.168.225.1:45750
+          scope=TCP health response only; no AT, PCM, shell, or persistence
+          EOF
+
+      - name: Build read-only QMI Voice compatibility probe
+        run: |
+          set -euxo pipefail
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_voice_codec.c \
+            module/djonehub_voice_policy.c \
+            module/djonehub_voice_codec_test.c \
+            -o outputs/module/djonehub-voice-codec-test
+          outputs/module/djonehub-voice-codec-test
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_control_protocol.c \
+            module/djonehub_control_protocol_test.c \
+            -o outputs/module/djonehub-control-protocol-test
+          outputs/module/djonehub-control-protocol-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_control_protocol.c \
+            module/djonehub_control_protocol_test.c \
+            -o outputs/module/djonehub-control-protocol-test-sanitized
+          outputs/module/djonehub-control-protocol-test-sanitized
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_voice_daemon_policy_test.c \
+            -o outputs/module/djonehub-voice-daemon-policy-test
+          outputs/module/djonehub-voice-daemon-policy-test
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_sms_protocol.c \
+            module/djonehub_sms_protocol_test.c \
+            -o outputs/module/djonehub-sms-protocol-test
+          outputs/module/djonehub-sms-protocol-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehub_crypto.c \
+            module/djonehub_sms_protocol.c \
+            module/djonehub_sms_protocol_test.c \
+            -o outputs/module/djonehub-sms-protocol-test-sanitized
+          outputs/module/djonehub-sms-protocol-test-sanitized
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/djonehub_wms_codec.c \
+            module/djonehub_wms_codec_test.c \
+            -o outputs/module/djonehub-wms-codec-test
+          outputs/module/djonehub-wms-codec-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/djonehub_wms_codec.c \
+            module/djonehub_wms_codec_test.c \
+            -o outputs/module/djonehub-wms-codec-test-sanitized
+          outputs/module/djonehub-wms-codec-test-sanitized
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_qmi_probe.c module/djonehub_voice_codec.c -ldl \
+            -o outputs/module/djonehub-qmi-probe.armv7.unstripped
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_qmi_voice_control.c \
+            module/djonehub_qmi_voice_engine.c \
+            module/djonehub_voice_codec.c module/djonehub_voice_policy.c -ldl \
+            -o outputs/module/djonehub-qmi-voice-control.armv7.unstripped
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_voice_daemon.c \
+            module/djonehub_qmi_voice_engine.c \
+            module/djonehub_control_protocol.c module/djonehub_crypto.c \
+            module/djonehub_voice_codec.c module/djonehub_voice_policy.c -ldl \
+            -o outputs/module/djonehub-voice-daemon.armv7.unstripped
+          zig cc \
+            -target arm-linux-gnueabi.2.7 -mcpu=cortex_a7 -mfloat-abi=soft \
+            -std=c11 -O2 -fno-pie -no-pie -fno-stack-protector \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            -Wl,--hash-style=sysv,-z,max-page-size=4096,-z,stack-size=0 \
+            module/djonehub_sms_daemon.c \
+            module/djonehub_qmi_wms_engine.c module/djonehub_wms_codec.c \
+            module/djonehub_sms_protocol.c module/djonehub_crypto.c \
+            -ldl -pthread \
+            -o outputs/module/djonehub-sms-daemon.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-qmi-probe.armv7 \
+            outputs/module/djonehub-qmi-probe.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-qmi-voice-control.armv7 \
+            outputs/module/djonehub-qmi-voice-control.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-voice-daemon.armv7 \
+            outputs/module/djonehub-voice-daemon.armv7.unstripped
+          arm-linux-gnueabi-strip --strip-unneeded \
+            -o outputs/module/djonehub-sms-daemon.armv7 \
+            outputs/module/djonehub-sms-daemon.armv7.unstripped
+          audit_qmi_binary() {
+            binary=$1
+            file "$binary"
+            readelf --file-header "$binary"
+            readelf --arch-specific "$binary"
+            readelf --program-headers "$binary"
+            readelf --dynamic "$binary"
+            readelf --version-info "$binary"
+            test "$(readelf --file-header "$binary" | grep -c 'Class:.*ELF32')" -eq 1
+            test "$(readelf --file-header "$binary" | grep -c 'Machine:.*ARM')" -eq 1
+            test "$(readelf --file-header "$binary" | grep -c 'Type:.*EXEC')" -eq 1
+            test "$(readelf --arch-specific "$binary" | grep -c 'Tag_CPU_arch: v7')" -eq 1
+            if readelf --arch-specific "$binary" | grep -q 'Tag_ABI_VFP_args:.*VFP registers'; then
+              echo 'error: hard-float ABI is incompatible with the module' >&2
+              exit 1
+            fi
+            test "$(readelf --program-headers "$binary" | grep -c '/lib/ld-linux.so.3')" -eq 1
+            if readelf --program-headers "$binary" | grep -Eq '0x10000[[:space:]]*$'; then
+              echo 'error: 64 KiB segment alignment is incompatible with the module loader' >&2
+              exit 1
+            fi
+            if readelf --version-info "$binary" | grep -Eq 'GLIBC_2\.(8|9|[1-9][0-9])|GLIBC_[3-9]'; then
+              echo 'error: binary requires a newer glibc than the module provides' >&2
+              exit 1
+            fi
+            if readelf --dynamic "$binary" | grep -q GNU_HASH; then
+              echo 'error: module loader requires a SysV hash table' >&2
+              exit 1
+            fi
+            if readelf --dyn-syms --wide "$binary" | grep -q '[[:space:]]stderr\(@\|$\)'; then
+              echo 'error: stderr data relocation is incompatible with the module runtime' >&2
+              exit 1
+            fi
+          }
+          audit_qmi_binary outputs/module/djonehub-qmi-probe.armv7
+          audit_qmi_binary outputs/module/djonehub-qmi-voice-control.armv7
+          audit_qmi_binary outputs/module/djonehub-voice-daemon.armv7
+          audit_qmi_binary outputs/module/djonehub-sms-daemon.armv7
+          (cd outputs/module && sha256sum djonehub-qmi-probe.armv7 > djonehub-qmi-probe.armv7.sha256)
+          (cd outputs/module && sha256sum djonehub-qmi-voice-control.armv7 > djonehub-qmi-voice-control.armv7.sha256)
+          (cd outputs/module && sha256sum djonehub-voice-daemon.armv7 > djonehub-voice-daemon.armv7.sha256)
+          (cd outputs/module && sha256sum djonehub-sms-daemon.armv7 > djonehub-sms-daemon.armv7.sha256)
+          cat >> outputs/module/BUILD-METADATA.txt <<'EOF'
+
+          qmi_probe=dynamically linked ARMv7 EABI5 soft-float, glibc <= 2.7
+          qmi_probe_scope=read-only QMI Voice 2/0x4D/6 initialization + Get All Call Info
+          qmi_probe_writes=no call control, no modem configuration, no persistence
+          qmi_control=candidate one-shot status/dial/answer/end with precondition and read-back confirmation
+          qmi_control_deployment=not pinned by the macOS API; do not persist
+          voice_daemon=authenticated one-request TCP control on 192.168.225.1:45750
+          voice_daemon_auth=fresh 32-byte challenge + full HMAC-SHA256 request and response tags
+          voice_daemon_scope=fixed status/dial/answer/end only; no shell, AT passthrough, or arbitrary QMI
+          voice_daemon_deployment=development one-shot boot arming only; production persistence is not approved
+          sms_daemon=authenticated fixed-operation QMI WMS gateway on 192.168.225.1:45752
+          sms_daemon_scope=status/list/read/send-raw/delete; no shell, AT passthrough, or arbitrary QMI
+          EOF
+
+      - name: Build authenticated uplink PCM bridge
+        run: |
+          set -euxo pipefail
+          ./scripts/build_pcm_bridge_armel.sh --container
+
+      - name: Test PCM resampler
+        run: |
+          set -euxo pipefail
+          cc \
+            -std=c11 -O2 -Wall -Wextra -Wpedantic -Wconversion \
+            -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+            -Wmissing-prototypes -Wundef -Werror \
+            module/mavo_pcm_resampler_test.c -lm \
+            -o outputs/module/mavo-pcm-resampler-test
+          outputs/module/mavo-pcm-resampler-test
+          cc \
+            -std=c11 -O1 -g -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion \
+            -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes \
+            -Wundef -Werror \
+            module/mavo_pcm_resampler_test.c -lm \
+            -o outputs/module/mavo-pcm-resampler-test-sanitized
+          outputs/module/mavo-pcm-resampler-test-sanitized
+
+      - name: Verify pinned QDC507 in-call card
+        run: |
+          set -euxo pipefail
+          (cd outputs/module && sha256sum -c qdc507_incall_card.new.ko.sha256)
+          readelf --file-header outputs/module/qdc507_incall_card.new.ko
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Class:.*ELF32')" -eq 1
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Data:.*little endian')" -eq 1
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Type:.*REL')" -eq 1
+          test "$(readelf --file-header outputs/module/qdc507_incall_card.new.ko | grep -c 'Machine:.*ARM')" -eq 1
+          strings outputs/module/qdc507_incall_card.new.ko | grep -F 'vermagic=3.18.44 preempt mod_unload ARMv7 p2v8'
+
+      - name: Upload sentinel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: djonehubd-armv7-sentinel
+          path: outputs/module/
+          if-no-files-found: error

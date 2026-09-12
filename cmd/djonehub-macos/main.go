@@ -122,10 +122,12 @@ type app struct {
 	moduleVoiceMu             sync.Mutex
 	moduleVoiceOpMu           sync.Mutex
 	moduleVoiceReady          bool
+	moduleVoiceBlocked        bool
 	moduleVoiceLast           time.Time
 	moduleVoiceErr            string
 	moduleVoiceDetail         string
 	moduleVoiceWarming        bool
+	moduleVoiceTestBypass     bool
 	moduleVoiceStopTimer      *time.Timer
 	moduleVoiceStopGeneration uint64
 
@@ -299,11 +301,23 @@ func main() {
 	var listen string
 	var demo bool
 	var webConsole bool
+	var notify moduleNotifyOptions
 	flag.StringVar(&port, "port", "", "AT serial port; auto-detected when omitted")
 	flag.StringVar(&listen, "listen", "127.0.0.1:7575", "HTTP listen address")
 	flag.BoolVar(&demo, "demo", false, "run the web UI with simulated modem data")
 	flag.BoolVar(&webConsole, "web-console", false, "serve the embedded compatibility console")
+	flag.StringVar(&notify.Action, "module-notify", "", "module notifications: install, start, stop, status, test-bark, test-webpush, probe-network, probe-runtime, enable-boot, disable-boot")
+	flag.StringVar(&notify.ArtifactDir, "notify-artifacts", "outputs/module", "notification ARM artifact directory")
+	flag.StringVar(&notify.ConfigPath, "notify-config", "", "private notification config to install")
+	flag.StringVar(&notify.CAPath, "notify-ca", "/etc/ssl/cert.pem", "public CA bundle to install")
 	flag.Parse()
+	if notify.Action != "" {
+		if err := runModuleNotify(notify); err != nil {
+			log.Print(err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if demo {
 		instance := newDemoApp()
@@ -1103,6 +1117,20 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/calls/audio/host/register", a.audioHostRegister)
 	mux.HandleFunc("GET /api/calls/audio/host/config", a.audioHostConfig)
 	mux.HandleFunc("GET /api/voice/status", a.voiceStatusAPI)
+	mux.HandleFunc("GET /api/module/adb-inventory", a.moduleADBInventoryAPI)
+	mux.HandleFunc("GET /api/module/adb-qmi-bundle", a.moduleADBQMIBundleAPI)
+	mux.HandleFunc("POST /api/module/qmi-voice/probe", a.qmiVoiceProbeAPI)
+	mux.HandleFunc("POST /api/module/qmi-voice/control/status", a.qmiVoiceControlStatusAPI)
+	mux.HandleFunc("POST /api/module/qmi-voice/control/dial", a.qmiVoiceControlDialAPI)
+	mux.HandleFunc("POST /api/module/qmi-voice/control/answer", a.qmiVoiceControlAnswerAPI)
+	mux.HandleFunc("POST /api/module/qmi-voice/control/end", a.qmiVoiceControlEndAPI)
+	mux.HandleFunc("POST /api/module/qmi-voice/daemon/status", a.qmiVoiceDaemonStatusAPI)
+	mux.HandleFunc("POST /api/module/qmi-sms/daemon/status", a.qmiSMSGatewayStatusAPI)
+	mux.HandleFunc("POST /api/module/qmi-sms/session/status", a.qmiSMSSessionStatusAPI)
+	mux.HandleFunc("GET /api/ios/voice-test", a.voiceTestStatusAPI)
+	mux.HandleFunc("POST /api/ios/voice-test/arm-once", a.voiceTestArmOnceAPI)
+	mux.HandleFunc("POST /api/ios/voice-test/arm-session", a.voiceTestArmSessionAPI)
+	mux.HandleFunc("POST /api/ios/voice-test/uninstall", a.voiceTestUninstallAPI)
 	mux.HandleFunc("POST /api/voice/provision", a.voiceProvisionAPI)
 	mux.HandleFunc("GET /api/module/setup", a.moduleSetupStatusAPI)
 	mux.HandleFunc("POST /api/module/setup", a.moduleSetupStartAPI)
@@ -1121,6 +1149,9 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/network/check-proxy", a.checkProxyRoute)
 	mux.HandleFunc("POST /api/network/usbnet", a.setUSBNetMode)
 	mux.HandleFunc("POST /api/network/reboot-module", a.rebootModule)
+	mux.HandleFunc("GET /api/ios/sentinel", a.sentinelStatusAPI)
+	mux.HandleFunc("POST /api/ios/sentinel/install-once", a.sentinelInstallOnceAPI)
+	mux.HandleFunc("POST /api/ios/sentinel/uninstall", a.sentinelUninstallAPI)
 	mux.HandleFunc("GET /api/usb/profile", a.usbProfile)
 	mux.HandleFunc("POST /api/usb/profile", a.setUSBProfile)
 	mux.HandleFunc("GET /api/esim", a.esimOverview)

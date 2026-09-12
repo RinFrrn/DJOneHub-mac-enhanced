@@ -824,6 +824,81 @@ NAND/SBL 故障
 
 因此，当前 iOS 架构可以避免本次同级别事故的核心原因，是因为它不需要日常进入 EDL、修改分区表或写 SBL。真正需要在实施前补齐的是：删除运行态全 MTD 扫描要求，增加原子双版本安装、启动熔断、权限隔离、USB 配置回滚和独立救援包。
 
+### 14.12 `rmnet` 不能被当作已验证的 USB Ethernet
+
+阶段 A 实机盘点发现当前 gadget functions 为：
+
+```text
+diag,serial,rmnet,ffs,audio
+```
+
+模块内部虽有 `bridge0=192.168.225.1/24`，但 `bridge0/brif` 为空，macOS 也没有枚举出
+对应 USB 网卡。`rmnet` 是 Qualcomm 厂商数据 function，不能因为模块内部出现一个 IP
+地址就把它等同于 iPhone 可访问的 ECM/NCM 网络。模块同时存在 `f_ecm`、`f_ncm`、
+`f_rndis`、`f_usb_mbim` 节点，只能证明内核包含相关 function，不能证明任一组合安全可用。
+
+这正是 14.7 所述“USB 配置软砖”风险的实际例子。后续测试 ECM/NCM 必须：
+
+1. 保存当前完整 USB tuple 和正常枚举证据；
+2. 先采用 RAM/临时组合或具备独立超时回滚的试验机制；
+3. 同时验证真实 iPhone、Mac、AT、ADB 和模块冷启动；
+4. 失败后自动恢复 `diag,serial,rmnet,ffs,audio`，不得靠 iPhone 执行救援；
+5. 未通过前不写持久 `USBCFG`，不把“USB Ethernet 已可用”写进发布承诺。
+
+### 14.13 活动电话中的 D5/D6 验证与占用陷阱
+
+阶段 A 后续实测否定了最初的 D5/D6 网络媒体映射，并暴露了 USB Audio 与网络 PCM
+不能并行打开的细节：
+
+- D5 playback 和 D6 capture 的 period 都是 256 字节，即 8 kHz、S16LE、单声道下
+  的 128 samples / 16 ms；
+- 活动电话中读取 D6 3 秒得到 `peak=11788` 和 `nonzero_samples=23515`，但实时 DAPM
+  后续证明 D6 位于 `PCM_TX`/VoLTE 上行输入侧；结合其空闲读取不按时钟推进，这些值
+  可能是 gadget 关闭前的残留环形缓冲，不能确认蜂窝下行；
+- 向 D5 先后写入约 -24 dBFS 和 -9 dBFS 的限幅 WAV，设备均报告完整播放和状态 0，
+  但通话对端均未听到；DAPM 显示 D5 位于 `PCM_RX`，不能进入
+  `PCM_TX -> VoLTE_UL`，因此该上行候选被否定；
+- 每次测试结束都把 `audio_enable` 恢复为 1，原 D4 route 进程保持存活，通话没有挂断。
+
+最容易误判的是进程文件描述符：route helper 的 `/proc/<pid>/fd` 只显示 D4 capture 和
+playback，但 USB gadget 启用后，ALSA status 会把 D5/D6 也登记为同一 owner，第二个
+open 返回 `EBUSY`。因此不能把“进程没有 D5/D6 fd”理解为代理 PCM 空闲，也不能在现有
+UAC 通话旁边直接启动第二个网络 helper。
+
+本轮只使用 `/tmp` 文件和带 `EXIT/HUP/INT/TERM` trap 的临时脚本，没有写 rootfs、UBI、
+MTD 或持久 USB 配置。模块自带 `aplay` 也有两个非标准行为：长输入路径会被截断，并且
+指定 PCM 参数后仍要求 RIFF/WAV 文件。这些失败均在写入 D5 前返回，且自动恢复了
+`audio_enable`。生产实现不应复用这套诊断切换；应由单一 session owner 在 UAC 与网络
+模式之间原子切换，并在退出路径统一回滚 mixer、PCM 与 gadget 状态。进一步分别使用
+网络候选 helper 和固定哈希的上游 MaVo helper 测试 MultiMedia1：即使 D4 完全退出、
+`audio_enable=0`、Auxpcm ACDB 已校准，D0 playback/capture 仍在 prepare 阶段返回
+`EINVAL`。当前 runtime manifest 也不要求 D0，不能把保留的默认代码误当作已支持路径。
+
+现有 UAC 仍值得用真实 iPhone 做枚举和拆向诊断，但下节的 Apple Audio Session 约束
+已经否定它作为完整 iPhone 通话媒体方案。生产路线必须修改内核驱动暴露方向正确的
+用户态 PCM，并验证 ECM/NCM 控制与媒体。该路线不需要写 MTD，仍应先在 `/tmp` 与临时
+USB 配置下验证。
+
+### 14.14 iOS UAC 双路由限制与真机探针
+
+本机 Xcode 27 / iOS 27 SDK 的公开头文件确认 `AVAudioSessionPortUSBAudio` 同时适用于
+输入和输出，但完整手持通话所需的设备集合不是一套普通双向 USB 声卡可以满足的：
+
+- iPhone 需要同时采集模块 USB 下行和内置麦克风；
+- iPhone 需要同时向模块 USB 上行输出，并从内置听筒/扬声器播放下行；
+- 传统 `multiRoute` 只有 last-in input，不能并行取得两个输入；
+- iOS 26.2 `dualRoute` 的第二设备只支持有线耳麦、Bluetooth LE/HFP，不支持 USB。
+
+仓库因此新增 iOS 17+ SwiftUI 探针 `ios/DJOneHubUACProbe`，分别验证 USB 输入下行与
+内置麦克风到 USB 输出的上行，并记录 current route、available inputs、UID、声道、
+采样率、I/O buffer 和路由事件。探针已通过 iphoneos arm64 无签名编译，但尚未在真实
+iPhone + QDC507 上运行。即便两个方向分开成功，也不能越过系统只允许一套当前通话
+路由的限制。
+
+这项修正反而降低了模块事故风险：后续不会为了迁就 iOS UAC 去反复猜 ALSA 设备号或
+持久修改 gadget composition，而是把风险集中在可回滚的 ECM/NCM 试验和受版本控制的
+内核音频接口。驱动和 USB 配置仍必须遵守本报告的双版本安装、启动熔断与自动回滚要求。
+
 ## 15. 相关文档
 
 - [iOS 模块侧电话网关设计](ios-module-gateway-design.md)

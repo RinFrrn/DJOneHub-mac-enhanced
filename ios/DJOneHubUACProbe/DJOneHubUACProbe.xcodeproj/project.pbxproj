@@ -1,0 +1,512 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* DJOneHubUACProbeApp.swift */; };
+		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
+		A10000000000000000000003 /* AudioProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AudioProbeModel.swift */; };
+		A10000000000000000000004 /* VoiceControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* VoiceControlProtocol.swift */; };
+		A10000000000000000000005 /* VoiceControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* VoiceControlClient.swift */; };
+		A10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
+		A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
+		A10000000000000000000008 /* CallAudioCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* CallAudioCoordinator.swift */; };
+		A10000000000000000000009 /* DownlinkJitterBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* DownlinkJitterBuffer.swift */; };
+		A10000000000000000000010 /* DownlinkPCMPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* DownlinkPCMPlayer.swift */; };
+		A10000000000000000000011 /* PCMTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* PCMTransport.swift */; };
+		A10000000000000000000012 /* DownlinkPlaybackMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */; };
+		A10000000000000000000013 /* DownlinkPlayoutQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */; };
+		A10000000000000000000017 /* AudioRouteRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* AudioRouteRecoveryState.swift */; };
+		A10000000000000000000018 /* CallRecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* CallRecordingController.swift */; };
+		A10000000000000000000019 /* VoiceControlRequestArbitration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* VoiceControlRequestArbitration.swift */; };
+		A1000000000000000000001A /* SMSControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001A /* SMSControl.swift */; };
+		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
+		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
+		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
+		B10000000000000000000004 /* VoiceControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* VoiceControlProtocol.swift */; };
+		B10000000000000000000005 /* VoiceControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* VoiceControlClient.swift */; };
+		B10000000000000000000006 /* PairingKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* PairingKeyStore.swift */; };
+		B10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* UplinkAudioProtocol.swift */; };
+		B10000000000000000000008 /* CallAudioCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* CallAudioCoordinator.swift */; };
+		B10000000000000000000009 /* ProductCallPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* ProductCallPhase.swift */; };
+		B10000000000000000000010 /* DownlinkJitterBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* DownlinkJitterBuffer.swift */; };
+		B10000000000000000000011 /* DownlinkPCMPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* DownlinkPCMPlayer.swift */; };
+		B10000000000000000000012 /* PCMTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* PCMTransport.swift */; };
+		B10000000000000000000013 /* DownlinkPlaybackMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */; };
+		B10000000000000000000014 /* DownlinkPlayoutQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */; };
+		B10000000000000000000015 /* AudioRouteRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* AudioRouteRecoveryState.swift */; };
+		B10000000000000000000016 /* CallRecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* CallRecordingController.swift */; };
+		B10000000000000000000017 /* PhoneProductModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* PhoneProductModels.swift */; };
+		B10000000000000000000018 /* KeypadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* KeypadView.swift */; };
+		B10000000000000000000019 /* PhoneLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* PhoneLibraryViews.swift */; };
+		B1000000000000000000001A /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* InCallView.swift */; };
+		B1000000000000000000001B /* VoiceControlRequestArbitration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* VoiceControlRequestArbitration.swift */; };
+		B1000000000000000000001C /* SMSControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001A /* SMSControl.swift */; };
+		B1000000000000000000001D /* IncomingCallPushEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000B /* IncomingCallPushEvent.swift */; };
+		B1000000000000000000001E /* SystemCallCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* SystemCallCoordinator.swift */; };
+		B1000000000000000000001F /* NotificationControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* NotificationControl.swift */; };
+		A10000000000000000000030 /* ModuleAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* ModuleAuthorization.swift */; };
+		B10000000000000000000030 /* ModuleAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* ModuleAuthorization.swift */; };
+		A10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ModuleAuthorizationClient.swift */; };
+		B10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ModuleAuthorizationClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* DJOneHubUACProbeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubUACProbeApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* AudioProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioProbeModel.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000005 /* DJOneHubUACProbe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DJOneHubUACProbe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000006 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		A20000000000000000000007 /* VoiceControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlProtocol.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* VoiceControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlClient.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* PairingKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKeyStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* UplinkAudioProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplinkAudioProtocol.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* CallAudioCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAudioCoordinator.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* DownlinkJitterBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkJitterBuffer.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 /* DownlinkPCMPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkPCMPlayer.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* PCMTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMTransport.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkPlaybackMetrics.swift; sourceTree = "<group>"; };
+		A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownlinkPlayoutQueueState.swift; sourceTree = "<group>"; };
+		A20000000000000000000017 /* AudioRouteRecoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteRecoveryState.swift; sourceTree = "<group>"; };
+		A20000000000000000000018 /* CallRecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordingController.swift; sourceTree = "<group>"; };
+		A20000000000000000000019 /* VoiceControlRequestArbitration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlRequestArbitration.swift; sourceTree = "<group>"; };
+		A2000000000000000000001A /* SMSControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMSControl.swift; sourceTree = "<group>"; };
+		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000005 /* DJOneHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DJOneHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000006 /* ProductCallPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCallPhase.swift; sourceTree = "<group>"; };
+		B20000000000000000000007 /* PhoneProductModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneProductModels.swift; sourceTree = "<group>"; };
+		B20000000000000000000008 /* KeypadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeypadView.swift; sourceTree = "<group>"; };
+		B20000000000000000000009 /* PhoneLibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneLibraryViews.swift; sourceTree = "<group>"; };
+		B2000000000000000000000A /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
+		B2000000000000000000000B /* IncomingCallPushEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomingCallPushEvent.swift; sourceTree = "<group>"; };
+		B2000000000000000000000C /* SystemCallCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCallCoordinator.swift; sourceTree = "<group>"; };
+		B2000000000000000000000D /* NotificationControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationControl.swift; sourceTree = "<group>"; };
+		A20000000000000000000030 /* ModuleAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorization.swift; sourceTree = "<group>"; };
+		A20000000000000000000031 /* ModuleAuthorizationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorizationClient.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* DJOneHubUACProbe */,
+				B40000000000000000000001 /* DJOneHub */,
+				A20000000000000000000006 /* README.md */,
+				A40000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* DJOneHubUACProbe */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000003 /* App */,
+				A40000000000000000000004 /* Audio */,
+				A40000000000000000000006 /* Control */,
+				A20000000000000000000004 /* Info.plist */,
+			);
+			path = DJOneHubUACProbe;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* DJOneHubUACProbeApp.swift */,
+				A20000000000000000000002 /* ContentView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000003 /* AudioProbeModel.swift */,
+				A20000000000000000000017 /* AudioRouteRecoveryState.swift */,
+				A20000000000000000000011 /* CallAudioCoordinator.swift */,
+				A20000000000000000000018 /* CallRecordingController.swift */,
+				A20000000000000000000012 /* DownlinkJitterBuffer.swift */,
+				A20000000000000000000015 /* DownlinkPlaybackMetrics.swift */,
+				A20000000000000000000016 /* DownlinkPlayoutQueueState.swift */,
+				A20000000000000000000013 /* DownlinkPCMPlayer.swift */,
+				A20000000000000000000014 /* PCMTransport.swift */,
+				A20000000000000000000010 /* UplinkAudioProtocol.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000005 /* DJOneHubUACProbe.app */,
+				B20000000000000000000005 /* DJOneHub.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* Control */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000007 /* VoiceControlProtocol.swift */,
+				A20000000000000000000008 /* VoiceControlClient.swift */,
+				A20000000000000000000019 /* VoiceControlRequestArbitration.swift */,
+				A2000000000000000000001A /* SMSControl.swift */,
+				A20000000000000000000009 /* PairingKeyStore.swift */,
+				A20000000000000000000031 /* ModuleAuthorizationClient.swift */,
+				A20000000000000000000030 /* ModuleAuthorization.swift */,
+			);
+			path = Control;
+			sourceTree = "<group>";
+		};
+		B40000000000000000000001 /* DJOneHub */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* DJOneHubApp.swift */,
+				B20000000000000000000002 /* DJOneHubRootView.swift */,
+				B20000000000000000000003 /* CallLifecycleCoordinator.swift */,
+				B20000000000000000000006 /* ProductCallPhase.swift */,
+				B20000000000000000000007 /* PhoneProductModels.swift */,
+				B20000000000000000000008 /* KeypadView.swift */,
+				B20000000000000000000009 /* PhoneLibraryViews.swift */,
+				B2000000000000000000000A /* InCallView.swift */,
+				B2000000000000000000000B /* IncomingCallPushEvent.swift */,
+				B2000000000000000000000C /* SystemCallCoordinator.swift */,
+				B2000000000000000000000D /* NotificationControl.swift */,
+				B20000000000000000000004 /* Info.plist */,
+			);
+			path = DJOneHub;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* DJOneHubUACProbe */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A60000000000000000000002 /* Build configuration list for PBXNativeTarget "DJOneHubUACProbe" */;
+			buildPhases = (
+				A70000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A70000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DJOneHubUACProbe;
+			productName = DJOneHubUACProbe;
+			productReference = A20000000000000000000005 /* DJOneHubUACProbe.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B50000000000000000000001 /* DJOneHub */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B60000000000000000000001 /* Build configuration list for PBXNativeTarget "DJOneHub" */;
+			buildPhases = (
+				B70000000000000000000001 /* Sources */,
+				B30000000000000000000001 /* Frameworks */,
+				B70000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DJOneHub;
+			productName = DJOneHub;
+			productReference = B20000000000000000000005 /* DJOneHub.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A80000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					B50000000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+				};
+			};
+			buildConfigurationList = A60000000000000000000001 /* Build configuration list for PBXProject "DJOneHubUACProbe" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* DJOneHubUACProbe */,
+				B50000000000000000000001 /* DJOneHub */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A70000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B70000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */,
+				A10000000000000000000002 /* ContentView.swift in Sources */,
+				A10000000000000000000003 /* AudioProbeModel.swift in Sources */,
+				A10000000000000000000004 /* VoiceControlProtocol.swift in Sources */,
+				A10000000000000000000005 /* VoiceControlClient.swift in Sources */,
+				A10000000000000000000006 /* PairingKeyStore.swift in Sources */,
+				A10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */,
+				A10000000000000000000030 /* ModuleAuthorization.swift in Sources */,
+				A10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
+				A10000000000000000000008 /* CallAudioCoordinator.swift in Sources */,
+				A10000000000000000000009 /* DownlinkJitterBuffer.swift in Sources */,
+				A10000000000000000000010 /* DownlinkPCMPlayer.swift in Sources */,
+				A10000000000000000000011 /* PCMTransport.swift in Sources */,
+				A10000000000000000000012 /* DownlinkPlaybackMetrics.swift in Sources */,
+				A10000000000000000000013 /* DownlinkPlayoutQueueState.swift in Sources */,
+				A10000000000000000000017 /* AudioRouteRecoveryState.swift in Sources */,
+				A10000000000000000000018 /* CallRecordingController.swift in Sources */,
+				A10000000000000000000019 /* VoiceControlRequestArbitration.swift in Sources */,
+				A1000000000000000000001A /* SMSControl.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* DJOneHubApp.swift in Sources */,
+				B10000000000000000000002 /* DJOneHubRootView.swift in Sources */,
+				B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */,
+				B10000000000000000000009 /* ProductCallPhase.swift in Sources */,
+				B10000000000000000000004 /* VoiceControlProtocol.swift in Sources */,
+				B10000000000000000000005 /* VoiceControlClient.swift in Sources */,
+				B10000000000000000000006 /* PairingKeyStore.swift in Sources */,
+				B10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */,
+				B10000000000000000000030 /* ModuleAuthorization.swift in Sources */,
+				B10000000000000000000007 /* UplinkAudioProtocol.swift in Sources */,
+				B10000000000000000000008 /* CallAudioCoordinator.swift in Sources */,
+				B10000000000000000000010 /* DownlinkJitterBuffer.swift in Sources */,
+				B10000000000000000000011 /* DownlinkPCMPlayer.swift in Sources */,
+				B10000000000000000000012 /* PCMTransport.swift in Sources */,
+				B10000000000000000000013 /* DownlinkPlaybackMetrics.swift in Sources */,
+				B10000000000000000000014 /* DownlinkPlayoutQueueState.swift in Sources */,
+				B10000000000000000000015 /* AudioRouteRecoveryState.swift in Sources */,
+				B10000000000000000000016 /* CallRecordingController.swift in Sources */,
+				B10000000000000000000017 /* PhoneProductModels.swift in Sources */,
+				B10000000000000000000018 /* KeypadView.swift in Sources */,
+				B10000000000000000000019 /* PhoneLibraryViews.swift in Sources */,
+				B1000000000000000000001A /* InCallView.swift in Sources */,
+				B1000000000000000000001B /* VoiceControlRequestArbitration.swift in Sources */,
+				B1000000000000000000001C /* SMSControl.swift in Sources */,
+				B1000000000000000000001D /* IncomingCallPushEvent.swift in Sources */,
+				B1000000000000000000001E /* SystemCallCoordinator.swift in Sources */,
+				B1000000000000000000001F /* NotificationControl.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A90000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DJOneHubUACProbe/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A90000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DJOneHubUACProbe/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DJOneHub/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
+				PRODUCT_NAME = DJOneHub;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M4Z7KWKY5J;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DJOneHub/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
+				PRODUCT_NAME = DJOneHub;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A60000000000000000000001 /* Build configuration list for PBXProject "DJOneHubUACProbe" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000001 /* Debug */,
+				A90000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A60000000000000000000002 /* Build configuration list for PBXNativeTarget "DJOneHubUACProbe" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000003 /* Debug */,
+				A90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B60000000000000000000001 /* Build configuration list for PBXNativeTarget "DJOneHub" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B90000000000000000000001 /* Debug */,
+				B90000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A80000000000000000000001 /* Project object */;
+}

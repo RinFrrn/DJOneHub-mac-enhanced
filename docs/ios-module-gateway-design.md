@@ -4,7 +4,117 @@
 
 目标是在不依赖 Mac 或另一台常驻设备的情况下，让 iPhone 通过 USB 直连大疆第一代 4G 模块，在前台完成拨号、接听、挂断和双向通话。
 
-当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过模块已有的 USB Ethernet 向 iPhone 提供受控的网络协议。
+当前 macOS 实现不能原样移植到 iOS：它依赖 libusb/IOKit 直接访问模块的 USB AT、ADB 和 UAC 接口，而普通 iOS App 没有这些能力。可行方向是把电话控制和语音传输移到模块内部，再通过 iPhone 能识别的 USB 网络功能向 App 提供受控协议。实机基线是 Qualcomm 厂商 `rmnet`，不是通用 USB Ethernet。ECM 已分别在 Mac 和真实 iPhone 上完成枚举、上网及模块 TCP 闭环验证；NCM 仍未验证。
+
+### 1.0 控制平面当前进度（2026-09-04）
+
+QDC507 当前 ECM 地址固定为 `192.168.225.1`，认证 voice daemon 监听 TCP `45750`。
+短信认证网关使用独立 TCP `45752` 和独立协议魔数。模块 WMS `STATUS` 以及 SIM/NV
+`LIST` 已实机通过，iOS 信息页已接入认证只读客户端；真实短信 `READ` 与发送仍待有消息
+样本后验收。设计和验证记录见 [qdc507-sms-gateway.md](qdc507-sms-gateway.md)。
+现有一次性候选已在 Mac 侧完成真实来电 `STATUS`、`ANSWER`、`END` 验收；最近一次
+`STATUS` 部署结果明确为 `authenticated=true`、`one_shot=true`、`persistent=false`。
+这只证明控制面，不代表 iOS 双向通话媒体已经完成。
+
+`ios/DJOneHubUACProbe` 现在增加纯 Swift 控制客户端：
+
+- `Network.framework` 建立 ECM TCP 连接，每连接只允许一个请求，并强制走
+  `.wiredEthernet`，避免相同 Wi-Fi 子网抢占路由；
+- `CryptoKit` 执行完整 32-byte HMAC-SHA256(`nonce || unsigned frame`)；
+- 严格解析 20-byte 大端 header、32-byte HELLO nonce、request ID、状态码和 call snapshot；
+- 仅暴露 `status/dial/answer/end` async API，不提供任意 QMI/AT 透传；
+- pairing key 必须由调用方注入 32 字节内存值，仓库不硬编码、不生成凭据；生产配对
+  完成后只允许按稳定模块标识显式写入不可同步的设备 Keychain；
+- connect/read/write 默认 5 秒有界，超时和任务取消都会关闭连接；
+- DIAL 与 call ID 在客户端先做白名单校验。
+
+探针 UI 已接入受限电话控制区域：`VoiceControlModel` 默认没有凭据；短期 STATUS 凭据
+只能读取状态，短期 control-session 凭据才会显示拨号、按 call ID 接听和挂断。App
+每秒执行一次认证 STATUS 轮询来刷新来电状态，拨号前要求界面二次确认。UI 不接收自由
+格式 AT/QMI 命令，也不把 key 放入文本框、UserDefaults 或日志。
+
+模块到 iPhone 的双向 ECM PCM、前后台与锁屏通话、断流恢复均已完成真机验收。仍未完成
+的是生产 pairing/轮换/双端撤销、后台来电与 CallKit 生命周期；当前开发配对不能替代
+产品首次信任根。
+
+为推进只读 STATUS 实机闭环，仓库增加了明确标注为 development-only 的一次性测试配对：
+Mac 后端生成随机 32 字节 key、在模块启动一次认证 daemon，并输出 30 天内可导入的 JSON
+配对包；iOS 校验固定 purpose/endpoint、有效期和 key 指纹后，按模块写入不可同步
+Keychain。该流程仍依赖 Mac 完成首次武装，不能替代下节要求的生产信任根。
+
+STATUS 实机闭环通过后又增加了 `development-control-session`。为支持无独立供电模块在
+Mac 与 iPhone 之间换接，它现在是**持久开发配对**：`run-control-session` marker、`pairing.key`
+和精确的 rc5 启动链接均保留在模块持久分区，模块每次上电都会恢复受认证控制 daemon 与
+PCM bridge，直至 Mac 卸载接口显式清理。它仍依赖 Mac 注入初始 key，不是生产配对。原
+`development-status-only` 明确以 `--once --status-only` 启动，非 STATUS 请求在模块
+侧返回 `FORBIDDEN`，iOS Keychain 的旧 32 字节裸值也只会迁移为只读权限。
+
+新导入凭据在 Keychain envelope v2 中保存权限、创建时间和到期时间，App 每次恢复凭据
+都会重新校验；既有 v1 control-session envelope 会在首次恢复时原地补成从升级时起 30 天
+有效的 v2，不改变 key、权限或模块标识，也不要求重新导入。当前 App 的删除操作只清理
+iPhone 本机 Keychain；模块侧撤销
+必须把模块接回 Mac 并调用测试卸载接口。生产版本必须把这两端合成可确认、可报告部分失败
+的统一撤销流程。
+
+### 1.0.1 配对是独立的产品门槛
+
+当前 daemon 的 `--key-file` 只解决“双方已经持有同一把密钥”后的认证，并没有解决
+首次把密钥安全交给 iPhone。ECM 是可访问网络，不能把 pairing key 明文或通过未认证
+TCP 传给 App；否则插入模块的任意主机都能接管电话控制。要实现真正的“只用 iPhone”，
+模块还必须提供一个用户可确认的一次性配对通道，例如实体按键/LED PIN、出厂 QR 或
+受保护的 USB 配置接口。配对完成后再执行以下生命周期：
+
+1. iPhone 生成临时公钥并发送配对请求；模块仅在物理确认窗口内接受请求。
+2. 双方用临时密钥协商出会话密钥，模块随机生成新的 32 字节控制 key，并只通过该
+   加密会话返回一次。
+3. iPhone 将 key 放入 Keychain（不可同步、设备解锁后可用），模块以 `0600` 写入
+   `/usrdata/djonehub/pairing.key`；两端回读指纹，不回显 key 内容。
+4. 轮换先建立第二把 key 并完成一次 STATUS，再原子替换旧 key；撤销则清除模块 key
+   并让 App 删除对应 Keychain 项。
+
+在上述硬件/固件配对入口落地前，App 只能保留内存注入和只读 STATUS 的开发接口，不能
+声称已具备无 Mac 的生产拨号能力。
+
+### 1.1 现有 UAC 不能单独组成 iPhone 通话
+
+2026-08-28 使用本机 Xcode 27 / iOS 27 SDK 复核 Apple 公共 API 后，否定了“保留
+模块 UAC 作为全部通话媒体、USB 网络只做控制”的中间方案：
+
+- 模块电话下行在 iPhone 上表现为 USB Audio **输入**，而说话人的声音来自 iPhone
+  内置麦克风；完整通话要求同时采集两个输入设备。
+- 模块电话上行在 iPhone 上表现为 USB Audio **输出**，而用户需要从 iPhone 听筒或
+  扬声器听到下行；完整通话也要求同时使用两个输出设备。
+- 普通 `playAndRecord` 可以从 `availableInputs` 选择一个偏好输入，但这不是并行采集。
+- 传统 `multiRoute` 明确将输入限制为 last-in input；内置扬声器也只允许在没有其他
+  eligible output 时使用。
+- iOS 26.2 的 `dualRoute` 虽能同时使用内置麦克风/扬声器与第二套双向设备，但 Apple
+  当前只列出有线耳麦、Bluetooth LE 和 Bluetooth HFP，明确没有 USB Audio。
+
+因此现有 UAC 只保留为 macOS 媒体路径和 iPhone 实机诊断手段，不能作为 iOS 生产架构
+的完成条件。生产方案仍需把电话上下行都暴露给模块用户态网关，经 ECM/NCM 传给 App；
+iPhone 的 Audio Session 只使用一套正常的内置/耳麦通话路由。
+
+### 1.2 iPhone 27 真机拆向验证
+
+在 iPhone 18,4、iOS 27.0 和 QDC507 `BAIWANG` UAC 实机上，探针得到以下结果：
+
+- 模块空闲时可枚举为 `AC Interface` 输入和 `AS Interface` 输出，均为单声道
+  USB Audio，8 kHz、23 ms buffer。
+- 选择内置麦克风后，路由为“内置麦克风输入 + 模块 USB 输出”，采样率 48 kHz；
+  `AVAudioEngine` 可稳定把麦克风 PCM 渲染到 USB 输出，输入电平随说话变化。
+- 选择“USB 输入 + iPhone 扬声器”时，iOS 的 `overrideOutputAudioPort(.speaker)` 会
+  同时把输入强制切回内置麦克风。模块 USB 输入仍列在 `availableInputs`，但为 0 ch，
+  不能被当前音频图读取。
+- 首次在路由切换后立即建图曾触发 `com.apple.coreaudio.avfaudio -10868` 并导致 App
+  退出；等待最后一个 route-change 事件稳定 500 ms 并重建 `AVAudioEngine` 后可避免。
+
+这组实测把“两个方向分别可用”和“同一会话全双工可用”明确区分开：前者成立，后者
+仍被 iOS 单一当前输入与扬声器路由规则阻断。探针中的扬声器模式只用于记录该限制，
+不是生产通话实现。
+
+仓库已增加 `ios/DJOneHubUACProbe`，可把两个方向拆开验证：选择 USB 输入观察电话下行，
+或选择内置麦克风并在 USB 输出仍存在时短暂验证上行。即使两项分别成功，也不等于它们
+能在同一个 iOS Audio Session 中同时工作。
 
 推荐架构：
 
@@ -16,19 +126,24 @@
 │   ├── 提供经过鉴权的 TCP 控制协议
 │   └── 按每通电话启动/停止音频 helper
 │
-└── mavo-pcm-gateway             每通电话运行
+└── mavo-pcm-gateway             每通电话运行（需内核暴露正确双向 PCM）
     ├── 配置并回滚 VoLTE mixer
     ├── 打开模块 PCM 设备
     ├── UDP 接收 iPhone 上行 PCM
     └── UDP 发送运营商下行 PCM
 
-USB Ethernet
+USB 网络（待验证 ECM/NCM；当前 rmnet 不可直接使用）
 └── iPhone App
     ├── Network.framework 控制和音频
     ├── AVAudioEngine/VoiceProcessingIO
     ├── CallKit 通话界面
     └── Contacts/SwiftUI
 ```
+
+这里的媒体 PCM 不能继续使用已被实机否定的 D5 playback / D6 capture 映射，也不能用
+当前无法 prepare 的 D0/MultiMedia1 路径。下一实现门槛是修改/扩展 QDC507 内核音频
+驱动，向用户态提供 `PCM_RX` 蜂窝下行 capture 和 `PCM_TX` 蜂窝上行 playback，并与
+现有 `f_audio` UAC 会话互斥。
 
 控制 daemon 可以常驻，但音频 helper 必须维持“每通电话一个 session”的生命周期。不要让当前 `--voice-route-session` 永久运行，否则容易重新引入第二通电话无声、旧 PCM 句柄未清理和 mixer 状态残留。
 
@@ -53,7 +168,51 @@ USB Ethernet
 4. 启动 `--voice-route-session`。
 5. 挂断后停止 helper，并执行 USB Audio 与 voice route 回滚。
 
+注意：macOS 端使用项目内的 libusb ADB 客户端直接 claim 厂商接口（当前设备在
+macOS IORegistry 中显示为 `ADB Interface@5`、`bInterfaceSubClass=66`），不是系统
+`adb` 守护进程。因而即使模块已被 macOS 枚举，命令行 `adb devices` 也可能为空；
+判断模块是否可用应以 IORegistry 和 DJOneHub 自带的 USB ADB 客户端为准。
+
 iPhone 无法执行这条 ADB 控制链，因此驱动准备、电话控制和音频 session 管理最终都必须由模块上的常驻 daemon 接管。
+
+### 2.1 USB 网络实机盘点
+
+本次从模块运行态读取到：
+
+```text
+/sys/class/android_usb/android0/functions = diag,serial,rmnet,ffs,audio
+bridge0 = 192.168.225.1/24
+bridge0/brif = 空
+```
+
+模块内核同时暴露 `f_ecm`、`f_ncm`、`f_rndis` 和 `f_usb_mbim` 等 function 节点，
+但“节点存在”不等于该组合已经配置、能枚举或被 iPhone 支持。当前 macOS 未出现对应
+`en*` 接口，说明 `rmnet` 不能作为本方案假定的通用 IP 链路；普通 iOS App 也不能直接
+claim 这个厂商 USB function。
+
+因此后续必须在不持久化的试验模式中分别验证 ECM/NCM：保存当前完整 USB tuple，设置
+自动回滚窗口，确认 Mac 和真实 iPhone 的枚举、DHCP/静态地址、ADB/AT 救援入口及冷启动
+恢复。未通过这项测试前，不得把“USB Ethernet 可用”作为既成事实，也不得永久改写
+`USBCFG`。
+
+### 2.2 ECM 临时实测（2026-08-28）
+
+在未修改 `USBCFG`、MTD 或启动脚本的前提下，通过 `AT+QCFG="usbnet",1` 并重启模块，
+Mac 成功枚举出 ECM：
+
+```text
+接口：en10
+IPv4：192.168.225.28/24
+模块网关：192.168.225.1（模块 bridge0）
+USB 控制接口：bInterfaceClass=2, bInterfaceSubClass=6
+USB 数据接口：bInterfaceClass=10
+驱动：AppleUserECM / AppleUserECMData
+```
+
+同一枚举中仍保留 USB AT（接口 2）、ADB（接口 6）和 UAC（接口 7–9），说明 QDC507
+当前组合可以在保留救援/音频接口的同时提供 ECM。该次切换的恢复目标仍是原始
+`usbnet=0`。后续真实 iPhone 已能通过该 ECM 有线网络上网，并能连接模块
+`192.168.225.1:45750` 的一次性 sentinel；NCM 尚未通过实机测试。
 
 ## 3. 进程职责
 
@@ -75,6 +234,56 @@ iPhone 无法执行这条 ADB 控制链，因此驱动准备、电话控制和�
 - 建链状态 `CLCC` 间隔 250 ms。
 - active 与 idle 状态间隔 1 s。
 - 能可靠接收 URC 时优先用事件，轮询作为校验和恢复手段。
+
+#### 3.1.1 QMI Voice 控制基线
+
+真实 QDC507 已验证模块自带 `libqmiservices.so` / `libqmi_cci.so` 可提供 QMI Voice
+service object `2/0x4d/6`。固定哈希 ARMv7 soft-float 探针成功初始化 QMI client，
+只读执行 Get All Call Info (`0x2f`) 并释放 client，因此控制面不再依赖未确认用途的
+内部 TTY。
+
+仓库中的 `djonehub_voice_codec` 依据 libqmi Voice wire definition 固化以下最小集合：
+
+- Dial Call `0x20`：号码使用 mandatory TLV `0x01`；
+- End Call `0x21`、Answer Call `0x22`：call ID 使用 mandatory TLV `0x01`；
+- Get All Call Info `0x2f`：call information 使用 TLV `0x10`，每条记录 7 字节；Remote
+  Party Number 使用可选 TLV `0x11`，按 call ID 关联并保留 presentation indicator；
+- 通用 QMI result 使用 TLV `0x02`，action response 的 call ID 使用 TLV `0x10`。
+
+必须注意：旧只读探针曾错误查找 call information TLV `0x01`。空闲响应没有 call
+information 时仍会得到“零通话”，所以这类成功只证明 QMI transport 可用，不能证明
+活动通话解析正确。修正版需先用真实来电完成只读验收，再按 STATUS、DIAL、ANSWER、
+END 的顺序逐项开放写操作。所有写操作必须串行、限定超时、回读 `0x2f` 确认最终状态，
+且不得提供任意 QMI message 透传。
+
+真实响铃只读验收现已完成：Get All Call Info 返回 `id=1`、`state=incoming`、
+`direction=MT`，说明修正后的活动 call record 解析有效。仓库已加入不由 macOS API 部署
+的 one-shot control 候选及独立策略单测，下一步先在模块上只运行其 `status` 子命令，
+核对它与只读探针完全一致，再逐项人工确认开放写命令。
+
+候选 `status` 已在真实模块返回 `exit_status=0` 和空闲快照，与独立只读探针一致。后续
+写接口使用固定 route 映射到固定子命令，不接受任意 operation；每次请求还必须携带
+精确操作确认串。号码只允许数字、开头的 `+`、`*`、`#`，Call ID 只允许 1..255，
+二者在 macOS 后端和 ARM 候选内重复校验，避免 shell/QMI 参数透传。
+
+真实来电的 Answer/End 闭环也已完成。部署端先读取唯一 `incoming` call ID，固定
+`answer` 操作在约 0.43 秒内回读到成功，独立状态查询确认 `conversation`；随后固定
+`end` 操作在约 0.43 秒内确认，最终快照为空。由此 STATUS、ANSWER、END 的 QMI
+transport、消息格式、状态策略和清理路径均已通过实机验证；DIAL 仍需使用明确的测试
+号码单独验收。通话期间 macOS 的旧 MaVo 音频桥启动失败不属于 QMI 控制故障，媒体面
+仍需按本设计由模块网关和 iOS 客户端另行实现。
+
+#### 3.1.2 ECM 闭环 sentinel
+
+在真正接入内部 AT 通道前，可以先部署仓库中的 `module/djonehubd.c` 做网络闭环
+验证。该程序只绑定 `192.168.225.1:45750`、接受 TCP 连接并返回固定健康响应，不
+执行 AT、拨号、PCM、shell 或持久化配置。它的目的仅是把 iOS 探针从 `ECONNREFUSED`
+推进到“控制端口可达”，证明 ECM 地址、路由和模块侧监听路径正确。
+
+模块上的 `POSIX error 61` 等价于 `ECONNREFUSED`，表示链路已到达目标地址但没有
+监听进程；这不是 iOS 本地网络权限失败。sentinel 必须使用 QDC507 匹配的 glibc
+sysroot 构建并以前台临时方式运行，验证完成后退出。生产版 `djonehubd` 仍需另行
+实现配对认证、AT 通道串行化和有界状态机，不能直接把 sentinel 注册进持久启动脚本。
 
 ### 3.2 `mavo-pcm-gateway`
 
@@ -122,7 +331,7 @@ static int voice_route_stop(
 /* 现有 macOS UAC */
 voice_route_start(api, 1, &route);
 
-/* iPhone USB Ethernet */
+/* iPhone USB network after ECM/NCM validation */
 voice_route_start(api, 0, &route);
 ```
 
@@ -132,7 +341,8 @@ voice_route_start(api, 0, &route);
 /sys/class/android_usb/f_audio/audio_enable = 0
 ```
 
-这样可继续使用当前 iPhone/iPad USB 组合，只暴露 USB Ethernet，避免 iOS 抢占系统 USB Audio 路由。
+这样可以避免 iOS 抢占系统 USB Audio 路由，但不能继续假定当前 `rmnet` 组合可用；
+必须先得到经过实机验证且可回滚的 ECM/NCM 组合。
 
 ### 4.2 增加网络模式参数
 
@@ -180,6 +390,23 @@ transport_send_downlink(context, buffer, size);
 
 TTY 模式保留原行为；UDP 模式使用 `recvfrom()`/`sendto()`，只接受已经完成鉴权和 session 协商的 peer。
 
+当前阶段 A 已在 `module/mavo_pcm_bridge.c` 中提供实验性实现：
+
+- `--probe-network-pcm` 打开 `hw:0,5` / `hw:0,6`，核对两端实机均为 256
+  字节 period，再读取 D6 约 3 秒并报告峰值与非零采样；不会启用 USB Audio 或写持久区。
+- `--network-session` 要求显式提供 `--peer-address`、`--peer-port`、`--token-file`、`--interface` 和非零 `--session-id`。
+- 媒体包使用 20 字节头、256 字节 PCM S16LE 载荷和 16 字节 HMAC-SHA256 标签；校验 peer、session、方向、长度、8 kHz 时间戳及递增序号。
+- 网络模式当前复用 D4 VoLTE route 并跳过 `/sys/class/android_usb/f_audio/audio_enable`；
+  原 D5 上行、D6 下行映射已被实通话否定，需改为经过真实方向验证的 PCM 路径。
+
+实机已确认 D5/D6 的 period 都是 256 字节，但没有确认它们可作为网络双向媒体端点。
+活动电话中的 D6 非零采样可能来自 gadget 关闭前的残留缓冲；D5 写入 -9 dBFS 测试音
+后对端仍未听到。实时 DAPM 显示 `VoLTE_DL -> PCM_RX` 和
+`PCM_TX -> VoLTE_UL`，与原先按 ALSA playback/capture 名称推断的方向不符。空闲态 D6
+还会快速返回旧数据或零帧，任何发送循环都不能依赖 PCM read 自身节拍。这仍不是生产
+完成态：当前必须先更换 PCM/mixer 映射，并且尚无抖动缓冲、
+控制面握手或 iOS 客户端，session-id 需由后续控制 daemon 按通话生成。
+
 ## 5. 音频协议
 
 第一版直接使用 PCM，不使用 Opus：
@@ -188,11 +415,13 @@ TTY 模式保留原行为；UDP 模式使用 `recvfrom()`/`sendto()`，只接受
 采样率：8000 Hz
 声道：1
 格式：PCM S16LE
-帧长：20 ms
-每帧：160 samples / 320 bytes
+硬件 period：16 ms
+每帧：128 samples / 256 bytes
 ```
 
-USB Ethernet 的带宽足够，PCM 可以减少编码延迟和首次实现的不确定性。
+USB Ethernet 的带宽足够，PCM 可以减少编码延迟和首次实现的不确定性。iOS
+VoiceProcessingIO 的回调大小不保证等于 128 samples，客户端必须通过有界环形缓冲重分帧，
+不能把 10 ms 或 20 ms 的宿主帧长直接强加给模块 PCM。
 
 建议包头：
 
@@ -201,11 +430,11 @@ struct __attribute__((packed)) audio_packet {
     uint32_t magic;          /* "DJOA" */
     uint8_t version;         /* 1 */
     uint8_t direction;       /* 1=uplink, 2=downlink */
-    uint16_t payload_bytes;  /* 320 */
+    uint16_t payload_bytes;  /* 256 */
     uint32_t session_id;
     uint32_t sequence;
     uint32_t timestamp;      /* 8 kHz sample clock */
-    uint8_t payload[320];
+    uint8_t payload[256];
     uint8_t auth_tag[16];
 };
 ```
@@ -236,11 +465,11 @@ struct __attribute__((packed)) audio_packet {
 00-08 AFE Capture      capture
 ```
 
-首选验证组合：
+已否定的候选组合：
 
 - D4 保持 VoLTE route session。
-- D5 playback 接收 iPhone 上行 PCM。
-- D6 capture 输出运营商下行 PCM。
+- D5 playback 接收 iPhone 上行 PCM（实测写入成功但对端无声）。
+- D6 capture 输出运营商下行 PCM（非零数据无法排除残留上行缓冲）。
 - 网络模式不启用 USB Audio。
 
 候选调用：
@@ -252,31 +481,45 @@ uplink_pcm = pcm_open("hw:0,5", PCM_PLAYBACK_FLAGS, ...);
 downlink_pcm = pcm_open("hw:0,6", PCM_CAPTURE_FLAGS, ...);
 ```
 
-这组映射仍需真实通话验证。应先增加 `--probe-network-pcm`：只采集 3 秒并报告 frames、peak 和 nonzero samples，不写入持久存储。确认 D6 有对端信号后，再开放 D5 上行。
+这组映射已经被真实通话否定。随后分别使用网络候选 helper 和固定哈希的上游 MaVo
+helper 测试 MultiMedia1：无论 D4 AFE route 是否运行，`hw:0,0` playback/capture 都在
+prepare 阶段返回 `EINVAL`；D4 完全退出时 Auxpcm ACDB 已校准且 legacy mixer 已恢复，
+仍不改变结果。当前运行时 manifest 也没有把 D0 列为必需设备，因此 MultiMedia1 只是
+保留兼容代码，不能作为本模块当前驱动的可用网络媒体入口。
+
+新的首选方案是保留已经在 Mac 上工作的 D4 + `f_audio` UAC 媒体路径，让真实 iPhone
+直接枚举模块为双向 USB Audio 设备；ECM/NCM 只承载电话控制协议。必须用真实 iPhone
+确认系统枚举、`AVAudioSession` 输入/输出选择、前后台限制和连续通话。如果 iOS 不能
+以应用所需方式访问该 UAC，才进入内核改造：为 `PCM_RX` 下行增加用户态 capture，为
+`PCM_TX` 上行增加用户态 playback，并保持与 UAC route 互斥。不能继续通过交换 D5/D6
+或猜测 ALSA 编号解决方向问题。
 
 ## 7. 控制协议
 
-建议 TCP 控制端口 `45750`，采用长度前缀 JSON 或 WebSocket。应用层只开放白名单：
+TCP 控制端口固定为 `192.168.225.1:45750`。候选协议使用紧凑二进制帧而非开放 JSON：
 
-```json
-{"id":1,"op":"dial","number":"+86138XXXXXXXX"}
-{"id":2,"op":"answer"}
-{"id":3,"op":"hangup"}
-{"id":4,"op":"dtmf","digit":"5"}
-```
+1. 模块每次 `accept` 后从 `/dev/urandom` 生成 32 字节 challenge，发出 HELLO。
+2. 客户端发送版本、固定操作码、非零 request ID、长度受限 payload，以及覆盖
+   `challenge + header + payload` 的完整 HMAC-SHA256。
+3. 模块常量时间校验通过后才执行 STATUS/DIAL/ANSWER/END/USB_AUDIO；每个 TCP 连接只接受一条
+   请求，从而使旧连接的认证帧无法跨连接重放。
+4. 模块以同一 challenge 对结构化结果签名；客户端必须同时核对 tag 与 request ID。
 
-状态事件：
+请求头固定 20 字节，保留字段必须为零，payload 最大 81 字节。STATUS payload 为空；
+DIAL 只允许 `+0123456789*#` 且 `+` 只能出现在首位；ANSWER/END payload 是一个非零
+call ID。USB_AUDIO 的空 payload 表示查询，单字节 `0/1` 表示关闭/开启
+`/sys/class/android_usb/f_audio/audio_enable`；设置前必须以新 QMI STATUS 确认无活动通话，
+且写后读回。STATUS-only 凭据不能执行该操作。响应包含固定状态码、动作结果和最多 8 条
+定长 call snapshot；其后可附加 HMAC 覆盖的 TLV 扩展。Remote Party Number 扩展类型为
+`0x01`，值为记录数以及重复的 `call_id/presentation/length/number`。无号码时不发送扩展，
+因此原有固定响应字节保持不变；新版客户端同时接受旧响应。当前协议只做
+身份与完整性认证，不提供内容保密；电话号码不会进入蜂窝公网监听面，但同一 USB 链路
+上的明文可见性需在威胁模型中明确。如需保密，应在协议定稿前升级为具备 AEAD 的握手，
+而不是在 HMAC 帧外临时加可选加密。
 
-```json
-{
-  "event":"call",
-  "state":"incoming",
-  "number":"+86138XXXXXXXX",
-  "session":1234
-}
-```
-
-生产协议不要开放未经保护的通用 `/api/at`。电话号码只允许 `+0123456789*#`；DTMF 只允许标准字符；任何网络字符串都不能拼接进 shell 命令。
+主动事件推送尚未定稿。第一版 iOS 客户端可短轮询 STATUS；验证 QMI indication 的线程
+与回调生命周期后，再增加有界、认证的来电状态流。生产协议绝不开放通用 `/api/at`、
+远程 shell 或客户端指定 QMI message ID。
 
 ## 8. 模块内部 AT 通道
 
@@ -378,7 +621,11 @@ pairing.key
 - App 保持前台时完整接打电话。
 - 通话建立后允许进入后台并维持当前音频。
 
-可靠锁屏来电最终仍需要 APNs/PushKit 服务、MFi ExternalAccessory 后台能力，或接受只能在 App 活跃时接听的限制。CallKit 只负责系统通话 UI 和音频会话协调，不会自动访问外接基带。
+可靠锁屏来电采用 APNs/PushKit + CallKit 路线：QDC507 通过 QMI Voice indication 发现
+来电，受认证 Relay 发送 VoIP Push，iOS App 在 PushKit 回调内立即向 CallKit 上报，再
+恢复 USB ECM STATUS 和现有 PCM。CallKit 只负责系统通话 UI、动作和音频会话协调，
+不会自动访问外接基带。当前已完成 iOS CallKit 本地链和 PushKit 接收入口；模块 indication、
+Relay、APNs entitlement 与锁屏端到端验收仍待完成。
 
 ## 13. 备份要求
 

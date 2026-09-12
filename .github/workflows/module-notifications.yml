@@ -1,0 +1,59 @@
+name: Test module notifications
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "cmd/djonehub-notify/**"
+      - "cmd/djonehub-macos/module_notify*"
+      - "cmd/djonehub-macos/main.go"
+      - "internal/modulepush/**"
+      - "module/djonehub_notify_monitor*"
+      - "module/djonehub_qmi_*"
+      - "web/module-push/**"
+      - "scripts/build_notify_armel.sh"
+      - "scripts/build_sms_daemon_armel.sh"
+      - "scripts/prepare_notify_go_overlay.py"
+      - "scripts/audit_notify_elf.py"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/module-notifications.yml"
+  pull_request:
+    paths:
+      - "cmd/djonehub-notify/**"
+      - "cmd/djonehub-macos/module_notify*"
+      - "cmd/djonehub-macos/main.go"
+      - "internal/modulepush/**"
+      - "module/**"
+      - "web/module-push/**"
+      - "scripts/build*"
+      - "scripts/prepare_notify_go_overlay.py"
+      - "scripts/audit_notify_elf.py"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/module-notifications.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test delivery, persistence, encryption and concurrency
+        run: |
+          go test -race ./internal/modulepush ./cmd/djonehub-notify
+          go test cmd/djonehub-macos/module_notify_common.go cmd/djonehub-macos/module_notify_common_test.go
+      - name: Test read-only QMI observer and webpage push handling
+        run: |
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            module/djonehub_notify_monitor_test.c -o /tmp/notify-monitor-test
+          /tmp/notify-monitor-test
+          node --check web/module-push/app.js
+          node --test web/module-push/sw.test.cjs
+      - name: Build ARMv7 sender and audit monitor ABI
+        run: ./scripts/build_notify_armel.sh --container

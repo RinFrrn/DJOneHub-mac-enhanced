@@ -3,6 +3,7 @@
 ## 仓库与 Release 包含
 
 - DJOneHub 后端、macOS SwiftUI App、Windows 控制台与部署脚本。
+- MaVo 模块侧 helper 的可审计源码与 ARMv7 构建脚本；源码仅用于审计和自行构建，不代表硬件兼容性保证。
 - 短信、网络、GPS、eSIM、来电提醒、通话状态与控制功能。
 - MaVo v0.1.2 的 MIT 许可 UAC 探测、调制解调器桥接和 macOS 音频适配源码，并保留署名与许可证声明。
 
