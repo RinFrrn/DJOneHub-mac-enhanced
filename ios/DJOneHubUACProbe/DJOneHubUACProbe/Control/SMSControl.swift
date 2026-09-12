@@ -2,6 +2,7 @@ import Combine
 import CryptoKit
 import Foundation
 import Network
+import OSLog
 
 enum SMSControlOperation: UInt8, Sendable {
     case status = 1
@@ -201,12 +202,17 @@ actor SMSControlClient {
         var attemptTimeout: Duration = .seconds(1)
         var retryDelay: Duration = .milliseconds(500)
         var ioTimeout: Duration = .seconds(5)
+        // A cold QMI client and a LIST compatibility retry can each consume
+        // another five seconds before the daemon can send its response.
+        var responseTimeout: Duration = .seconds(20)
+        var handshakeTimeout: Duration = .seconds(20)
     }
 
     enum ClientError: Error, LocalizedError {
         case connectionFailed(String)
         case connectionClosed
         case timeout
+        case stageTimeout(String)
         case invalidPort
 
         var errorDescription: String? {
@@ -214,6 +220,7 @@ actor SMSControlClient {
             case .connectionFailed(let text): return "连接模块短信网关失败：\(text)"
             case .connectionClosed: return "模块提前关闭了短信连接"
             case .timeout: return "模块短信请求超时"
+            case .stageTimeout(let stage): return "模块短信\(stage)超时"
             case .invalidPort: return "模块短信端口无效"
             }
         }
@@ -287,7 +294,7 @@ actor SMSControlClient {
         }
         let connection = try await connect(port)
         defer { connection.cancel() }
-        let hello = try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
+        let hello = try await withTimeout(configuration.handshakeTimeout, stage: "握手", onCancel: { connection.cancel() }) {
             try await connection.smsReceiveExactly(SMSControlProtocol.helloBytes)
         }
         let nonce = try SMSControlProtocol.decodeHello(hello)
@@ -300,17 +307,17 @@ actor SMSControlClient {
             requestID: requestID,
             payload: payload
         )
-        try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
+        try await withTimeout(configuration.ioTimeout, stage: "发送请求", onCancel: { connection.cancel() }) {
             try await connection.smsSend(request)
         }
-        let header = try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
+        let header = try await withTimeout(configuration.responseTimeout, stage: "等待响应（\(operation)）", onCancel: { connection.cancel() }) {
             try await connection.smsReceiveExactly(SMSControlProtocol.headerBytes)
         }
         let payloadLength = Int(SMSControlProtocol.uint16(header, 8))
         guard payloadLength <= SMSControlProtocol.maxResponsePayload else {
             throw SMSControlProtocolError.invalidFrame
         }
-        let tail = try await withTimeout(configuration.ioTimeout, onCancel: { connection.cancel() }) {
+        let tail = try await withTimeout(configuration.ioTimeout, stage: "接收数据", onCancel: { connection.cancel() }) {
             try await connection.smsReceiveExactly(payloadLength + SMSControlProtocol.tagBytes)
         }
         return try SMSControlProtocol.decodeResponse(
@@ -343,6 +350,7 @@ actor SMSControlClient {
                 return connection
             } catch {
                 connection.cancel()
+                try Task.checkCancellation()
                 lastError = error
             }
             try await Task.sleep(for: configuration.retryDelay)
@@ -352,16 +360,22 @@ actor SMSControlClient {
 
     private func withTimeout<T: Sendable>(
         _ duration: Duration,
+        stage: String = "建立连接",
         onCancel: @escaping @Sendable () -> Void,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        try await withTaskCancellationHandler {
+        let started = ContinuousClock.now
+        defer {
+            let elapsed = started.duration(to: .now)
+            Logger(subsystem: "DJOneHub", category: "SMS").info("stage=\(stage, privacy: .public) elapsed=\(String(describing: elapsed), privacy: .public)")
+        }
+        return try await withTaskCancellationHandler {
             try await withThrowingTaskGroup(of: T.self) { group in
                 group.addTask { try await operation() }
                 group.addTask {
                     try await Task.sleep(for: duration)
                     onCancel()
-                    throw ClientError.timeout
+                    throw ClientError.stageTimeout(stage)
                 }
                 guard let result = try await group.next() else { throw ClientError.timeout }
                 group.cancelAll()
@@ -381,6 +395,8 @@ final class SMSControlModel: ObservableObject {
     @Published private(set) var unreadCount = 0
     private var refreshTask: Task<Void, Never>?
     private var messageCache: [SMSMessageReference: ModuleSMSMessage] = [:]
+    private var retryNotBefore: ContinuousClock.Instant?
+    private var consecutiveFailures = 0
     private var unreadMessageIDs: Set<String>
     private var readMessageIDs: Set<String>
 
@@ -404,8 +420,11 @@ final class SMSControlModel: ObservableObject {
             messageCache = [:]
             stateText = "请先连接已配对模块"
             isLoading = false
+            retryNotBefore = nil
+            consecutiveFailures = 0
             return
         }
+        if let retryNotBefore, ContinuousClock.now < retryNotBefore { return }
         isLoading = true
         stateText = "正在读取短信…"
         refreshTask = Task {
@@ -427,6 +446,8 @@ final class SMSControlModel: ObservableObject {
                         message = cached
                     } else {
                         message = try await client.read(reference)
+                        // Keep successful reads even when a later request fails.
+                        messageCache[reference] = message
                     }
                     loaded.append(message)
                     updatedCache[reference] = message
@@ -437,6 +458,8 @@ final class SMSControlModel: ObservableObject {
                     return $0.index > $1.index
                 }
                 messageCache = updatedCache
+                consecutiveFailures = 0
+                retryNotBefore = nil
                 updateUnreadState(with: loadedPairs)
                 stateText = messages.isEmpty
                     ? "模块中暂无短信 · 自动更新"
@@ -444,7 +467,10 @@ final class SMSControlModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                stateText = "自动重试：\(error.localizedDescription)"
+                consecutiveFailures = min(consecutiveFailures + 1, 4)
+                let delay = min(5 * (1 << consecutiveFailures), 60)
+                retryNotBefore = .now.advanced(by: .seconds(delay))
+                stateText = "\(error.localizedDescription)，\(delay) 秒后自动重试"
             }
         }
     }
