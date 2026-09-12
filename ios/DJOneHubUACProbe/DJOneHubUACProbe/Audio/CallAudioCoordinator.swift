@@ -76,7 +76,7 @@ final class CallAudioCoordinator: ObservableObject {
     private var interruptedRouteSettleTask: Task<Void, Never>?
     private var interruptedRouteRevision: UInt64 = 0
     private var interruptedRouteRetryNotBefore: ContinuousClock.Instant?
-    private var preferredAudioRoute: CallAudioRoute.Kind = .speaker
+    private var preferredAudioRoute: CallAudioRoute.Kind = .receiver
     private var sessionDeactivationTask: Task<Void, Never>?
     private var pendingAudioRouteSelection: CallAudioRoute.Kind?
     private var activeRouteSignature = ""
@@ -375,6 +375,9 @@ final class CallAudioCoordinator: ObservableObject {
         isTestTone = false
         isAwaitingRecovery = false
         tearDownAudio(deactivateSession: true)
+        preferredAudioRoute = .receiver
+        pendingAudioRouteSelection = nil
+        refreshAvailableAudioRoutes()
         stateText = reason == nil ? "已停止" : "连接中断，PCM 已停止"
         detailText = reason ?? "模块侧将在 3 秒无合法包后关闭 Media1 通话 PCM"
         inputLevel = 0

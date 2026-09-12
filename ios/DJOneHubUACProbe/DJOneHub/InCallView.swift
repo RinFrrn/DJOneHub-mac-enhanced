@@ -10,7 +10,6 @@ struct InCallView: View {
     let onEnd: (UInt8) -> Void
     let onToggleMute: () -> Void
     let onToggleRecording: () -> Void
-    @State private var isShowingAudioRoutes = false
 
     var body: some View {
         ZStack {
@@ -53,19 +52,10 @@ struct InCallView: View {
                     }
                 } else {
                     Spacer()
-                    HStack(spacing: 22) {
-                        CallActionButton(
-                            title: callAudio.selectedAudioRoute?.compactTitle ?? "音频",
-                            systemImage: callAudio.selectedAudioRoute?.systemImage ?? "speaker.wave.2",
-                            color: .white.opacity(0.18),
-                            action: {
-                                callAudio.refreshAvailableAudioRoutes()
-                                isShowingAudioRoutes = true
-                            }
-                        )
+                    CallAudioRouteControl(audio: callAudio)
                         .disabled(!isActive || !callAudio.canSelectAudioRoute)
                         .opacity(isActive && callAudio.canSelectAudioRoute ? 1 : 0.45)
-
+                    HStack(spacing: 54) {
                         CallActionButton(
                             title: "静音",
                             systemImage: lifecycle.isMuted ? "mic.slash.fill" : "mic.fill",
@@ -111,20 +101,7 @@ struct InCallView: View {
             }
             .padding(.horizontal, 28)
         }
-        .confirmationDialog(
-            "选择音频设备",
-            isPresented: $isShowingAudioRoutes,
-            titleVisibility: .visible
-        ) {
-            ForEach(callAudio.availableAudioRoutes) { route in
-                Button(audioRouteTitle(route)) {
-                    callAudio.selectAudioRoute(route)
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("切换时会短暂重新建立通话音频。")
-        }
+        .onAppear { callAudio.refreshAvailableAudioRoutes() }
     }
 
     private var isActive: Bool {
@@ -158,8 +135,70 @@ struct InCallView: View {
         }
     }
 
-    private func audioRouteTitle(_ route: CallAudioRoute) -> String {
-        callAudio.isSelectedAudioRoute(route) ? "✓ \(route.title)" : route.title
+}
+
+private struct CallAudioRouteControl: View {
+    @ObservedObject var audio: CallAudioCoordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selection
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("通话音频")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white.opacity(0.6))
+            ViewThatFits(in: .horizontal) {
+                segments(minimumWidth: 0)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    segments(minimumWidth: 88)
+                }
+            }
+            .padding(5)
+            .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24)
+                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+            }
+        }
+        .sensoryFeedback(.selection, trigger: audio.selectedAudioRoute?.id)
+    }
+
+    private func segments(minimumWidth: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            ForEach(audio.availableAudioRoutes) { route in
+                let selected = audio.isSelectedAudioRoute(route)
+                Button {
+                    guard !selected else { return }
+                    audio.selectAudioRoute(route)
+                } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: route.systemImage)
+                            .font(.system(size: 23, weight: .medium))
+                            .frame(height: 26)
+                        Text(route.title.replacingOccurrences(of: "蓝牙：", with: ""))
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .foregroundStyle(selected ? Color.black : Color.white.opacity(0.72))
+                    .frame(minWidth: max(68, minimumWidth), maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 19)
+                                .fill(.white)
+                                .matchedGeometryEffect(id: "audio-selection", in: selection)
+                        }
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 19))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(route.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
+                   value: audio.selectedAudioRoute?.id)
     }
 }
 
