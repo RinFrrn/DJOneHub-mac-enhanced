@@ -80,6 +80,9 @@ final class CallAudioCoordinator: ObservableObject {
     private var sessionDeactivationTask: Task<Void, Never>?
     private var pendingAudioRouteSelection: CallAudioRoute.Kind?
     private var activeRouteSignature = ""
+    private var activeBuiltInInputUID: String?
+    private var outputSwitchTask: Task<Void, Never>?
+    private var isSwitchingBuiltInOutput = false
     private let recordingController = CallRecordingController()
     private var recordingTimerTask: Task<Void, Never>?
     private var callKitOwnership = CallKitAudioOwnership.app
@@ -149,6 +152,7 @@ final class CallAudioCoordinator: ObservableObject {
         routeSettleTask?.cancel()
         interruptedRouteSettleTask?.cancel()
         recordingTimerTask?.cancel()
+        outputSwitchTask?.cancel()
         _ = try? recordingController.stop()
         for observer in notificationObservers {
             NotificationCenter.default.removeObserver(observer)
@@ -313,10 +317,29 @@ final class CallAudioCoordinator: ObservableObject {
     private func applySelectedAudioRoute(_ route: CallAudioRoute) async {
         let generation = startGeneration
         do {
-            try configureCallAudioSession()
-            try await activateAppAudioSessionIfNeeded()
+            // The running call already owns an active session. Re-activation
+            // can disturb the route while the user is selecting an output.
             guard generation == startGeneration, isRunning, !isInterrupted else { return }
+            if activeBuiltInInputUID != nil,
+               route.kind == .receiver || route.kind == .speaker {
+                isSwitchingBuiltInOutput = true
+                outputSwitchTask?.cancel()
+            }
             try applyPreferredCallRoute()
+            if isSwitchingBuiltInOutput {
+                outputSwitchTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(150))
+                    guard !Task.isCancelled, let self else { return }
+                    self.isSwitchingBuiltInOutput = false
+                    self.outputSwitchTask = nil
+                    guard self.startGeneration == generation else { return }
+                    self.handleRouteChange(Notification(
+                        name: AVAudioSession.routeChangeNotification,
+                        userInfo: [AVAudioSessionRouteChangeReasonKey:
+                            AVAudioSession.RouteChangeReason.override.rawValue]
+                    ))
+                }
+            }
             refreshAvailableAudioRoutes()
             if currentRouteMatchesPolicy {
                 pendingAudioRouteSelection = nil
@@ -324,6 +347,7 @@ final class CallAudioCoordinator: ObservableObject {
                 detailText = "正在切换到\(route.title)…"
             }
         } catch {
+            isSwitchingBuiltInOutput = false
             pendingAudioRouteSelection = nil
             audioRouteErrorText = error.localizedDescription
             refreshAvailableAudioRoutes()
@@ -421,6 +445,7 @@ final class CallAudioCoordinator: ObservableObject {
         networkFormat = nil
         engine = nil
         activeRouteSignature = ""
+        activeBuiltInInputUID = nil
         if clearOutputOverride {
             try? session.overrideOutputAudioPort(.none)
         }
@@ -528,6 +553,7 @@ final class CallAudioCoordinator: ObservableObject {
             self.pipeline = pipeline
             self.downlinkPlayer = downlinkPlayer
             activeRouteSignature = currentRouteSignature
+            activeBuiltInInputUID = builtInCallInputUID
             refreshAvailableAudioRoutes()
             sentFrames = 0
             receivedFrames = 0
@@ -782,6 +808,9 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func handleRouteChange(_ notification: Notification) {
+        // Ignore transient routes while iOS clears the speaker override and
+        // selects the built-in input. Evaluate the settled output once below.
+        guard !isSwitchingBuiltInOutput else { return }
         let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
         trace("route changed reason=\(Self.routeChangeReason(rawReason)) route=\(routeSummary) interrupted=\(isInterrupted)")
         refreshAvailableAudioRoutes()
@@ -802,6 +831,31 @@ final class CallAudioCoordinator: ObservableObject {
         let routeChangeReason = AVAudioSession.RouteChangeReason(rawValue: rawReason)
         let reason = Self.routeChangeReason(rawReason)
         let routeIsAcceptable = currentRouteIsAcceptableForRecovery
+        // Receiver/speaker share the built-in capture format. Keep the engine,
+        // authenticated UDP peer and recording alive for this output-only swap.
+        // Bluetooth and USB changes still take the full recovery path.
+        if isRunning, let engine,
+           let activeBuiltInInputUID,
+           activeBuiltInInputUID == builtInCallInputUID,
+           currentRouteMatchesPolicy,
+           let converter,
+           engine.inputNode.outputFormat(forBus: 0) == converter.inputFormat {
+            do {
+                if !engine.isRunning {
+                    try engine.start()
+                    downlinkPlayer?.resumeAfterEngineRestart()
+                }
+            } catch {
+                trace("local output restart failed: \(error.localizedDescription)")
+                pauseForRouteRecovery(reason: reason)
+                requestRecovery("本机音频重启失败，正在恢复通话")
+                return
+            }
+            activeRouteSignature = currentRouteSignature
+            pendingAudioRouteSelection = nil
+            trace("built-in output switched without restarting PCM")
+            return
+        }
         // A Bluetooth HFP route can be selected by iOS shortly after the audio
         // category changes. It is a supported call route, even while the system
         // reports the built-in microphone as the input. Rebuilding the engine in
@@ -853,7 +907,8 @@ final class CallAudioCoordinator: ObservableObject {
     private func pauseForRouteRecovery(reason: String) {
         guard hasAudioResources else { return }
         trace("pausing for route recovery reason=\(reason) route=\(routeSummary)")
-        stopRecording()
+        // Recording belongs to the call, not to an audio route. The replacement
+        // transport feeds the same recorder so history retains the whole file.
         startGeneration &+= 1
         isRunning = false
         isMediaEnabled = false
@@ -873,6 +928,9 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func resetRouteRecoveryTracking() {
+        outputSwitchTask?.cancel()
+        outputSwitchTask = nil
+        isSwitchingBuiltInOutput = false
         routeSettleTask?.cancel()
         routeSettleTask = nil
         routeRecoveryState.reset()
@@ -1051,6 +1109,13 @@ final class CallAudioCoordinator: ObservableObject {
         let inputs = session.currentRoute.inputs.map { "\($0.portType.rawValue):\($0.uid)" }.joined(separator: ",")
         let outputs = session.currentRoute.outputs.map { "\($0.portType.rawValue):\($0.uid)" }.joined(separator: ",")
         return "in=[\(inputs)] out=[\(outputs)]"
+    }
+
+    private var builtInCallInputUID: String? {
+        guard session.currentRoute.outputs.contains(where: {
+            $0.portType == .builtInReceiver || $0.portType == .builtInSpeaker
+        }) else { return nil }
+        return session.currentRoute.inputs.first(where: { $0.portType == .builtInMic })?.uid
     }
 
     private static func isAccessoryOutput(_ port: AVAudioSessionPortDescription) -> Bool {

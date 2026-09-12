@@ -113,6 +113,17 @@ final class DownlinkPCMPlayer: @unchecked Sendable {
         }
     }
 
+    func resumeAfterEngineRestart() {
+        queue.async { [self] in
+            guard !stopped else { return }
+            // Engine configuration changes invalidate scheduled buffers. Drop
+            // that bookkeeping; the existing UDP stream supplies fresh audio.
+            player.stop()
+            jitterBuffer.reset()
+            playoutState.reset()
+        }
+    }
+
     func enqueueDiagnosticTone() {
         queue.async { [self] in
             guard !stopped, mediaEnabled else { return }
