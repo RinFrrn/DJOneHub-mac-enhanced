@@ -1,4 +1,5 @@
 import SwiftUI
+import AudioToolbox
 
 struct ProductToolbar: ToolbarContent {
     let onNotifications: () -> Void
@@ -41,6 +42,7 @@ struct ConnectionPill: View {
 struct KeypadView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @StateObject private var tones = DialpadTonePlayer()
     @AppStorage(PhoneProductPreferences.automaticCallRecording)
     private var automaticCallRecordingEnabled = false
 
@@ -57,7 +59,7 @@ struct KeypadView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
+            VStack(spacing: 14) {
                 Spacer(minLength: 0)
                 Text(displayNumber.isEmpty ? "输入号码" : displayNumber)
                     .font(.system(
@@ -72,63 +74,49 @@ struct KeypadView: View {
                 .frame(height: 52)
                 .padding(.horizontal, 34)
 
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.fixed(78), spacing: 22), count: 3),
-                    spacing: 14
-                ) {
-                    ForEach(keys, id: \.digit) { key in
-                        Button { append(key.digit) } label: {
-                            Group {
-                                if key.digit == "*" || key.digit == "#" {
-                                    Text(key.digit)
-                                        .font(.system(size: 32, weight: .regular, design: .rounded))
-                                } else {
-                                    VStack(spacing: 0) {
-                                        Text(key.digit)
-                                            .font(.system(size: 32, weight: .regular, design: .rounded))
-                                        Text(key.letters)
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .tracking(1.5)
-                                            .frame(height: 12)
-                                    }
+                DialpadGlassGroup {
+                    VStack(spacing: 22) {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.fixed(86), spacing: 26), count: 3),
+                            spacing: 20
+                        ) {
+                            ForEach(keys, id: \.digit) { key in
+                                NativeDialpadDigit(digit: key.digit, letters: key.letters) {
+                                    append(key.digit)
                                 }
+                                .frame(width: 86, height: 86)
                             }
-                            .frame(width: 76, height: 76)
-                            .foregroundStyle(.primary)
-                            .background(Color.secondary.opacity(0.14), in: Circle())
-                            .contentShape(Circle())
                         }
-                        .buttonStyle(PhoneCircleButtonStyle())
-                        .accessibilityLabel(key.digit)
-                    }
-                }
 
-                HStack(spacing: 22) {
-                    Color.clear
-                        .frame(width: 78, height: 72)
+                        HStack(spacing: 26) {
+                            Color.clear
+                                .frame(width: 86, height: 80)
 
-                    Button(action: onCall) {
-                        Image(systemName: "phone.fill")
-                            .font(.system(size: 28, weight: .semibold))
-                            .frame(width: 72, height: 72)
-                            .foregroundStyle(.white)
-                            .background(.green, in: Circle())
-                    }
-                    .buttonStyle(PhoneCircleButtonStyle())
-                    .disabled(!canDial)
-                    .opacity(canDial ? 1 : 0.35)
-                    .frame(width: 78, height: 72)
-                    .accessibilityLabel("拨打电话")
+                            Button(action: onCall) {
+                                Image(systemName: "phone.fill")
+                                    .font(.system(size: 30, weight: .semibold))
+                                    .frame(width: 56, height: 56)
+                            }
+                            .modifier(DialpadCallButtonStyle())
+                            .buttonBorderShape(.circle)
+                            .controlSize(.large)
+                            .tint(.green)
+                            .disabled(!canDial)
+                            .frame(width: 86, height: 80)
+                            .accessibilityLabel("拨打电话")
 
-                    Button("删除", systemImage: "delete.left.fill") {
-                        voiceControl.dialNumber.removeLast()
+                            FastDeleteButton {
+                                guard !voiceControl.dialNumber.isEmpty else { return false }
+                                voiceControl.dialNumber.removeLast()
+                                return !voiceControl.dialNumber.isEmpty
+                            }
+                            .frame(width: 86, height: 80)
+                            .disabled(displayNumber.isEmpty)
+                            .opacity(displayNumber.isEmpty ? 0 : 1)
+                            .accessibilityHidden(displayNumber.isEmpty)
+                            .accessibilityHint("轻点删除一位，按住连续删除")
+                        }
                     }
-                    .labelStyle(.iconOnly)
-                    .font(.title2)
-                    .frame(width: 78, height: 72)
-                    .disabled(displayNumber.isEmpty)
-                    .opacity(displayNumber.isEmpty ? 0 : 1)
-                    .accessibilityHidden(displayNumber.isEmpty)
                 }
 
                 Toggle(isOn: $automaticCallRecordingEnabled) {
@@ -162,6 +150,7 @@ struct KeypadView: View {
                 }
                 ProductToolbar(onNotifications: onNotifications, onSettings: onSettings)
             }
+            .task { await tones.prepare() }
         }
     }
 
@@ -176,6 +165,200 @@ struct KeypadView: View {
     private func append(_ digit: String) {
         guard voiceControl.dialNumber.utf8.count < VoiceControlProtocol.maxDialBytes else { return }
         voiceControl.dialNumber.append(digit)
+        tones.play(digit)
+    }
+}
+
+private struct DialpadGlassGroup<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 12) { content() }
+        } else { content() }
+    }
+}
+
+/// UIKit owns touch tracking and the glass highlight. SwiftUI only lays out
+/// the control; it does not insert a gesture recognizer around each digit.
+private struct NativeDialpadDigit: UIViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
+    let digit: String
+    let letters: String
+    let action: () -> Void
+
+    func makeUIView(context: Context) -> NativeDialpadDigitControl {
+        let button = NativeDialpadDigitControl(frame: .zero)
+        var configuration: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            configuration = .glass()
+        } else {
+            configuration = .gray()
+        }
+        configuration.cornerStyle = .capsule
+        configuration.contentInsets = .zero
+        configuration.titleAlignment = .center
+        configuration.titlePadding = 0
+        configuration.baseForegroundColor = .label
+        let font = UIFont.systemFont(ofSize: 36)
+        let descriptor = font.fontDescriptor.withDesign(.rounded) ?? font.fontDescriptor
+        configuration.attributedTitle = AttributedString(digit, attributes: AttributeContainer([
+            .font: UIFont(descriptor: descriptor, size: 36)
+        ]))
+        if digit != "*", digit != "#" {
+            configuration.attributedSubtitle = AttributedString(letters.isEmpty ? " " : letters, attributes: AttributeContainer([
+                .font: UIFont.systemFont(ofSize: 11, weight: .semibold), .kern: 1.5
+            ]))
+        }
+        button.configuration = configuration
+        button.accessibilityLabel = digit
+        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        button.setContentHuggingPriority(.defaultLow, for: .vertical)
+        return button
+    }
+
+    func updateUIView(_ button: NativeDialpadDigitControl, context: Context) {
+        button.action = action
+        button.isEnabled = isEnabled
+    }
+}
+
+private final class NativeDialpadDigitControl: UIButton {
+    var action: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // Keep commit-on-release and drag-out cancellation. UIButton handles
+        // highlight on touch-down without a SwiftUI long-press recognizer.
+        addTarget(self, action: #selector(activate), for: .primaryActionTriggered)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func activate() {
+        guard isEnabled else { return }
+        action?()
+    }
+}
+
+private struct DialpadCallButtonStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+@MainActor
+private final class DialpadTonePlayer: ObservableObject {
+    private var sounds: [String: SystemSoundID] = [:]
+    private var isPreparing = false
+
+    func prepare() async {
+        guard sounds.isEmpty, !isPreparing else { return }
+        isPreparing = true
+        defer { isPreparing = false }
+        // Register the bundled effects off the UI thread. No AVAudioSession
+        // activation or route changes: these are UI sounds, not call audio.
+        sounds = await Task.detached(priority: .userInitiated) {
+            var registered: [String: SystemSoundID] = [:]
+            for (digit, name) in [("0", "0"), ("1", "1"), ("2", "2"), ("3", "3"),
+                                  ("4", "4"), ("5", "5"), ("6", "6"), ("7", "7"),
+                                  ("8", "8"), ("9", "9"), ("*", "star"), ("#", "hash")] {
+                guard let url = Bundle.main.url(forResource: name, withExtension: "wav", subdirectory: "DialpadSounds") else { continue }
+                var sound: SystemSoundID = 0
+                guard AudioServicesCreateSystemSoundID(url as CFURL, &sound) == noErr else { continue }
+                var isUISound: UInt32 = 1
+                AudioServicesSetProperty(kAudioServicesPropertyIsUISound,
+                                         UInt32(MemoryLayout<SystemSoundID>.size), &sound,
+                                         UInt32(MemoryLayout<UInt32>.size), &isUISound)
+                registered[digit] = sound
+            }
+            return registered
+        }.value
+    }
+
+    func play(_ digit: String) {
+        guard let sound = sounds[digit] else { return }
+        AudioServicesPlaySystemSound(sound)
+    }
+
+    deinit {
+        for sound in sounds.values { AudioServicesDisposeSystemSoundID(sound) }
+    }
+}
+
+private struct FastDeleteButton: UIViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.scenePhase) private var scenePhase
+    let deleteCharacter: () -> Bool
+
+    func makeUIView(context: Context) -> RepeatingDeleteControl {
+        RepeatingDeleteControl(frame: .zero)
+    }
+
+    func updateUIView(_ button: RepeatingDeleteControl, context: Context) {
+        button.deleteCharacter = deleteCharacter
+        button.isEnabled = isEnabled && scenePhase == .active
+    }
+
+    static func dismantleUIView(_ button: RepeatingDeleteControl, coordinator: ()) {
+        button.stopRepeating()
+    }
+}
+
+private final class RepeatingDeleteControl: UIButton {
+    var deleteCharacter: (() -> Bool)?
+    private var repeatTask: Task<Void, Never>?
+
+    override var isEnabled: Bool {
+        didSet { if !isEnabled { stopRepeating() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setImage(UIImage(systemName: "delete.left.fill",
+                         withConfiguration: UIImage.SymbolConfiguration(pointSize: 22)), for: .normal)
+        tintColor = .secondaryLabel
+        accessibilityLabel = "删除"
+        accessibilityHint = "轻点删除一位，按住连续删除"
+        addTarget(self, action: #selector(beginRepeating), for: [.touchDown, .touchDragEnter])
+        addTarget(self, action: #selector(stopRepeating), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func beginRepeating() {
+        stopRepeating()
+        guard isEnabled, deleteCharacter?() == true else { return }
+        repeatTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+                while !Task.isCancelled {
+                    guard self?.isEnabled == true, self?.deleteCharacter?() == true else { return }
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+            } catch { /* Releasing the key cancels the delay immediately. */ }
+        }
+    }
+
+    @objc func stopRepeating() {
+        repeatTask?.cancel()
+        repeatTask = nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { stopRepeating() }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard isEnabled else { return false }
+        _ = deleteCharacter?()
+        return true
     }
 }
 

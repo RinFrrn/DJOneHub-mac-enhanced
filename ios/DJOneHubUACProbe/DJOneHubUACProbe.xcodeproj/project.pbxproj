@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B10000000000000000000040 /* DialpadSounds in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000040 /* DialpadSounds */; };
 		A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* DJOneHubUACProbeApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
 		A10000000000000000000003 /* AudioProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AudioProbeModel.swift */; };
@@ -56,6 +57,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B20000000000000000000040 /* DialpadSounds */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DialpadSounds; sourceTree = "<group>"; };
 		A20000000000000000000001 /* DJOneHubUACProbeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubUACProbeApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* AudioProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioProbeModel.swift; sourceTree = "<group>"; };
@@ -184,6 +186,7 @@
 		B40000000000000000000001 /* DJOneHub */ = {
 			isa = PBXGroup;
 			children = (
+				B20000000000000000000040 /* DialpadSounds */,
 				B20000000000000000000001 /* DJOneHubApp.swift */,
 				B20000000000000000000002 /* DJOneHubRootView.swift */,
 				B20000000000000000000003 /* CallLifecycleCoordinator.swift */,
@@ -286,6 +289,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000000000000000000040 /* DialpadSounds in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

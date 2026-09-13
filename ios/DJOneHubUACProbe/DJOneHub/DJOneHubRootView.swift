@@ -17,7 +17,6 @@ struct DJOneHubRootView: View {
     private var automaticCallRecordingEnabled = false
 
     @State private var selectedTab: PhoneTab = .keypad
-    @State private var isConfirmingDial = false
     @State private var isConfirmingUnpair = false
     @State private var isConfirmingRecording = false
     @State private var isShowingSettings = false
@@ -43,7 +42,7 @@ struct DJOneHubRootView: View {
                     .tag(PhoneTab.contacts)
                     .tabItem { Label("通讯录", systemImage: "person.crop.circle.fill") }
                 KeypadView(
-                    onCall: { isConfirmingDial = true },
+                    onCall: { lifecycle.dial() },
                     onNotifications: showNotificationSettings,
                     onSettings: showSettings
                 )
@@ -139,14 +138,6 @@ struct DJOneHubRootView: View {
             onCompletion: importPairing
         )
         .confirmationDialog(
-            "确认拨打 \(trimmedDialNumber)？",
-            isPresented: $isConfirmingDial,
-            titleVisibility: .visible
-        ) {
-            Button("拨打") { lifecycle.dial() }
-            Button("取消", role: .cancel) {}
-        }
-        .confirmationDialog(
             "开始通话录音？",
             isPresented: $isConfirmingRecording,
             titleVisibility: .visible
@@ -176,10 +167,6 @@ struct DJOneHubRootView: View {
         case .placingCall, .dialing, .incoming, .answering, .active, .ending: return true
         default: return false
         }
-    }
-
-    private var trimmedDialNumber: String {
-        voiceControl.dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func prepareNumber(_ number: String) {
