@@ -43,6 +43,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     func start() {
         guard lifecycleTask == nil else { return }
         ConnectionLog.shared.append("开始连接：恢复本机配对配置")
+        ConnectionLog.shared.startNetworkMonitoring()
         voiceControl.restorePairings()
         hasStarted = true
         updatePhaseAndAudio()
@@ -79,6 +80,7 @@ final class CallLifecycleCoordinator: ObservableObject {
     }
 
     func applicationDidBecomeActive() {
+        ConnectionLog.shared.recordNetworkSnapshot()
         nextStatusAttempt = ContinuousClock.now
         if !callAudio.isRunning, !callAudio.hasActiveRequest {
             audioStartRequested = false

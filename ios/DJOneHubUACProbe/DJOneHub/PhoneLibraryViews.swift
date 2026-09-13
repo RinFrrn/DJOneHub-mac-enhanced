@@ -334,7 +334,7 @@ struct MessagesView: View {
                                             .font(.body.weight(sms.isUnread(message) ? .semibold : .regular))
                                             .lineLimit(1)
                                         Spacer()
-                                        Text(message.storage.title)
+                                        Text(message.storageTitle)
                                             .font(.caption.weight(.medium))
                                             .foregroundStyle(.secondary)
                                     }
@@ -342,6 +342,9 @@ struct MessagesView: View {
                                         .font(.subheadline)
                                         .foregroundStyle(sms.isUnread(message) ? .primary : .secondary)
                                         .lineLimit(2)
+                                    if let incomplete = message.incompleteText {
+                                        Text(incomplete).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                             .padding(.vertical, 3)
@@ -369,33 +372,36 @@ struct MessagesView: View {
 }
 
 private struct ModuleSMSDetailView: View {
-    let message: ModuleSMSMessage
+    let message: ModuleSMSDisplayMessage
 
     var body: some View {
         List {
             Section("内容") {
                 LabeledContent("发件人", value: message.title)
+                if let incomplete = message.incompleteText {
+                    Text(incomplete).font(.footnote).foregroundStyle(.secondary)
+                }
                 Text(message.preview)
                     .textSelection(.enabled)
             }
-            Section("模块存储") {
-                LabeledContent("位置", value: message.storage.title)
-                LabeledContent("索引", value: String(message.index))
-                LabeledContent("标签", value: tagText)
-                LabeledContent("格式", value: String(format: "0x%02X", message.format))
-            }
-            Section("原始 PDU") {
-                Text(message.rawHex)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
+            ForEach(message.parts) { part in
+                Section("模块存储 · \(part.storage.title) #\(part.index)") {
+                    LabeledContent("标签", value: tagText(part.tag))
+                    LabeledContent("格式", value: String(format: "0x%02X", part.format))
+                    DisclosureGroup("原始 PDU") {
+                        Text(part.rawHex)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                    }
+                }
             }
         }
         .navigationTitle("短信")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var tagText: String {
-        switch message.tag {
+    private func tagText(_ tag: UInt8) -> String {
+        switch tag {
         case 0: return "已读"
         case 1: return "未读"
         case 2: return "已发送"

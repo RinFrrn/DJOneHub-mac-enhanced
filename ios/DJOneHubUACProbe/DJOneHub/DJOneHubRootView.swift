@@ -87,6 +87,12 @@ struct DJOneHubRootView: View {
             if tab == .messages, scenePhase == .active { refreshSMS() }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active: ConnectionLog.shared.append("App 已回到前台")
+            case .inactive: ConnectionLog.shared.append("App 暂时不活跃（系统交互或前后台切换）")
+            case .background: ConnectionLog.shared.append("App 已进入后台（可能锁屏或切换 App）")
+            @unknown default: break
+            }
             if newPhase == .active {
                 lifecycle.applicationDidBecomeActive()
                 contacts.loadIfAuthorized()

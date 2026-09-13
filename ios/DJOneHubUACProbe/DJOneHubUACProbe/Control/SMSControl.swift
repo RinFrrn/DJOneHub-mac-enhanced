@@ -16,6 +16,42 @@ final class ConnectionLog: ObservableObject {
     }
     @Published private(set) var entries: [Entry] = []
     private var started = ContinuousClock.now
+    private let wiredMonitor = NWPathMonitor(requiredInterfaceType: .wiredEthernet)
+    private let monitorQueue = DispatchQueue(label: "DJOneHub.WiredNetworkDiagnostics")
+    private var monitoringStarted = false
+    private var lastWiredPath: String?
+
+    func startNetworkMonitoring() {
+        guard !monitoringStarted else { return }
+        monitoringStarted = true
+        wiredMonitor.pathUpdateHandler = { [weak self] path in
+            let summary = Self.describeWiredPath(path)
+            Task { @MainActor [weak self] in
+                guard let self, self.lastWiredPath != summary else { return }
+                self.lastWiredPath = summary
+                self.append("独立有线网络监测：\(summary)")
+            }
+        }
+        wiredMonitor.start(queue: monitorQueue)
+    }
+
+    func recordNetworkSnapshot() {
+        append("前台有线网络快照：\(Self.describeWiredPath(wiredMonitor.currentPath))")
+    }
+
+    nonisolated private static func describeWiredPath(_ path: NWPath) -> String {
+        let status: String
+        switch path.status {
+        case .satisfied: status = "路径可用"
+        case .requiresConnection: status = "路径等待建立"
+        case .unsatisfied:
+            status = path.unsatisfiedReason == .localNetworkDenied
+                ? "本地网络权限被拒绝" : "路径不可用"
+        @unknown default: status = "路径状态未知"
+        }
+        let count = path.availableInterfaces.filter { $0.type == .wiredEthernet }.count
+        return "\(status)；系统报告可用有线接口 \(count) 个；IPv4 支持\(path.supportsIPv4 ? "有" : "无")"
+    }
 
     func append(_ message: String) {
         let duration = started.duration(to: .now).components
@@ -97,6 +133,107 @@ struct ModuleSMSMessage: Identifiable, Hashable, Sendable {
 struct SMSDeliverSummary: Hashable, Sendable {
     let sender: String
     let text: String
+    let concatenation: SMSConcatenation?
+    let timestamp: Date?
+    let coding: UInt8
+    let protocolID: UInt8
+    let otherHeader: Data
+}
+
+struct SMSConcatenation: Hashable, Sendable {
+    let reference: UInt16
+    let referenceBits: Int
+    let total: Int
+    let sequence: Int
+}
+
+/// One visible message can own multiple module storage records. Keep every
+/// record so read state and raw diagnostics continue to refer to real PDUs.
+struct ModuleSMSDisplayMessage: Identifiable, Sendable {
+    let parts: [ModuleSMSMessage]
+    let title: String
+    let preview: String
+    let receivedParts: Int
+    let expectedParts: Int
+    var id: String { parts[0].id }
+    var storageTitle: String {
+        Set(parts.map(\.storage)).count > 1 ? "SIM / 模块" : parts[0].storage.title
+    }
+    var incompleteText: String? {
+        receivedParts < expectedParts ? "长短信尚未收齐（\(receivedParts)/\(expectedParts) 段）" : nil
+    }
+
+    static func assemble(_ records: [ModuleSMSMessage]) -> [Self] {
+        struct Key: Hashable {
+            let sender: String
+            let reference: UInt16
+            let bits: Int
+            let total: Int
+            let coding: UInt8
+            let protocolID: UInt8
+            let otherHeader: Data
+        }
+        var groups: [[ModuleSMSMessage]] = []
+        var candidates: [Key: [Int]] = [:]
+        var decodedRecords: [String: SMSDeliverSummary] = [:]
+        for record in records { decodedRecords[record.id] = record.decoded }
+        let ordered = records.sorted {
+            let left = decodedRecords[$0.id]?.timestamp ?? .distantPast
+            let right = decodedRecords[$1.id]?.timestamp ?? .distantPast
+            if left != right { return left < right }
+            if $0.storage != $1.storage { return $0.storage.rawValue < $1.storage.rawValue }
+            return $0.index < $1.index
+        }
+        for record in ordered {
+            guard let decoded = decodedRecords[record.id], let concat = decoded.concatenation else {
+                groups.append([record])
+                continue
+            }
+            let key = Key(sender: decoded.sender, reference: concat.reference,
+                          bits: concat.referenceBits, total: concat.total,
+                          coding: decoded.coding, protocolID: decoded.protocolID,
+                          otherHeader: decoded.otherHeader)
+            let matches = (candidates[key] ?? []).filter { index in
+                guard let first = decodedRecords[groups[index][0].id] else { return false }
+                // References are reused. Do not combine unrelated old messages;
+                // conflicting copies of a sequence must remain separate.
+                if let a = first.timestamp, let b = decoded.timestamp,
+                   abs(a.timeIntervalSince(b)) > 600 { return false }
+                return !groups[index].contains {
+                    guard let existing = decodedRecords[$0.id],
+                          existing.concatenation?.sequence == concat.sequence else { return false }
+                    return existing.text != decoded.text
+                }
+            }
+            if matches.count == 1, let index = matches.first {
+                groups[index].append(record)
+            } else {
+                candidates[key, default: []].append(groups.count)
+                groups.append([record])
+            }
+        }
+        return groups.reversed().map { records in
+            let parts = records.sorted {
+                let left = decodedRecords[$0.id]?.concatenation?.sequence ?? 1
+                let right = decodedRecords[$1.id]?.concatenation?.sequence ?? 1
+                if left != right { return left < right }
+                return $0.id < $1.id
+            }
+            let first = parts[0]
+            guard let concat = decodedRecords[first.id]?.concatenation else {
+                return Self(parts: parts, title: first.title, preview: first.preview, receivedParts: 1, expectedParts: 1)
+            }
+            var bySequence: [Int: String] = [:]
+            for part in parts {
+                if let decoded = decodedRecords[part.id], let sequence = decoded.concatenation?.sequence {
+                    bySequence[sequence] = decoded.text
+                }
+            }
+            let text = (1...concat.total).map { bySequence[$0] ?? "〔缺少第 \($0) 段〕" }.joined()
+            return Self(parts: parts, title: first.title, preview: text,
+                        receivedParts: bySequence.count, expectedParts: concat.total)
+        }
+    }
 }
 
 enum SMSControlProtocolError: Error, LocalizedError {
@@ -422,7 +559,7 @@ actor SMSControlClient {
 
 @MainActor
 final class SMSControlModel: ObservableObject {
-    @Published private(set) var messages: [ModuleSMSMessage] = []
+    @Published private(set) var messages: [ModuleSMSDisplayMessage] = []
     @Published private(set) var stateText = "等待连接模块"
     @Published private(set) var isLoading = false
     @Published private(set) var hasLoadedMessages = false
@@ -440,7 +577,6 @@ final class SMSControlModel: ObservableObject {
         self.defaults = defaults
         unreadMessageIDs = Set(defaults.stringArray(forKey: Self.unreadDefaultsKey) ?? [])
         readMessageIDs = Set(defaults.stringArray(forKey: Self.readDefaultsKey) ?? [])
-        unreadCount = unreadMessageIDs.count
     }
 
     private let defaults: UserDefaults
@@ -453,6 +589,7 @@ final class SMSControlModel: ObservableObject {
         guard !isLoading else { return }
         guard let pairingKey else {
             messages = []
+            unreadCount = 0
             messageCache = [:]
             hasLoadedMessages = false
             stateText = "请先连接已配对模块"
@@ -493,10 +630,7 @@ final class SMSControlModel: ObservableObject {
                     updatedCache[reference] = message
                     loadedPairs.append((reference, message))
                 }
-                messages = loaded.sorted {
-                    if $0.storage != $1.storage { return $0.storage.rawValue < $1.storage.rawValue }
-                    return $0.index > $1.index
-                }
+                messages = ModuleSMSDisplayMessage.assemble(loaded)
                 messageCache = updatedCache
                 hasLoadedMessages = true
                 if consecutiveFailures > 0 || !loggedSuccessfulQuery {
@@ -526,14 +660,15 @@ final class SMSControlModel: ObservableObject {
         }
     }
 
-    func isUnread(_ message: ModuleSMSMessage) -> Bool {
-        unreadMessageIDs.contains(message.trackingID)
+    func isUnread(_ message: ModuleSMSDisplayMessage) -> Bool {
+        message.parts.contains { unreadMessageIDs.contains($0.trackingID) }
     }
 
-    func markRead(_ message: ModuleSMSMessage) {
-        let id = message.trackingID
-        guard unreadMessageIDs.remove(id) != nil else { return }
-        readMessageIDs.insert(id)
+    func markRead(_ message: ModuleSMSDisplayMessage) {
+        for part in message.parts {
+            unreadMessageIDs.remove(part.trackingID)
+            readMessageIDs.insert(part.trackingID)
+        }
         persistReadState()
     }
 
@@ -549,7 +684,7 @@ final class SMSControlModel: ObservableObject {
     }
 
     private func persistReadState() {
-        unreadCount = unreadMessageIDs.count
+        unreadCount = messages.filter { isUnread($0) }.count
         defaults.set(unreadMessageIDs.sorted(), forKey: Self.unreadDefaultsKey)
         defaults.set(readMessageIDs.sorted(), forKey: Self.readDefaultsKey)
     }
@@ -572,27 +707,87 @@ enum SMSPDU {
         let addressBytes = (addressDigits + 1) / 2
         guard cursor + addressBytes + 10 <= bytes.count else { return nil }
         var sender = semiOctetDigits(Array(bytes[cursor..<(cursor + addressBytes)]), digits: addressDigits)
+        if toa & 0x70 == 0x50 {
+            guard let name = decodeGSM7(Array(bytes[cursor..<(cursor + addressBytes)]),
+                                        septetCount: addressDigits * 4 / 7, hasHeader: false) else { return nil }
+            sender = name
+        }
         if toa & 0x70 == 0x10 { sender = "+" + sender }
         cursor += addressBytes
-        cursor += 1 // PID
+        let protocolID = bytes[cursor]
+        cursor += 1
         let dcs = bytes[cursor]
         cursor += 1
+        let timestamp = decodeTimestamp(Array(bytes[cursor..<(cursor + 7)]))
         cursor += 7 // SCTS
         guard cursor < bytes.count else { return nil }
         let userLength = Int(bytes[cursor])
         cursor += 1
-        let userData = Array(bytes[cursor...])
+        let isGSM7 = dcs & 0x0C == 0
+        let byteLength = isGSM7 ? (userLength * 7 + 7) / 8 : userLength
+        guard cursor + byteLength <= bytes.count else { return nil }
+        let userData = Array(bytes[cursor..<(cursor + byteLength)])
+        let hasHeader = firstOctet & 0x40 != 0
+        let headerLength: Int
+        var concatenation: SMSConcatenation?
+        var otherHeader = Data()
+        if hasHeader {
+            guard let length = userData.first else { return nil }
+            headerLength = Int(length) + 1
+            guard headerLength <= userData.count else { return nil }
+            var offset = 1
+            while offset < headerLength {
+                guard offset + 2 <= headerLength else { return nil }
+                let identifier = userData[offset]
+                let length = Int(userData[offset + 1])
+                let end = offset + 2 + length
+                guard end <= headerLength else { return nil }
+                let info = Array(userData[(offset + 2)..<end])
+                if identifier == 0x00 || identifier == 0x08 {
+                    guard concatenation == nil else { return nil }
+                    if identifier == 0x00, length == 3 {
+                        concatenation = SMSConcatenation(reference: UInt16(info[0]), referenceBits: 8,
+                                                        total: Int(info[1]), sequence: Int(info[2]))
+                    } else if identifier == 0x08, length == 4 {
+                        concatenation = SMSConcatenation(reference: UInt16(info[0]) << 8 | UInt16(info[1]),
+                                                        referenceBits: 16, total: Int(info[2]), sequence: Int(info[3]))
+                    } else { return nil }
+                    guard let value = concatenation, value.total > 0,
+                          (1...value.total).contains(value.sequence) else { return nil }
+                } else {
+                    otherHeader.append(contentsOf: userData[offset..<end])
+                }
+                offset = end
+            }
+        } else { headerLength = 0 }
+        let body = Data(userData.dropFirst(headerLength))
         let text: String?
         if dcs & 0x0C == 0x08 {
-            let byteCount = min(userLength, userData.count) & ~1
-            text = String(data: Data(userData.prefix(byteCount)), encoding: .utf16BigEndian)
-        } else if dcs & 0x0C == 0 {
-            text = decodeGSM7(userData, septetCount: userLength, hasHeader: firstOctet & 0x40 != 0)
+            guard body.count.isMultiple(of: 2) else { return nil }
+            text = String(data: body, encoding: .utf16BigEndian)
+        } else if isGSM7 {
+            text = decodeGSM7(userData, septetCount: userLength, hasHeader: hasHeader)
         } else {
-            text = String(data: Data(userData.prefix(min(userLength, userData.count))), encoding: .isoLatin1)
+            text = String(data: body, encoding: .isoLatin1)
         }
         guard let text else { return nil }
-        return SMSDeliverSummary(sender: sender, text: text)
+        return SMSDeliverSummary(sender: sender, text: text, concatenation: concatenation,
+                                 timestamp: timestamp, coding: dcs, protocolID: protocolID, otherHeader: otherHeader)
+    }
+
+    private static func decodeTimestamp(_ bytes: [UInt8]) -> Date? {
+        func bcd(_ byte: UInt8) -> Int { Int(byte & 0x0F) * 10 + Int(byte >> 4) }
+        guard bytes.prefix(6).allSatisfy({ $0 & 0x0F <= 9 && $0 >> 4 <= 9 }) else { return nil }
+        let quarterHours = bcd(bytes[6] & 0xF7)
+        let offset = quarterHours * 15 * 60 * (bytes[6] & 0x08 == 0 ? 1 : -1)
+        guard let zone = TimeZone(secondsFromGMT: offset) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let components = DateComponents(year: 2000 + bcd(bytes[0]), month: bcd(bytes[1]),
+                                        day: bcd(bytes[2]), hour: bcd(bytes[3]),
+                                        minute: bcd(bytes[4]), second: bcd(bytes[5]))
+        guard components.isValidDate(in: calendar) else { return nil }
+        return calendar.date(from: components)
     }
 
     private static func semiOctetDigits(_ bytes: [UInt8], digits: Int) -> String {
@@ -613,6 +808,7 @@ enum SMSPDU {
             skipSeptets = (Int(first) + 1) * 8 / 7
             if (Int(first) + 1) * 8 % 7 != 0 { skipSeptets += 1 }
         }
+        guard septetCount >= skipSeptets, septetCount * 7 <= bytes.count * 8 else { return nil }
         var output = ""
         var escaped = false
         for index in skipSeptets..<septetCount {
