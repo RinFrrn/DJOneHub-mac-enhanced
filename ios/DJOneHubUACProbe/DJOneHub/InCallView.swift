@@ -12,96 +12,23 @@ struct InCallView: View {
     let onToggleRecording: () -> Void
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.08, green: 0.12, blue: 0.18), .black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                Spacer(minLength: 44)
-                Text(callTitle)
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(statusText)
-                    .font(.title3.monospacedDigit())
-                    .foregroundStyle(callAudio.isRecording ? .red : .white.opacity(0.68))
-
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 120, height: 120)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 52))
-                            .foregroundStyle(.white.opacity(0.82))
-                    }
-
-                if case .incoming(let callID) = lifecycle.phase {
-                    Spacer()
-                    HStack(spacing: 76) {
-                        CallActionButton(title: "拒绝", systemImage: "phone.down.fill", color: .red) {
-                            onEnd(callID)
-                        }
-                        CallActionButton(title: "接听", systemImage: "phone.fill", color: .green) {
-                            onAnswer(callID)
-                        }
-                    }
-                } else {
-                    Spacer()
-                    CallAudioRouteControl(audio: callAudio)
-                        .disabled(!isActive || !callAudio.canSelectAudioRoute)
-                        .opacity(isActive && callAudio.canSelectAudioRoute ? 1 : 0.45)
-                    HStack(spacing: 54) {
-                        CallActionButton(
-                            title: "静音",
-                            systemImage: lifecycle.isMuted ? "mic.slash.fill" : "mic.fill",
-                            color: lifecycle.isMuted ? .white : .white.opacity(0.18),
-                            foreground: lifecycle.isMuted ? .black : .white,
-                            action: onToggleMute
-                        )
-                        .disabled(!isActive)
-                        .opacity(isActive ? 1 : 0.45)
-
-                        CallActionButton(
-                            title: callAudio.isRecording ? "停止录音" : "录音",
-                            systemImage: callAudio.isRecording ? "stop.fill" : "record.circle",
-                            color: callAudio.isRecording ? .red : .white.opacity(0.18),
-                            action: onToggleRecording
-                        )
-                        .disabled(!isActive)
-                        .opacity(isActive ? 1 : 0.45)
-                    }
-
-                    if !callAudio.recordingErrorText.isEmpty {
-                        Text(callAudio.recordingErrorText)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-
-                    if !callAudio.audioRouteErrorText.isEmpty {
-                        Text(callAudio.audioRouteErrorText)
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    if let callID = lifecycle.phase.callID {
-                        CallActionButton(title: "挂断", systemImage: "phone.down.fill", color: .red) {
-                            onEnd(callID)
-                        }
-                    } else {
-                        ProgressView().tint(.white)
-                    }
-                }
-                Spacer(minLength: 30)
-            }
-            .padding(.horizontal, 28)
+        CallScreenLayout(
+            callTitle: callTitle, statusText: statusText,
+            isRecording: callAudio.isRecording, isMuted: lifecycle.isMuted,
+            isActive: isActive, incomingCallID: incomingCallID,
+            callID: lifecycle.phase.callID, canSelectAudioRoute: callAudio.canSelectAudioRoute,
+            recordingErrorText: callAudio.recordingErrorText, audioRouteErrorText: callAudio.audioRouteErrorText,
+            onAnswer: onAnswer, onEnd: onEnd, onToggleMute: onToggleMute,
+            onToggleRecording: onToggleRecording
+        ) {
+            CallAudioRouteControl(audio: callAudio)
         }
         .onAppear { callAudio.refreshAvailableAudioRoutes() }
+    }
+
+    private var incomingCallID: UInt8? {
+        if case .incoming(let id) = lifecycle.phase { return id }
+        return nil
     }
 
     private var isActive: Bool {
@@ -137,8 +64,209 @@ struct InCallView: View {
 
 }
 
+/// Shared presentation only: all side effects are supplied by the caller.
+private struct CallScreenLayout<RouteControl: View>: View {
+    let callTitle: String
+    let statusText: String
+    let isRecording: Bool
+    let isMuted: Bool
+    let isActive: Bool
+    let incomingCallID: UInt8?
+    let callID: UInt8?
+    let canSelectAudioRoute: Bool
+    let recordingErrorText: String
+    let audioRouteErrorText: String
+    let onAnswer: (UInt8) -> Void
+    let onEnd: (UInt8) -> Void
+    let onToggleMute: () -> Void
+    let onToggleRecording: () -> Void
+    @ViewBuilder let routeControl: () -> RouteControl
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.08, green: 0.12, blue: 0.18), .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                Spacer(minLength: 44)
+                Text(callTitle)
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(statusText)
+                    .font(.title3.monospacedDigit())
+                    .foregroundStyle(isRecording ? .red : .white.opacity(0.68))
+
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 120, height: 120)
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 52))
+                            .foregroundStyle(.white.opacity(0.82))
+                    }
+
+                if let callID = incomingCallID {
+                    Spacer()
+                    HStack(spacing: 76) {
+                        CallActionButton(title: "拒绝", systemImage: "phone.down.fill", color: .red) {
+                            onEnd(callID)
+                        }
+                        CallActionButton(title: "接听", systemImage: "phone.fill", color: .green) {
+                            onAnswer(callID)
+                        }
+                    }
+                } else {
+                    Spacer()
+                    routeControl()
+                        .disabled(!isActive || !canSelectAudioRoute)
+                        .opacity(isActive && canSelectAudioRoute ? 1 : 0.45)
+                    HStack(spacing: 54) {
+                        CallActionButton(
+                            title: "静音",
+                            systemImage: isMuted ? "mic.slash.fill" : "mic.fill",
+                            color: isMuted ? .white : .white.opacity(0.18),
+                            foreground: isMuted ? .black : .white,
+                            action: onToggleMute
+                        )
+                        .disabled(!isActive)
+                        .opacity(isActive ? 1 : 0.45)
+
+                        CallActionButton(
+                            title: isRecording ? "停止录音" : "录音",
+                            systemImage: isRecording ? "stop.fill" : "record.circle",
+                            color: isRecording ? .red : .white.opacity(0.18),
+                            action: onToggleRecording
+                        )
+                        .disabled(!isActive)
+                        .opacity(isActive ? 1 : 0.45)
+                    }
+
+                    if !recordingErrorText.isEmpty {
+                        Text(recordingErrorText)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    if !audioRouteErrorText.isEmpty {
+                        Text(audioRouteErrorText)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    if let callID {
+                        CallActionButton(title: "挂断", systemImage: "phone.down.fill", color: .red) {
+                            onEnd(callID)
+                        }
+                    } else {
+                        ProgressView().tint(.white)
+                    }
+                }
+                Spacer(minLength: 30)
+            }
+            .padding(.horizontal, 28)
+        }
+    }
+}
+
+/// No live coordinators, module commands or audio sessions are used here.
+private struct CallScreenPreview: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var incoming = false
+    @State private var muted = false
+    @State private var recordingStarted: Date?
+    @State private var connectedAt = Date()
+    @State private var selectedRoute = "receiver"
+
+    private let routes: [CallAudioRoute] = [
+        .init(kind: .receiver, title: "听筒", systemImage: "ear"),
+        .init(kind: .speaker, title: "扬声器", systemImage: "speaker.wave.2.fill"),
+        .init(kind: .accessory(uid: "preview"), title: "蓝牙耳机", systemImage: "headphones")
+    ]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            CallScreenLayout(
+                callTitle: "示例联系人", statusText: status(at: context.date),
+                isRecording: recordingStarted != nil, isMuted: muted,
+                isActive: !incoming, incomingCallID: incoming ? 1 : nil,
+                callID: 1, canSelectAudioRoute: true,
+                recordingErrorText: "", audioRouteErrorText: "",
+                onAnswer: { _ in reset(incoming: false) },
+                onEnd: { _ in dismiss() },
+                onToggleMute: { muted.toggle() },
+                onToggleRecording: { recordingStarted = recordingStarted == nil ? Date() : nil }
+            ) {
+                CallAudioRoutePicker(routes: routes, selectedID: selectedRoute) {
+                    selectedRoute = $0.id
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("通话界面预览").font(.subheadline.weight(.semibold))
+                    Text("模拟操作，不会拨号或录音").font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                Spacer()
+                Menu {
+                    Button("通话中") { reset(incoming: false) }
+                    Button("收到来电") { reset(incoming: true) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.title2)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("切换预览场景")
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.title2)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("关闭预览")
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func status(at date: Date) -> String {
+        if incoming { return "来电" }
+        if let recordingStarted {
+            return "● 录音中  \(phoneDurationText(max(0, date.timeIntervalSince(recordingStarted))))"
+        }
+        return phoneDurationText(max(0, date.timeIntervalSince(connectedAt)))
+    }
+
+    private func reset(incoming: Bool) {
+        self.incoming = incoming
+        muted = false
+        recordingStarted = nil
+        connectedAt = Date()
+        selectedRoute = "receiver"
+    }
+}
+
 private struct CallAudioRouteControl: View {
     @ObservedObject var audio: CallAudioCoordinator
+
+    var body: some View {
+        CallAudioRoutePicker(routes: audio.availableAudioRoutes,
+                             selectedID: audio.availableAudioRoutes.first(where: audio.isSelectedAudioRoute)?.id,
+                             onSelect: audio.selectAudioRoute)
+    }
+}
+
+private struct CallAudioRoutePicker: View {
+    let routes: [CallAudioRoute]
+    let selectedID: String?
+    let onSelect: (CallAudioRoute) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var selection
 
@@ -160,16 +288,16 @@ private struct CallAudioRouteControl: View {
                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
             }
         }
-        .sensoryFeedback(.selection, trigger: audio.selectedAudioRoute?.id)
+        .sensoryFeedback(.selection, trigger: selectedID)
     }
 
     private func segments(minimumWidth: CGFloat) -> some View {
         HStack(spacing: 4) {
-            ForEach(audio.availableAudioRoutes) { route in
-                let selected = audio.isSelectedAudioRoute(route)
+            ForEach(routes) { route in
+                let selected = selectedID == route.id
                 Button {
                     guard !selected else { return }
-                    audio.selectAudioRoute(route)
+                    onSelect(route)
                 } label: {
                     VStack(spacing: 8) {
                         Image(systemName: route.systemImage)
@@ -198,7 +326,7 @@ private struct CallAudioRouteControl: View {
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
-                   value: audio.selectedAudioRoute?.id)
+                   value: selectedID)
     }
 }
 
@@ -237,6 +365,7 @@ struct SettingsView: View {
     @StateObject private var recordingPlayer = CallRecordingPlayer()
     @State private var recordings: [CallRecordingInfo] = []
     @State private var recordingPendingDeletion: CallRecordingInfo?
+    @State private var isShowingCallPreview = false
 
     var body: some View {
         NavigationStack {
@@ -283,6 +412,11 @@ struct SettingsView: View {
                 }
 
                 Section("诊断") {
+                    Button {
+                        isShowingCallPreview = true
+                    } label: {
+                        Label("通话界面预览", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                    }
                     NavigationLink {
                         ConnectionLogView()
                     } label: {
@@ -328,6 +462,9 @@ struct SettingsView: View {
             .onAppear { reloadRecordings() }
             .onChange(of: callAudio.lastRecordingURL) { _, _ in reloadRecordings() }
             .onDisappear { recordingPlayer.stop() }
+            .fullScreenCover(isPresented: $isShowingCallPreview) {
+                CallScreenPreview()
+            }
         }
     }
 
