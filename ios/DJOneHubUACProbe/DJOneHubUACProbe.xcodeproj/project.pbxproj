@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B10000000000000000000040 /* DialpadSounds in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000040 /* DialpadSounds */; };
+		376CC5B3D752CC63BF738D66 /* ContactDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4DDFC07A5921ABC4C57A59 /* ContactDetailView.swift */; };
 		A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* DJOneHubUACProbeApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
 		A10000000000000000000003 /* AudioProbeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AudioProbeModel.swift */; };
@@ -25,6 +25,8 @@
 		A10000000000000000000018 /* CallRecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* CallRecordingController.swift */; };
 		A10000000000000000000019 /* VoiceControlRequestArbitration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* VoiceControlRequestArbitration.swift */; };
 		A1000000000000000000001A /* SMSControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001A /* SMSControl.swift */; };
+		A10000000000000000000030 /* ModuleAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* ModuleAuthorization.swift */; };
+		A10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ModuleAuthorizationClient.swift */; };
 		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
 		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
 		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
@@ -50,14 +52,13 @@
 		B1000000000000000000001D /* IncomingCallPushEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000B /* IncomingCallPushEvent.swift */; };
 		B1000000000000000000001E /* SystemCallCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* SystemCallCoordinator.swift */; };
 		B1000000000000000000001F /* NotificationControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* NotificationControl.swift */; };
-		A10000000000000000000030 /* ModuleAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* ModuleAuthorization.swift */; };
 		B10000000000000000000030 /* ModuleAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* ModuleAuthorization.swift */; };
-		A10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ModuleAuthorizationClient.swift */; };
 		B10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ModuleAuthorizationClient.swift */; };
+		B10000000000000000000040 /* DialpadSounds in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000040 /* DialpadSounds */; };
+		B68BC6888719079DE5461CC7 /* ContactAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03F3B2C5DA7DABEA4A401A0 /* ContactAvatarView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B20000000000000000000040 /* DialpadSounds */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DialpadSounds; sourceTree = "<group>"; };
 		A20000000000000000000001 /* DJOneHubUACProbeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubUACProbeApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* AudioProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioProbeModel.swift; sourceTree = "<group>"; };
@@ -78,6 +79,8 @@
 		A20000000000000000000018 /* CallRecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordingController.swift; sourceTree = "<group>"; };
 		A20000000000000000000019 /* VoiceControlRequestArbitration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceControlRequestArbitration.swift; sourceTree = "<group>"; };
 		A2000000000000000000001A /* SMSControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMSControl.swift; sourceTree = "<group>"; };
+		A20000000000000000000030 /* ModuleAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorization.swift; sourceTree = "<group>"; };
+		A20000000000000000000031 /* ModuleAuthorizationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorizationClient.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
@@ -91,8 +94,9 @@
 		B2000000000000000000000B /* IncomingCallPushEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomingCallPushEvent.swift; sourceTree = "<group>"; };
 		B2000000000000000000000C /* SystemCallCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCallCoordinator.swift; sourceTree = "<group>"; };
 		B2000000000000000000000D /* NotificationControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationControl.swift; sourceTree = "<group>"; };
-		A20000000000000000000030 /* ModuleAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorization.swift; sourceTree = "<group>"; };
-		A20000000000000000000031 /* ModuleAuthorizationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorizationClient.swift; sourceTree = "<group>"; };
+		B20000000000000000000040 /* DialpadSounds */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DialpadSounds; sourceTree = "<group>"; };
+		F03F3B2C5DA7DABEA4A401A0 /* ContactAvatarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContactAvatarView.swift; sourceTree = "<group>"; };
+		FA4DDFC07A5921ABC4C57A59 /* ContactDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContactDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -199,6 +203,8 @@
 				B2000000000000000000000C /* SystemCallCoordinator.swift */,
 				B2000000000000000000000D /* NotificationControl.swift */,
 				B20000000000000000000004 /* Info.plist */,
+				F03F3B2C5DA7DABEA4A401A0 /* ContactAvatarView.swift */,
+				FA4DDFC07A5921ABC4C57A59 /* ContactDetailView.swift */,
 			);
 			path = DJOneHub;
 			sourceTree = "<group>";
@@ -353,6 +359,8 @@
 				B1000000000000000000001D /* IncomingCallPushEvent.swift in Sources */,
 				B1000000000000000000001E /* SystemCallCoordinator.swift in Sources */,
 				B1000000000000000000001F /* NotificationControl.swift in Sources */,
+				B68BC6888719079DE5461CC7 /* ContactAvatarView.swift in Sources */,
+				376CC5B3D752CC63BF738D66 /* ContactDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

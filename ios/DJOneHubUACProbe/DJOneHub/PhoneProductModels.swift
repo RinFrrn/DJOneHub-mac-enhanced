@@ -136,6 +136,7 @@ struct ContactPhone: Identifiable, Equatable, Sendable {
     let contactName: String
     let label: String
     let number: String
+    let imageData: Data?
 }
 
 @MainActor
@@ -225,11 +226,52 @@ final class ContactsModel: ObservableObject {
         }
     }
 
+    func matchedContact(for number: String) -> ContactPhone? {
+        guard !Self.normalizedNumber(number).isEmpty else { return nil }
+        return phones.first { Self.phoneNumbersMatch($0.number, number) }
+    }
+
+    nonisolated static func phoneNumbersMatch(_ a: String, _ b: String) -> Bool {
+        let na = normalizedNumber(a)
+        let nb = normalizedNumber(b)
+        guard !na.isEmpty, !nb.isEmpty else { return false }
+        if na == nb { return true }
+
+        let variantsA = phoneNumberVariants(na)
+        let variantsB = phoneNumberVariants(nb)
+        return !variantsA.isDisjoint(with: variantsB)
+    }
+
+    private nonisolated static func phoneNumberVariants(_ number: String) -> Set<String> {
+        var variants: Set<String> = [number]
+        // China country code variants
+        if number.hasPrefix("+86"), number.count > 3 {
+            variants.insert(String(number.dropFirst(3)))
+        }
+        if number.hasPrefix("86"), number.count > 2, number.first != "+" {
+            variants.insert(String(number.dropFirst(2)))
+        }
+        // Generic: strip leading +
+        if number.hasPrefix("+"), number.count > 1 {
+            variants.insert(String(number.dropFirst()))
+        }
+        // Mobile suffix fallback: last 10-11 digits
+        let digitsOnly = number.filter(\.isNumber)
+        if digitsOnly.count >= 10 {
+            variants.insert(String(digitsOnly.suffix(10)))
+        }
+        if digitsOnly.count >= 11 {
+            variants.insert(String(digitsOnly.suffix(11)))
+        }
+        return variants
+    }
+
     nonisolated private static func fetchContacts() throws -> [ContactPhone] {
         let store = CNContactStore()
         let keys: [CNKeyDescriptor] = [
             CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
-            CNContactPhoneNumbersKey as CNKeyDescriptor
+            CNContactPhoneNumbersKey as CNKeyDescriptor,
+            CNContactThumbnailImageDataKey as CNKeyDescriptor
         ]
         let request = CNContactFetchRequest(keysToFetch: keys)
         request.sortOrder = .userDefault
@@ -244,15 +286,21 @@ final class ContactsModel: ObservableObject {
                 let label = CNLabeledValue<NSString>.localizedString(
                     forLabel: labeledValue.label ?? CNLabelPhoneNumberMain
                 )
+                let imageData = contact.thumbnailImageData
                 result.append(ContactPhone(
                     id: "\(contact.identifier):\(index)",
                     contactName: name,
                     label: label,
-                    number: number
+                    number: number,
+                    imageData: imageData
                 ))
             }
         }
         return result
+    }
+
+    nonisolated static func normalizedNumber(_ input: String) -> String {
+        dialableNumber(input)
     }
 
     nonisolated private static func dialableNumber(_ input: String) -> String {

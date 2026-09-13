@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecentsView: View {
     @EnvironmentObject private var history: CallHistoryStore
+    @EnvironmentObject private var contacts: ContactsModel
     @State private var selectedRecording: CallRecordingInfo?
     let onDial: (String) -> Void
     let onSettings: () -> Void
@@ -19,13 +20,18 @@ struct RecentsView: View {
                     List {
                         ForEach(history.entries) { entry in
                             HStack(spacing: 8) {
-                                Button {
-                                    if let number = entry.number { onDial(number) }
+                                NavigationLink {
+                                    if let number = entry.number {
+                                        ContactDetailView(number: number, onDial: onDial)
+                                    }
                                 } label: {
-                                    CallHistoryRow(entry: entry)
+                                    CallHistoryRow(
+                                        entry: entry,
+                                        contact: matchedContact(for: entry)
+                                    )
                                 }
-                                .buttonStyle(.plain)
                                 .disabled(entry.number == nil)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
                                 if let recording = recording(for: entry) {
                                     Button {
@@ -52,6 +58,11 @@ struct RecentsView: View {
                 RecordingPlaybackView(recording: recording)
             }
         }
+    }
+
+    private func matchedContact(for entry: CallHistoryEntry) -> ContactPhone? {
+        guard let number = entry.number else { return nil }
+        return contacts.matchedContact(for: number)
     }
 
     private func recording(for entry: CallHistoryEntry) -> CallRecordingInfo? {
@@ -144,24 +155,44 @@ private struct RecordingPlaybackView: View {
 
 private struct CallHistoryRow: View {
     let entry: CallHistoryEntry
+    let contact: ContactPhone?
+
+    private var displayName: String {
+        contact?.contactName ?? entry.number ?? "未知号码"
+    }
+
+    private var displayNumber: String? {
+        guard contact != nil else { return nil }
+        return entry.number
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             HStack(spacing: 12) {
-                Image(systemName: entry.direction == .outgoing
-                      ? "phone.arrow.up.right" : "phone.arrow.down.left")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(isUnsuccessful ? .red : .secondary)
-                    .frame(width: 28)
+                ContactAvatarView(
+                    imageData: contact?.imageData,
+                    name: displayName,
+                    size: 42
+                )
+
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.number ?? "未知号码")
+                    Text(displayName)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(isUnsuccessful ? .red : .primary)
-                    Text(outcomeText)
-                        .font(.subheadline)
-                        .foregroundStyle(isUnsuccessful ? .red : .secondary)
+                    if let displayNumber {
+                        Text(displayNumber)
+                            .font(.subheadline)
+                            .foregroundStyle(isUnsuccessful ? .red.opacity(0.8) : .secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(outcomeText)
+                            .font(.subheadline)
+                            .foregroundStyle(isUnsuccessful ? .red : .secondary)
+                    }
                 }
+
                 Spacer()
+
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(callRelativeTime(entry.startedAt, relativeTo: context.date))
                         .font(.subheadline)
@@ -256,24 +287,23 @@ struct ContactsView: View {
 
     private var contactList: some View {
         List(filteredPhones) { phone in
-            Button { onDial(phone.number) } label: {
+            NavigationLink {
+                ContactDetailView(number: phone.number, onDial: onDial)
+            } label: {
                 HStack(spacing: 12) {
-                    Text(initials(phone.contactName))
-                        .font(.headline)
-                        .frame(width: 42, height: 42)
-                        .foregroundStyle(.white)
-                        .background(Color.accentColor.gradient, in: Circle())
+                    ContactAvatarView(
+                        imageData: phone.imageData,
+                        name: phone.contactName,
+                        size: 42
+                    )
                     VStack(alignment: .leading, spacing: 3) {
                         Text(phone.contactName).font(.body.weight(.semibold))
                         Text("\(phone.label)  \(phone.number)")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Image(systemName: "phone.fill").foregroundStyle(.green)
                 }
             }
-            .buttonStyle(.plain)
         }
         .listStyle(.plain)
         .searchable(text: $searchText, prompt: "姓名或号码")
@@ -285,10 +315,6 @@ struct ContactsView: View {
         return contacts.phones.filter {
             $0.contactName.localizedCaseInsensitiveContains(query) || $0.number.contains(query)
         }
-    }
-
-    private func initials(_ name: String) -> String {
-        String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
     }
 }
 
