@@ -17,6 +17,7 @@ backups/
 # Local runtime data and logs
 *.log
 *.pid
+.workbuddy/
 
 # Editor files
 .idea/

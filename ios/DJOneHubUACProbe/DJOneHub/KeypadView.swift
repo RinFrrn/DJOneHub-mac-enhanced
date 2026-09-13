@@ -11,7 +11,10 @@ struct LegacyModuleBottomBar: ViewModifier {
         } else {
             content.toolbar {
                 ToolbarItem(placement: .bottomBar) {
-                    ModuleAccessoryButton(onOpen: onSettings)
+                    HStack {
+                        Spacer(minLength: 0)
+                        ModuleAccessoryButton(onOpen: onSettings)
+                    }
                 }
             }
         }
@@ -34,36 +37,39 @@ struct ModuleBottomAccessory: ViewModifier {
 private struct ModuleAccessoryButton: View {
     let onOpen: () -> Void
     var body: some View {
-        Button(action: onOpen) { ConnectionPill() }
-            .buttonStyle(.plain)
-            .accessibilityHint("打开模块状态、提醒和设置")
+        Button(action: onOpen) {
+            ModuleAccessoryPill()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("模块状态")
+        .accessibilityHint("打开模块状态、提醒和设置")
     }
 }
 
-struct ConnectionPill: View {
+private struct ModuleAccessoryPill: View {
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
     @ObservedObject private var network = ConnectionLog.shared
     private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
 
     var body: some View {
         HStack(spacing: 12) {
-            if noDevice {
-                Image(systemName: "cable.connector").foregroundStyle(.secondary)
-            } else if lifecycle.phase == .connecting {
-                ProgressView().controlSize(.mini)
-            } else {
-                Circle().fill(color).frame(width: 8, height: 8)
-            }
+            ModuleStatusIcon()
+                .frame(width: 32, height: 32)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                 Text("模块提醒 · 录音 · 设置")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+
             Spacer(minLength: 8)
+
             Image(systemName: "chevron.up")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 6)
@@ -71,8 +77,45 @@ struct ConnectionPill: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
+}
 
-    private var color: Color {
+struct ModuleStatusIcon: View {
+    @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @ObservedObject private var network = ConnectionLog.shared
+    private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
+
+    var body: some View {
+        Group {
+            if noDevice {
+                Image(systemName: "cable.connector.slash")
+                    .foregroundStyle(.secondary)
+            } else if lifecycle.phase == .connecting {
+                Image(systemName: "arrow.2.circlepath")
+                    .foregroundStyle(.orange)
+            } else {
+                Image(systemName: iconName)
+                    .foregroundStyle(iconColor)
+            }
+        }
+        .font(.system(size: 22, weight: .semibold))
+        .imageScale(.large)
+        .frame(width: 44, height: 44)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle)
+    }
+
+    private var iconName: String {
+        switch lifecycle.phase {
+        case .ready: return "checkmark.circle.fill"
+        case .active: return "phone.connection.fill"
+        case .incoming: return "phone.arrow.down.left.fill"
+        case .needsPairing, .needsControlPairing: return "person.crop.circle.badge.plus"
+        case .recovering: return "exclamationmark.triangle.fill"
+        default: return "exclamationmark.circle.fill"
+        }
+    }
+
+    private var iconColor: Color {
         switch lifecycle.phase {
         case .ready, .active: return .green
         case .incoming: return .blue

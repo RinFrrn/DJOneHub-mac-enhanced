@@ -53,6 +53,7 @@ struct DJOneHubRootView: View {
                     .badge(sms.unreadCount)
             }
             .modifier(ModuleBottomAccessory(onOpen: showSettings))
+            .tabBarMinimizeIfAvailable()
 
             if shouldPresentCallScreen {
                 InCallView(
@@ -218,6 +219,17 @@ struct DJOneHubRootView: View {
             lifecycle.pairingDidChange()
         } catch {
             voiceControl.reportPairingImportFailure(error)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func tabBarMinimizeIfAvailable() -> some View {
+        if #available(iOS 26.0, *) {
+            self.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
         }
     }
 }
