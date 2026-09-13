@@ -35,13 +35,31 @@ type Delivery struct {
 }
 
 type State struct {
-	Version  int              `json:"version"`
-	SMS      map[int][]string `json:"sms"`
-	Queue    []Delivery       `json:"queue"`
-	Sequence uint64           `json:"sequence"`
+	Version   int                      `json:"version"`
+	SMS       map[int][]string         `json:"sms"`
+	Queue     []Delivery               `json:"queue"`
+	Sequence  uint64                   `json:"sequence"`
+	Multipart map[string]*multipartSMS `json:"multipart,omitempty"`
 	// Calls are intentionally not restored across boot: a currently ringing
 	// call deserves a fresh alert, whereas historical SMS must remain silent.
 	calls []int
+}
+
+type multipartSMS struct {
+	Key       string         `json:"key"` // Hash of sender and concatenation metadata, never the sender itself.
+	Timestamp time.Time      `json:"timestamp"`
+	Expires   time.Time      `json:"expires"`
+	Total     int            `json:"total"`
+	IDs       map[int]string `json:"ids"`
+	Text      map[int]string `json:"text,omitempty"`
+	Silent    bool           `json:"silent,omitempty"`
+	Notified  bool           `json:"notified,omitempty"`
+}
+
+type smsPart struct {
+	id, key, text string
+	timestamp     time.Time
+	concat        smscodec.ConcatInfo
 }
 
 func NewState() *State { return &State{Version: 1, SMS: make(map[int][]string)} }
@@ -87,6 +105,7 @@ func (s *State) Apply(event Snapshot, options EventOptions, now time.Time) (bool
 		}
 		ids := make([]string, 0, len(event.PDUs))
 		details := make(map[string]string)
+		parts := make(map[string]smsPart)
 		for _, raw := range event.PDUs {
 			pdu, err := hex.DecodeString(raw)
 			if err != nil || len(pdu) < 2 || len(pdu) > 512 {
@@ -103,10 +122,14 @@ func (s *State) Apply(event Snapshot, options EventOptions, now time.Time) (bool
 			hash := sha256.Sum256(pdu)
 			id := hex.EncodeToString(hash[:])
 			ids = append(ids, id)
-			if options.ShowSMSBody {
-				_, text, _, _, decodeErr := smscodec.DecodeDeliverTPDU(pdu[offset:])
-				if decodeErr == nil {
+			sender, text, timestamp, concat, decodeErr := smscodec.DecodeDeliverTPDU(pdu[offset:])
+			if decodeErr == nil {
+				if options.ShowSMSBody {
 					details[id] = normalizedDetail(text, 240)
+				}
+				if concat.IsConcat && concat.Total > 1 && concat.Total <= 255 && concat.Seq >= 1 && concat.Seq <= concat.Total {
+					digest := sha256.Sum256([]byte(fmt.Sprintf("%s/%d/%d/%d", sender, concat.RefBits, concat.Ref, concat.Total)))
+					parts[id] = smsPart{id: id, key: hex.EncodeToString(digest[:]), text: text, timestamp: timestamp, concat: concat}
 				}
 			}
 		}
@@ -114,11 +137,14 @@ func (s *State) Apply(event Snapshot, options EventOptions, now time.Time) (bool
 		ids = slices.Compact(ids)
 		previous, initialized := s.SMS[event.Storage]
 		changed := !initialized || !slices.Equal(previous, ids)
-		if initialized {
-			for _, id := range ids {
-				if !slices.Contains(previous, id) && !slices.Contains(s.SMS[1-event.Storage], id) {
-					s.enqueue("sms", "sms-"+id, options.Transports, details[id], now)
+		for _, id := range ids {
+			fresh := initialized && !slices.Contains(previous, id) && !slices.Contains(s.SMS[1-event.Storage], id)
+			if part, ok := parts[id]; ok {
+				if s.addSMSPart(part, fresh, options, now) {
+					changed = true
 				}
+			} else if fresh {
+				s.enqueue("sms", "sms-"+id, options.Transports, details[id], now)
 			}
 		}
 		if s.SMS == nil {
@@ -129,6 +155,71 @@ func (s *State) Apply(event Snapshot, options EventOptions, now time.Time) (bool
 	default:
 		return false, errors.New("unknown snapshot kind")
 	}
+}
+
+func (s *State) addSMSPart(part smsPart, fresh bool, options EventOptions, now time.Time) bool {
+	var group *multipartSMS
+	var groupID string
+	for id, candidate := range s.Multipart {
+		if candidate.Key != part.key || !now.Before(candidate.Expires) {
+			continue
+		}
+		if !candidate.Timestamp.IsZero() && !part.timestamp.IsZero() && candidate.Timestamp.Sub(part.timestamp).Abs() > 10*time.Minute {
+			continue
+		}
+		if old, ok := candidate.IDs[part.concat.Seq]; ok && old != part.id {
+			continue
+		}
+		// Ambiguous reference reuse must not join two different messages.
+		if group != nil {
+			return false
+		}
+		group, groupID = candidate, id
+	}
+	if group == nil {
+		if s.Multipart == nil {
+			s.Multipart = make(map[string]*multipartSMS)
+		}
+		if len(s.Multipart) >= 128 {
+			var oldest string
+			for id, candidate := range s.Multipart {
+				if oldest == "" || candidate.Expires.Before(s.Multipart[oldest].Expires) {
+					oldest = id
+				}
+			}
+			delete(s.Multipart, oldest)
+		}
+		groupID = "sms-multipart-" + part.id
+		group = &multipartSMS{Key: part.key, Timestamp: part.timestamp, Expires: now.Add(24 * time.Hour), Total: part.concat.Total,
+			IDs: make(map[int]string), Text: make(map[int]string), Silent: !fresh}
+		s.Multipart[groupID] = group
+	}
+	if _, exists := group.IDs[part.concat.Seq]; exists {
+		return false
+	}
+	if !fresh {
+		group.Silent = true
+		group.Text = nil
+	}
+	group.IDs[part.concat.Seq] = part.id
+	if options.ShowSMSBody && !group.Silent && !group.Notified {
+		if group.Text == nil {
+			group.Text = make(map[int]string)
+		}
+		group.Text[part.concat.Seq] = part.text
+	}
+	if len(group.IDs) == group.Total && !group.Silent && !group.Notified {
+		var body strings.Builder
+		if options.ShowSMSBody && len(group.Text) == group.Total {
+			for sequence := 1; sequence <= group.Total; sequence++ {
+				body.WriteString(group.Text[sequence])
+			}
+		}
+		s.enqueue("sms", groupID, options.Transports, normalizedDetail(body.String(), 240), now)
+		group.Notified = true
+		group.Text = nil
+	}
+	return true
 }
 
 func (s *State) enqueue(kind, key string, transports []string, detail string, now time.Time) {
@@ -189,6 +280,14 @@ func normalizedCallNumber(value string) string {
 // notifications that were waiting for retry when the daemon restarted.
 func (s *State) RedactQueuedDetails(showCallNumber, showSMSBody bool) bool {
 	changed := false
+	if !showSMSBody {
+		for _, group := range s.Multipart {
+			if len(group.Text) > 0 {
+				group.Text = nil
+				changed = true
+			}
+		}
+	}
 	for index := range s.Queue {
 		keep := (s.Queue[index].Kind == "call" && showCallNumber) ||
 			(s.Queue[index].Kind == "sms" && showSMSBody)
@@ -227,7 +326,14 @@ func (s *State) Finish(id, transport string, retry bool, now time.Time) bool {
 }
 
 func (s *State) Expire(now time.Time) bool {
+	changed := false
+	for id, group := range s.Multipart {
+		if !now.Before(group.Expires) {
+			delete(s.Multipart, id)
+			changed = true
+		}
+	}
 	before := len(s.Queue)
 	s.Queue = slices.DeleteFunc(s.Queue, func(d Delivery) bool { return !now.Before(d.Expires) })
-	return len(s.Queue) != before
+	return changed || len(s.Queue) != before
 }
