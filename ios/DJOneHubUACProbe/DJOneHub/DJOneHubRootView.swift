@@ -76,7 +76,16 @@ struct DJOneHubRootView: View {
             lifecycle.start()
             contacts.loadIfAuthorized()
         }
-        .task { await runAutomaticSMSRefresh() }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await runAutomaticSMSRefresh()
+        }
+        .onChange(of: voiceControl.shouldPollStatus) { _, ready in
+            if ready, scenePhase == .active { refreshSMS() }
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if tab == .messages, scenePhase == .active { refreshSMS() }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 lifecycle.applicationDidBecomeActive()
@@ -186,7 +195,7 @@ struct DJOneHubRootView: View {
 
     private func runAutomaticSMSRefresh() async {
         while !Task.isCancelled {
-            if scenePhase == .active { refreshSMS() }
+            refreshSMS()
             do {
                 try await Task.sleep(for: .seconds(5))
             } catch {

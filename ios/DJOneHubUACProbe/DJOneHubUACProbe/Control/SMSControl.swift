@@ -425,6 +425,8 @@ final class SMSControlModel: ObservableObject {
     @Published private(set) var messages: [ModuleSMSMessage] = []
     @Published private(set) var stateText = "等待连接模块"
     @Published private(set) var isLoading = false
+    @Published private(set) var hasLoadedMessages = false
+    var isInitialLoading: Bool { isLoading && !hasLoadedMessages }
     @Published private(set) var unreadCount = 0
     private var refreshTask: Task<Void, Never>?
     private var messageCache: [SMSMessageReference: ModuleSMSMessage] = [:]
@@ -452,6 +454,7 @@ final class SMSControlModel: ObservableObject {
         guard let pairingKey else {
             messages = []
             messageCache = [:]
+            hasLoadedMessages = false
             stateText = "请先连接已配对模块"
             isLoading = false
             retryNotBefore = nil
@@ -460,7 +463,10 @@ final class SMSControlModel: ObservableObject {
         }
         if let retryNotBefore, ContinuousClock.now < retryNotBefore { return }
         isLoading = true
-        stateText = "正在读取短信…"
+        if !hasLoadedMessages { stateText = "正在读取短信…" }
+        if !loggedSuccessfulQuery || consecutiveFailures > 0 {
+            ConnectionLog.shared.append("开始查询模块短信")
+        }
         refreshTask = Task {
             defer { isLoading = false }
             do {
@@ -492,6 +498,7 @@ final class SMSControlModel: ObservableObject {
                     return $0.index > $1.index
                 }
                 messageCache = updatedCache
+                hasLoadedMessages = true
                 if consecutiveFailures > 0 || !loggedSuccessfulQuery {
                     ConnectionLog.shared.append("短信查询完成")
                     loggedSuccessfulQuery = true

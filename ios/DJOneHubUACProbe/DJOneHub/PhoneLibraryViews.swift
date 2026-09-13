@@ -310,8 +310,8 @@ struct MessagesView: View {
                 if sms.messages.isEmpty {
                     ContentUnavailableView {
                         Label(
-                            sms.isLoading ? "正在读取短信" : "暂无短信",
-                            systemImage: sms.isLoading ? "arrow.triangle.2.circlepath" : "message"
+                            sms.isInitialLoading ? "正在读取短信" : "暂无短信",
+                            systemImage: sms.isInitialLoading ? "arrow.triangle.2.circlepath" : "message"
                         )
                     } description: {
                         Text(sms.stateText)
