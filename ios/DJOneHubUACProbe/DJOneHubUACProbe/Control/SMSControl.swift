@@ -15,6 +15,7 @@ final class ConnectionLog: ObservableObject {
         let message: String
     }
     @Published private(set) var entries: [Entry] = []
+    @Published private(set) var noWiredInterface: Bool?
     private var started = ContinuousClock.now
     private let wiredMonitor = NWPathMonitor(requiredInterfaceType: .wiredEthernet)
     private let monitorQueue = DispatchQueue(label: "DJOneHub.WiredNetworkDiagnostics")
@@ -26,8 +27,12 @@ final class ConnectionLog: ObservableObject {
         monitoringStarted = true
         wiredMonitor.pathUpdateHandler = { [weak self] path in
             let summary = Self.describeWiredPath(path)
+            let absent = path.status == .unsatisfied && path.unsatisfiedReason == .notAvailable &&
+                !path.availableInterfaces.contains { $0.type == .wiredEthernet }
             Task { @MainActor [weak self] in
-                guard let self, self.lastWiredPath != summary else { return }
+                guard let self else { return }
+                self.noWiredInterface = absent
+                guard self.lastWiredPath != summary else { return }
                 self.lastWiredPath = summary
                 self.append("独立有线网络监测：\(summary)")
             }

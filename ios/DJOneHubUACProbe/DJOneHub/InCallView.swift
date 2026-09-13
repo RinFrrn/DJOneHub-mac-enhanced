@@ -354,7 +354,9 @@ private struct CallActionButton: View {
     }
 }
 
-struct SettingsView: View {
+struct ModulePanelView: View {
+    @ObservedObject private var network = ConnectionLog.shared
+    private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
@@ -367,93 +369,68 @@ struct SettingsView: View {
     @State private var recordingPendingDeletion: CallRecordingInfo?
     @State private var isShowingCallPreview = false
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("模块") {
-                    Label(lifecycle.phase.title, systemImage: lifecycle.phase.systemImage)
-                    if let identifier = voiceControl.moduleIdentifier {
-                        LabeledContent("模块", value: String(identifier.prefix(8)))
-                    }
-                    if !voiceControl.detailText.isEmpty {
-                        Text(voiceControl.detailText)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button(voiceControl.isConfigured ? "替换模块配对" : "导入模块配对") {
-                        voiceControl.isImportingPairing = true
-                    }
-                    if voiceControl.canControlCalls {
-                        NavigationLink {
-                            ModuleNotificationSettingsView(
-                                pairingKey: voiceControl.pairingKeyForUplinkProbe()
-                            )
-                        } label: {
-                            Label("提醒设置", systemImage: "bell.badge")
-                        }
-                    }
-                    if voiceControl.isConfigured {
-                        Button("删除 iPhone 本机配对", role: .destructive) {
-                            isConfirmingUnpair = true
-                        }
-                    }
-                }
+    private enum Page: Hashable { case notifications, recordings, settings, diagnostics, logs }
+    @State private var path: [Page] = []
+    @State private var detent: PresentationDetent = .medium
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-                Section("通话录音") {
-                    NavigationLink {
-                        recordingsPage
-                    } label: {
-                        LabeledContent {
-                            Text("\(recordings.count) 段")
-                        } label: {
+    var body: some View {
+        NavigationStack(path: $path) {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle,
+                              systemImage: noDevice ? "cable.connector" : lifecycle.phase.systemImage)
+                            .font(.title3.weight(.semibold))
+                        Text(connectionDescription)
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        if case .recovering = lifecycle.phase {
+                            HStack {
+                                Button("重新检查") {
+                                    ConnectionLog.shared.append("用户重新检查模块连接")
+                                    lifecycle.applicationDidBecomeActive()
+                                }
+                                .disabled(voiceControl.isBusy)
+                                Button("查看连接日志") { path.append(.logs) }
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Section {
+                    NavigationLink(value: Page.notifications) {
+                        ModuleNotificationSummaryRow(pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                                                     connected: voiceControl.shouldPollStatus && !noDevice)
+                    }
+                    NavigationLink(value: Page.recordings) {
+                        LabeledContent { Text("\(recordings.count) 段") } label: {
                             Label("通话录音", systemImage: "waveform")
                         }
                     }
-                }
-
-                Section("诊断") {
-                    Button {
-                        isShowingCallPreview = true
-                    } label: {
-                        Label("通话界面预览", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                    NavigationLink(value: Page.settings) {
+                        Label("模块设置", systemImage: "gearshape")
                     }
-                    NavigationLink {
-                        ConnectionLogView()
-                    } label: {
-                        Label("连接日志", systemImage: "list.bullet.rectangle")
+                    NavigationLink(value: Page.diagnostics) {
+                        Label("连接诊断", systemImage: "list.bullet.rectangle")
                     }
-                    LabeledContent("PCM", value: callAudio.stateText)
-                    LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
-                    LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
-                    LabeledContent("媒体恢复", value: "\(callAudio.recoveryGeneration) 次")
-                    LabeledContent(
-                        "链路",
-                        value: "丢包 \(callAudio.downlinkMetrics.concealedFrames) · 乱序 \(callAudio.downlinkMetrics.reorderedPackets)"
-                    )
-                    LabeledContent(
-                        "播放",
-                        value: "重缓冲 \(callAudio.downlinkMetrics.rebufferEvents) · 丢弃 \(callAudio.downlinkMetrics.queueDroppedFrames)"
-                    )
-                }
-
-                Section("后台来电") {
-                    LabeledContent("CallKit", value: "已启用")
-                    LabeledContent("PushKit", value: systemCalls.pushStateText)
-                    if !systemCalls.hasVoIPToken {
-                        Text("如果一直无法取得 VoIP token，需要在 Apple Developer 中启用 Push Notifications，并使用包含 APNs entitlement 的 provisioning profile 重新签名。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section {
-                    Text("当前版本通过 USB ECM 控制 QDC507 并传输电话 PCM，不使用 USB Audio。Bark 与 Web Push 可在 App 未运行时提醒；要直接唤起原生 CallKit 接听页，仍需 VoIP APNs。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("设置与诊断")
+            .navigationTitle("模块")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: Page.self) { page in
+                switch page {
+                case .notifications:
+                    ModuleNotificationSettingsView(
+                        pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                        openModuleSettings: { path = [.settings] }
+                    )
+                case .recordings: recordingsPage
+                case .settings: moduleSettingsPage
+                case .diagnostics: diagnosticsPage
+                case .logs: ConnectionLogView()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成", action: dismiss)
@@ -462,10 +439,102 @@ struct SettingsView: View {
             .onAppear { reloadRecordings() }
             .onChange(of: callAudio.lastRecordingURL) { _, _ in reloadRecordings() }
             .onDisappear { recordingPlayer.stop() }
-            .fullScreenCover(isPresented: $isShowingCallPreview) {
-                CallScreenPreview()
+            .fullScreenCover(isPresented: $isShowingCallPreview) { CallScreenPreview() }
+        }
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            if !voiceControl.isConfigured, network.noWiredInterface == false { path = [.settings] }
+            if !path.isEmpty || dynamicTypeSize.isAccessibilitySize { detent = .large }
+        }
+        .onChange(of: path) { _, value in
+            if !value.isEmpty { detent = .large }
+        }
+    }
+
+    private var connectionDescription: String {
+        if noDevice { return "请通过 USB 连接模块。若已插入，请检查线材与供电，或尝试重新连接。" }
+        switch lifecycle.phase {
+        case .ready: return "模块已连接，可拨打电话。"
+        case .needsPairing, .needsControlPairing: return "导入模块配对后，即可连接并使用电话与短信。"
+        case .connecting: return "正在等待网络连接与模块响应。"
+        case .recovering: return "暂时无法与模块通信，正在尝试恢复。连接日志可查看具体原因。"
+        default: return "模块正在处理通话。"
+        }
+    }
+
+    private var moduleSettingsPage: some View {
+        List {
+            Section("模块") {
+                Label(lifecycle.phase.title, systemImage: lifecycle.phase.systemImage)
+                if let identifier = voiceControl.moduleIdentifier {
+                    LabeledContent("模块", value: String(identifier.prefix(8)))
+                }
+                if !voiceControl.detailText.isEmpty {
+                    Text(voiceControl.detailText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Button(voiceControl.isConfigured ? "替换模块配对" : "导入模块配对") {
+                    voiceControl.isImportingPairing = true
+                }
+                if voiceControl.isConfigured {
+                    Button("删除 iPhone 本机配对", role: .destructive) {
+                        isConfirmingUnpair = true
+                    }
+                }
+            }
+
+        }
+        .navigationTitle("模块设置")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var diagnosticsPage: some View {
+        List {
+            Section("诊断") {
+                Button {
+                    isShowingCallPreview = true
+                } label: {
+                    Label("通话界面预览", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                }
+                NavigationLink {
+                    ConnectionLogView()
+                } label: {
+                    Label("连接日志", systemImage: "list.bullet.rectangle")
+                }
+                LabeledContent("PCM", value: callAudio.stateText)
+                LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
+                LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
+                LabeledContent("媒体恢复", value: "\(callAudio.recoveryGeneration) 次")
+                LabeledContent(
+                    "链路",
+                    value: "丢包 \(callAudio.downlinkMetrics.concealedFrames) · 乱序 \(callAudio.downlinkMetrics.reorderedPackets)"
+                )
+                LabeledContent(
+                    "播放",
+                    value: "重缓冲 \(callAudio.downlinkMetrics.rebufferEvents) · 丢弃 \(callAudio.downlinkMetrics.queueDroppedFrames)"
+                )
+            }
+
+            Section("后台来电") {
+                LabeledContent("CallKit", value: "已启用")
+                LabeledContent("PushKit", value: systemCalls.pushStateText)
+                if !systemCalls.hasVoIPToken {
+                    Text("如果一直无法取得 VoIP token，需要在 Apple Developer 中启用 Push Notifications，并使用包含 APNs entitlement 的 provisioning profile 重新签名。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Text("当前版本通过 USB ECM 控制 QDC507 并传输电话 PCM，不使用 USB Audio。Bark 与 Web Push 可在 App 未运行时提醒；要直接唤起原生 CallKit 接听页，仍需 VoIP APNs。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
+        .navigationTitle("连接诊断")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var recordingsPage: some View {

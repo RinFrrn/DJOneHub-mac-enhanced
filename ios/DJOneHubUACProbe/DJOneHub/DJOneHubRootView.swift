@@ -20,8 +20,6 @@ struct DJOneHubRootView: View {
     @State private var isConfirmingUnpair = false
     @State private var isConfirmingRecording = false
     @State private var isShowingSettings = false
-    @State private var isShowingNotificationSettings = false
-    @State private var openSettingsAfterNotificationDismiss = false
     @State private var suppressedAutomaticRecordingCallID: UInt8?
 
     var body: some View {
@@ -29,21 +27,18 @@ struct DJOneHubRootView: View {
             TabView(selection: $selectedTab) {
                 RecentsView(
                     onDial: prepareNumber,
-                    onNotifications: showNotificationSettings,
                     onSettings: showSettings
                 )
                     .tag(PhoneTab.recents)
                     .tabItem { Label("最近通话", systemImage: "clock.fill") }
                 ContactsView(
                     onDial: prepareNumber,
-                    onNotifications: showNotificationSettings,
                     onSettings: showSettings
                 )
                     .tag(PhoneTab.contacts)
                     .tabItem { Label("通讯录", systemImage: "person.crop.circle.fill") }
                 KeypadView(
                     onCall: { lifecycle.dial() },
-                    onNotifications: showNotificationSettings,
                     onSettings: showSettings
                 )
                     .tag(PhoneTab.keypad)
@@ -51,13 +46,13 @@ struct DJOneHubRootView: View {
                 MessagesView(
                     sms: sms,
                     onRefresh: refreshSMS,
-                    onNotifications: showNotificationSettings,
                     onSettings: showSettings
                 )
                     .tag(PhoneTab.messages)
                     .tabItem { Label("信息", systemImage: "message.fill") }
                     .badge(sms.unreadCount)
             }
+            .modifier(ModuleBottomAccessory(onOpen: showSettings))
 
             if shouldPresentCallScreen {
                 InCallView(
@@ -99,6 +94,7 @@ struct DJOneHubRootView: View {
             }
         }
         .onChange(of: lifecycle.phase) { _, newPhase in
+            if shouldPresentCallScreen { isShowingSettings = false }
             systemCalls.synchronize(with: newPhase)
             handleCallPhaseForAutomaticRecording(newPhase)
         }
@@ -106,30 +102,10 @@ struct DJOneHubRootView: View {
             startAutomaticRecordingIfNeeded()
         }
         .sheet(isPresented: $isShowingSettings) {
-            SettingsView(
+            ModulePanelView(
                 isConfirmingUnpair: $isConfirmingUnpair,
                 dismiss: { isShowingSettings = false }
             )
-        }
-        .sheet(
-            isPresented: $isShowingNotificationSettings,
-            onDismiss: {
-                if openSettingsAfterNotificationDismiss {
-                    openSettingsAfterNotificationDismiss = false
-                    isShowingSettings = true
-                }
-            }
-        ) {
-            NavigationStack {
-                ModuleNotificationSettingsView(
-                    pairingKey: voiceControl.pairingKeyForUplinkProbe(),
-                    dismiss: { isShowingNotificationSettings = false },
-                    openModuleSettings: {
-                        openSettingsAfterNotificationDismiss = true
-                        isShowingNotificationSettings = false
-                    }
-                )
-            }
         }
         .fileImporter(
             isPresented: $voiceControl.isImportingPairing,
@@ -175,8 +151,6 @@ struct DJOneHubRootView: View {
     }
 
     private func showSettings() { isShowingSettings = true }
-
-    private func showNotificationSettings() { isShowingNotificationSettings = true }
 
     private func refreshSMS() {
         guard !sms.isLoading else { return }

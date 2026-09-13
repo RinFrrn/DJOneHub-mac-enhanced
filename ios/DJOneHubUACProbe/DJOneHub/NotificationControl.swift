@@ -492,6 +492,41 @@ private final class NotificationControlModel: ObservableObject {
     }
 }
 
+struct ModuleNotificationSummaryRow: View {
+    let pairingKey: Data?
+    let connected: Bool
+    @StateObject private var model = NotificationControlModel()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            LabeledContent {
+                Text(summary).font(.subheadline)
+            } label: {
+                Label("模块提醒", systemImage: "bell.badge")
+            }
+            Text("App 未运行时，由模块独立发送提醒")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .task(id: connected ? pairingKey : nil) {
+            if connected, pairingKey != nil { model.refresh(pairingKey: pairingKey) }
+        }
+        .onAppear {
+            if connected, pairingKey != nil { model.refresh(pairingKey: pairingKey) }
+        }
+    }
+
+    private var summary: String {
+        guard connected, pairingKey != nil else { return "状态暂不可读取" }
+        if model.isBusy { return "正在读取" }
+        if model.lastError != nil { return "暂时无法读取" }
+        guard let status = model.status else { return "尚未读取" }
+        if status.barkConfigured && status.webPushConfigured { return "Bark、Web Push 已配置" }
+        if status.barkConfigured { return "Bark 已配置" }
+        if status.webPushConfigured { return "Web Push 已配置" }
+        return "未开启"
+    }
+}
+
 struct ModuleNotificationSettingsView: View {
     let pairingKey: Data?
     var dismiss: (() -> Void)? = nil

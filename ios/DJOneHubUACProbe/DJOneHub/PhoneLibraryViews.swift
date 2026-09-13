@@ -4,7 +4,6 @@ struct RecentsView: View {
     @EnvironmentObject private var history: CallHistoryStore
     @State private var selectedRecording: CallRecordingInfo?
     let onDial: (String) -> Void
-    let onNotifications: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -48,9 +47,7 @@ struct RecentsView: View {
                 }
             }
             .navigationTitle("最近通话")
-            .toolbar {
-                ProductToolbar(onNotifications: onNotifications, onSettings: onSettings)
-            }
+            .modifier(LegacyModuleBottomBar(onSettings: onSettings))
             .sheet(item: $selectedRecording) { recording in
                 RecordingPlaybackView(recording: recording)
             }
@@ -219,7 +216,6 @@ struct ContactsView: View {
     @State private var searchText = ""
 
     let onDial: (String) -> Void
-    let onNotifications: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -254,9 +250,7 @@ struct ContactsView: View {
                 }
             }
             .navigationTitle("通讯录")
-            .toolbar {
-                ProductToolbar(onNotifications: onNotifications, onSettings: onSettings)
-            }
+            .modifier(LegacyModuleBottomBar(onSettings: onSettings))
         }
     }
 
@@ -301,7 +295,6 @@ struct ContactsView: View {
 struct MessagesView: View {
     @ObservedObject var sms: SMSControlModel
     let onRefresh: () -> Void
-    let onNotifications: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -356,9 +349,7 @@ struct MessagesView: View {
                 }
             }
             .navigationTitle("信息")
-            .toolbar {
-                ProductToolbar(onNotifications: onNotifications, onSettings: onSettings)
-            }
+            .modifier(LegacyModuleBottomBar(onSettings: onSettings))
             .safeAreaInset(edge: .bottom) {
                 if !sms.messages.isEmpty {
                     Text(sms.stateText)

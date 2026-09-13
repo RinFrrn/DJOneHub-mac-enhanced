@@ -1,31 +1,74 @@
 import SwiftUI
 import AudioToolbox
 
-struct ProductToolbar: ToolbarContent {
-    let onNotifications: () -> Void
+struct LegacyModuleBottomBar: ViewModifier {
     let onSettings: () -> Void
 
-    var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            Button("提醒", systemImage: "bell.badge", action: onNotifications)
-            Button("设置", systemImage: "gearshape", action: onSettings)
+    func body(content: Content) -> some View {
+        // Older systems keep a navigation bottom bar above the tab bar.
+        if #available(iOS 26.0, *) {
+            content
+        } else {
+            content.toolbar {
+                ToolbarItem(placement: .bottomBar) {
+                    ModuleAccessoryButton(onOpen: onSettings)
+                }
+            }
         }
+    }
+}
+
+struct ModuleBottomAccessory: ViewModifier {
+    let onOpen: () -> Void
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.tabViewBottomAccessory {
+                ModuleAccessoryButton(onOpen: onOpen)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private struct ModuleAccessoryButton: View {
+    let onOpen: () -> Void
+    var body: some View {
+        Button(action: onOpen) { ConnectionPill() }
+            .buttonStyle(.plain)
+            .accessibilityHint("打开模块状态、提醒和设置")
     }
 }
 
 struct ConnectionPill: View {
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @ObservedObject private var network = ConnectionLog.shared
+    private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
 
     var body: some View {
-        HStack(spacing: 7) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(lifecycle.phase.title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            if noDevice {
+                Image(systemName: "cable.connector").foregroundStyle(.secondary)
+            } else if lifecycle.phase == .connecting {
+                ProgressView().controlSize(.mini)
+            } else {
+                Circle().fill(color).frame(width: 8, height: 8)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("模块提醒 · 录音 · 设置")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.up")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(.thinMaterial, in: Capsule())
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
@@ -39,6 +82,23 @@ struct ConnectionPill: View {
     }
 }
 
+extension ProductCallPhase {
+    func showNoDevice(_ noWiredInterface: Bool?) -> Bool {
+        switch self {
+        case .placingCall, .dialing, .incoming, .answering, .active, .ending: return false
+        default: return noWiredInterface == true
+        }
+    }
+    var moduleStatusTitle: String {
+        switch self {
+        case .ready: return "模块已连接"
+        case .needsPairing, .needsControlPairing: return "配对模块"
+        case .recovering: return "模块连接中断"
+        default: return title
+        }
+    }
+}
+
 struct KeypadView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
@@ -47,7 +107,6 @@ struct KeypadView: View {
     private var automaticCallRecordingEnabled = false
 
     let onCall: () -> Void
-    let onNotifications: () -> Void
     let onSettings: () -> Void
 
     private let keys: [(digit: String, letters: String)] = [
@@ -144,12 +203,7 @@ struct KeypadView: View {
                 Spacer(minLength: 4)
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    ConnectionPill()
-                }
-                ProductToolbar(onNotifications: onNotifications, onSettings: onSettings)
-            }
+            .modifier(LegacyModuleBottomBar(onSettings: onSettings))
             .task { await tones.prepare() }
         }
     }
