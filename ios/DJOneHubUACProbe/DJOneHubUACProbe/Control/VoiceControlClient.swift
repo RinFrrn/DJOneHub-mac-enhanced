@@ -628,15 +628,7 @@ actor VoiceControlClient {
             let attemptStarted = clock.now
             let diagnostic = TCPAttemptDiagnostic()
             do {
-                try await withTimeout(
-                    min(configuration.connectAttemptTimeout, clock.now.duration(to: deadline)),
-                    onTimeout: {
-                        diagnostic.markTimedOut()
-                        connection.cancel()
-                    }
-                ) {
-                    try await connection.startAndWaitUntilReady(diagnostic: diagnostic)
-                }
+                try await waitForTCP(connection, diagnostic: diagnostic, deadline: deadline)
                 if attempt > 1 || !loggedInitialAuthentication {
                     await ConnectionLog.shared.append("控制 TCP 第 \(attempt) 次连接成功，耗时 \(TCPAttemptDiagnostic.elapsed(since: attemptStarted))；\(diagnostic.summary)")
                 }
@@ -657,6 +649,40 @@ actor VoiceControlClient {
         }
         await ConnectionLog.shared.append("本轮控制 TCP 连接结束，共尝试 \(attempt) 次，等待额度已用完")
         throw lastError
+    }
+
+    private func waitForTCP(
+        _ connection: NWConnection,
+        diagnostic: TCPAttemptDiagnostic,
+        deadline: ContinuousClock.Instant
+    ) async throws {
+        let attemptTimeout = configuration.connectAttemptTimeout
+        try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                defer { group.cancelAll() }
+                group.addTask {
+                    try Task.checkCancellation()
+                    try await connection.startAndWaitUntilReady(diagnostic: diagnostic)
+                }
+                group.addTask {
+                    let clock = ContinuousClock()
+                    try await Task.sleep(for: max(.zero, min(attemptTimeout, clock.now.duration(to: deadline))))
+                    // Preserve the same connection when iOS is waiting for its
+                    // USB path or local-network permission. A refused port still
+                    // uses the short retry interval. Never exceed the round budget.
+                    if diagnostic.shouldWaitForNetwork {
+                        try await Task.sleep(for: max(.zero, clock.now.duration(to: deadline)))
+                    }
+                    try Task.checkCancellation()
+                    diagnostic.markTimedOut()
+                    connection.cancel()
+                    throw ClientError.timeout
+                }
+                _ = try await group.next()
+            }
+        } onCancel: {
+            connection.cancel()
+        }
     }
 
     private func withTimeout<T: Sendable>(
@@ -687,17 +713,29 @@ private final class TCPAttemptDiagnostic: @unchecked Sendable {
     private var state = "尚未收到网络状态"
     private var path = "网络路径尚未提供"
     private var timedOut = false
+    private var waitingForNetwork = false
+    private var lastReportedState: String?
+
+    var shouldWaitForNetwork: Bool { lock.withLock { waitingForNetwork } }
 
     func markTimedOut() {
         lock.withLock { timedOut = true }
     }
 
     func update(_ value: NWConnection.State, path currentPath: NWPath?) {
-        lock.withLock {
+        let event: String? = lock.withLock {
             switch value {
             case .setup: state = "等待开始"
             case .preparing: state = "正在准备连接"
-            case .waiting(let error): state = "网络正在等待：\(Self.describe(error))"
+            case .waiting(let error):
+                state = "网络正在等待：\(Self.describe(error))"
+                if case .posix(let code) = error,
+                   [.ENETDOWN, .ENETUNREACH, .EHOSTUNREACH, .EACCES, .EPERM].contains(code) {
+                    waitingForNetwork = true
+                }
+                if currentPath?.unsatisfiedReason == .localNetworkDenied {
+                    waitingForNetwork = true
+                }
             case .failed(let error): state = "连接失败：\(Self.describe(error))"
             case .ready: state = "TCP 已就绪"
             case .cancelled: break // Preserve the cause preceding timeout cancellation.
@@ -718,6 +756,14 @@ private final class TCPAttemptDiagnostic: @unchecked Sendable {
                 }
                 path = "\(status)，\(currentPath.usesInterfaceType(.wiredEthernet) ? "使用有线网络" : "未使用有线网络")"
             }
+            if case .cancelled = value { return nil }
+            let report = "\(state)；\(path)"
+            guard waitingForNetwork, report != lastReportedState else { return nil }
+            lastReportedState = report
+            return "控制 TCP 路径变化（保留连接，最多等待至本轮超时）：\(report)"
+        }
+        if let event {
+            Task { @MainActor in ConnectionLog.shared.append(event) }
         }
     }
 
@@ -757,20 +803,27 @@ private extension NWConnection {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let gate = ContinuationGate(continuation)
 
+            pathUpdateHandler = { [weak self] path in
+                guard let self else { return }
+                diagnostic.update(self.state, path: path)
+            }
             stateUpdateHandler = { [weak self] state in
                 diagnostic.update(state, path: self?.currentPath)
                 switch state {
                 case .ready:
                     if gate.resume(with: .success(())) {
                         self?.stateUpdateHandler = nil
+                        self?.pathUpdateHandler = nil
                     }
                 case .failed(let error):
                     if gate.resume(with: .failure(VoiceControlClient.ClientError.connectionFailed(error.localizedDescription))) {
                         self?.stateUpdateHandler = nil
+                        self?.pathUpdateHandler = nil
                     }
                 case .cancelled:
                     if gate.resume(with: .failure(CancellationError())) {
                         self?.stateUpdateHandler = nil
+                        self?.pathUpdateHandler = nil
                     }
                 default:
                     break
