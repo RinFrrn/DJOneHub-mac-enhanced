@@ -271,31 +271,23 @@ struct SettingsView: View {
                 }
 
                 Section("通话录音") {
-                    if recordings.isEmpty {
-                        Text("暂无录音").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(recordings) { recording in
-                            RecordingRow(
-                                recording: recording,
-                                isPlaying: recordingPlayer.isPlaying(recording),
-                                onTogglePlayback: { recordingPlayer.toggle(recording) }
-                            )
-                            .swipeActions {
-                                Button("删除", role: .destructive) {
-                                    recordingPendingDeletion = recording
-                                }
-                            }
+                    NavigationLink {
+                        recordingsPage
+                    } label: {
+                        LabeledContent {
+                            Text("\(recordings.count) 段")
+                        } label: {
+                            Label("通话录音", systemImage: "waveform")
                         }
                     }
-                    if let error = recordingPlayer.errorText {
-                        Text(error).font(.footnote).foregroundStyle(.red)
-                    }
-                    Text("录音为 8 kHz、16-bit、双声道 WAV：左声道是本机麦克风，右声道是对端语音。文件仅保存在本机且不进入 iCloud 备份。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("诊断") {
+                    NavigationLink {
+                        ConnectionLogView()
+                    } label: {
+                        Label("连接日志", systemImage: "list.bullet.rectangle")
+                    }
                     LabeledContent("PCM", value: callAudio.stateText)
                     LabeledContent("上行", value: "\(callAudio.sentFrames) 帧")
                     LabeledContent("下行", value: "\(callAudio.receivedFrames) 帧")
@@ -336,12 +328,46 @@ struct SettingsView: View {
             .onAppear { reloadRecordings() }
             .onChange(of: callAudio.lastRecordingURL) { _, _ in reloadRecordings() }
             .onDisappear { recordingPlayer.stop() }
-            .alert("删除这段录音？", isPresented: isConfirmingRecordingDeletion) {
-                Button("删除", role: .destructive, action: deletePendingRecording)
-                Button("取消", role: .cancel) { recordingPendingDeletion = nil }
-            } message: {
-                Text("删除后无法恢复，对应通话记录仍会保留。")
+        }
+    }
+
+    private var recordingsPage: some View {
+        List {
+            Section {
+                if recordings.isEmpty {
+                    ContentUnavailableView("暂无通话录音", systemImage: "waveform", description: Text("通话中保存的录音会显示在这里。"))
+                } else {
+                    ForEach(recordings) { recording in
+                        RecordingRow(
+                            recording: recording,
+                            isPlaying: recordingPlayer.isPlaying(recording),
+                            onTogglePlayback: { recordingPlayer.toggle(recording) }
+                        )
+                        .swipeActions {
+                            Button("删除", role: .destructive) {
+                                recordingPendingDeletion = recording
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("录音仅保存在本机，不进入 iCloud 备份。双声道 WAV 文件的左声道是本机麦克风，右声道是对端语音。")
             }
+            if let error = recordingPlayer.errorText {
+                Section {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+            }
+        }
+        .navigationTitle("通话录音")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reloadRecordings() }
+        .onDisappear { recordingPlayer.stop() }
+        .alert("删除这段录音？", isPresented: isConfirmingRecordingDeletion) {
+            Button("删除", role: .destructive, action: deletePendingRecording)
+            Button("取消", role: .cancel) { recordingPendingDeletion = nil }
+        } message: {
+            Text("删除后无法恢复，对应通话记录仍会保留。")
         }
     }
 
@@ -367,6 +393,51 @@ struct SettingsView: View {
             recordingPlayer.report(error)
             recordingPendingDeletion = nil
         }
+    }
+}
+
+private struct ConnectionLogView: View {
+    @ObservedObject private var log = ConnectionLog.shared
+    @State private var copied = false
+
+    var body: some View {
+        List {
+            Section {
+                Text("记录本次 App 运行的连接、重试与短信状态，最多保留 300 条。时间为距离日志开始的耗时；退出 App 后不保留。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("不包含配对密钥、电话号码和短信正文。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if log.entries.isEmpty {
+                Text("暂无连接记录").foregroundStyle(.secondary)
+            }
+            ForEach(log.entries.reversed()) { entry in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(entry.message)
+                    Text("\(entry.date.formatted(date: .omitted, time: .standard)) · +\(String(format: "%.3f", entry.elapsed)) 秒")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                .textSelection(.enabled)
+            }
+        }
+        .navigationTitle("连接日志")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("复制日志", systemImage: "doc.on.doc") {
+                        UIPasteboard.general.string = log.exportText
+                        copied = true
+                    }
+                    ShareLink(item: log.exportText) {
+                        Label("导出日志", systemImage: "square.and.arrow.up")
+                    }
+                    Button("清空日志", systemImage: "trash", role: .destructive) { log.clear() }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("日志操作")
+            }
+        }
+        .alert("日志已复制", isPresented: $copied) { Button("好", role: .cancel) {} }
     }
 }
 

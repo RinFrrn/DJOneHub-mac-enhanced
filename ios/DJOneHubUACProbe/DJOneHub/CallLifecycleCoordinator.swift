@@ -42,6 +42,7 @@ final class CallLifecycleCoordinator: ObservableObject {
 
     func start() {
         guard lifecycleTask == nil else { return }
+        ConnectionLog.shared.append("开始连接：恢复本机配对配置")
         voiceControl.restorePairings()
         hasStarted = true
         updatePhaseAndAudio()
@@ -159,7 +160,7 @@ final class CallLifecycleCoordinator: ObservableObject {
             nextStatusAttempt = clock.now.advanced(by: interval)
         } else if clock.now >= nextStatusAttempt {
             voiceControl.refreshStatus()
-            nextStatusAttempt = clock.now.advanced(by: .seconds(3))
+            nextStatusAttempt = clock.now.advanced(by: .milliseconds(750))
         }
     }
 
@@ -174,6 +175,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         )
         synchronizeCallHistory(with: derivedPhase)
         if phase != derivedPhase {
+            ConnectionLog.shared.append("连接状态：\(derivedPhase.title)")
 #if DEBUG
             print("DJOneHubLifecycle phase \(String(describing: phase)) -> \(String(describing: derivedPhase))")
 #endif

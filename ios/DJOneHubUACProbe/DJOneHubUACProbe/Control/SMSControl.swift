@@ -4,6 +4,39 @@ import Foundation
 import Network
 import OSLog
 
+/// Shared by the product app and the diagnostic probe; entries stay in memory.
+@MainActor
+final class ConnectionLog: ObservableObject {
+    static let shared = ConnectionLog()
+    struct Entry: Identifiable {
+        let id = UUID()
+        let date: Date
+        let elapsed: Double
+        let message: String
+    }
+    @Published private(set) var entries: [Entry] = []
+    private var started = ContinuousClock.now
+
+    func append(_ message: String) {
+        let duration = started.duration(to: .now).components
+        entries.append(Entry(date: Date(),
+                             elapsed: Double(duration.seconds) + Double(duration.attoseconds) / 1e18,
+                             message: message))
+        if entries.count > 300 { entries.removeFirst(entries.count - 300) }
+    }
+
+    func clear() {
+        entries.removeAll()
+        started = .now
+    }
+
+    var exportText: String {
+        (["DJOneHub 连接日志（本次 App 运行，最多 300 条）"] + entries.map {
+            "\($0.date.formatted(.iso8601)) +\(String(format: "%.3f", $0.elapsed))s \($0.message)"
+        }).joined(separator: "\n")
+    }
+}
+
 enum SMSControlOperation: UInt8, Sendable {
     case status = 1
     case list = 2
@@ -397,6 +430,7 @@ final class SMSControlModel: ObservableObject {
     private var messageCache: [SMSMessageReference: ModuleSMSMessage] = [:]
     private var retryNotBefore: ContinuousClock.Instant?
     private var consecutiveFailures = 0
+    private var loggedSuccessfulQuery = false
     private var unreadMessageIDs: Set<String>
     private var readMessageIDs: Set<String>
 
@@ -458,6 +492,10 @@ final class SMSControlModel: ObservableObject {
                     return $0.index > $1.index
                 }
                 messageCache = updatedCache
+                if consecutiveFailures > 0 || !loggedSuccessfulQuery {
+                    ConnectionLog.shared.append("短信查询完成")
+                    loggedSuccessfulQuery = true
+                }
                 consecutiveFailures = 0
                 retryNotBefore = nil
                 updateUnreadState(with: loadedPairs)
@@ -471,6 +509,12 @@ final class SMSControlModel: ObservableObject {
                 let delay = min(5 * (1 << consecutiveFailures), 60)
                 retryNotBefore = .now.advanced(by: .seconds(delay))
                 stateText = "\(error.localizedDescription)，\(delay) 秒后自动重试"
+                // Log only our fixed error categories, never arbitrary payloads.
+                if case SMSControlClient.ClientError.stageTimeout(let stage) = error {
+                    ConnectionLog.shared.append("短信超时：\(stage)；\(delay) 秒后重试")
+                } else {
+                    ConnectionLog.shared.append("短信查询失败；\(delay) 秒后重试")
+                }
             }
         }
     }

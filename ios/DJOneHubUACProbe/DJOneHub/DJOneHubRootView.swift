@@ -178,6 +178,9 @@ struct DJOneHubRootView: View {
 
     private func refreshSMS() {
         guard !sms.isLoading else { return }
+        // Give the authenticated control connection priority during USB setup;
+        // defer the secondary SMS connection until STATUS has succeeded.
+        guard voiceControl.shouldPollStatus else { return }
         sms.refresh(pairingKey: voiceControl.pairingKeyForUplinkProbe())
     }
 

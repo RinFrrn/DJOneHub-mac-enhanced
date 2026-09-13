@@ -488,6 +488,7 @@ actor VoiceControlClient {
     }
 
     private let pairingKey: Data
+    private var loggedInitialAuthentication = false
     private let configuration: Configuration
 
     init(pairingKey: Data, configuration: Configuration = .init()) throws {
@@ -540,6 +541,9 @@ actor VoiceControlClient {
             timeout: connectTimeout ?? configuration.connectTimeout
         )
         defer { connection.cancel() }
+        if !loggedInitialAuthentication {
+            await ConnectionLog.shared.append("控制 TCP 已连接，等待模块握手")
+        }
 
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
@@ -588,6 +592,10 @@ actor VoiceControlClient {
             guard reply.status == .ok, let result = reply.result else {
                 throw ClientError.responseStatus(reply.status)
             }
+            if !loggedInitialAuthentication {
+                loggedInitialAuthentication = true
+                await ConnectionLog.shared.append("控制响应认证通过，模块已就绪")
+            }
             return result
         } onCancel: {
             connection.cancel()
@@ -605,9 +613,11 @@ actor VoiceControlClient {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         var lastError: Error = ClientError.timeout
+        var attempt = 0
 
         while clock.now < deadline {
             try Task.checkCancellation()
+            attempt += 1
             let parameters = NWParameters.tcp
             parameters.requiredInterfaceType = .wiredEthernet
             let connection = NWConnection(
@@ -615,21 +625,37 @@ actor VoiceControlClient {
                 port: port,
                 using: parameters
             )
+            let attemptStarted = clock.now
+            let diagnostic = TCPAttemptDiagnostic()
             do {
                 try await withTimeout(
-                    configuration.connectAttemptTimeout,
-                    onTimeout: { connection.cancel() }
+                    min(configuration.connectAttemptTimeout, clock.now.duration(to: deadline)),
+                    onTimeout: {
+                        diagnostic.markTimedOut()
+                        connection.cancel()
+                    }
                 ) {
-                    try await connection.startAndWaitUntilReady()
+                    try await connection.startAndWaitUntilReady(diagnostic: diagnostic)
+                }
+                if attempt > 1 || !loggedInitialAuthentication {
+                    await ConnectionLog.shared.append("控制 TCP 第 \(attempt) 次连接成功，耗时 \(TCPAttemptDiagnostic.elapsed(since: attemptStarted))；\(diagnostic.summary)")
                 }
                 return connection
             } catch {
                 connection.cancel()
+                try Task.checkCancellation()
+                await ConnectionLog.shared.append("控制 TCP 第 \(attempt) 次未连通，耗时 \(TCPAttemptDiagnostic.elapsed(since: attemptStarted))；\(diagnostic.summary)")
                 lastError = error
             }
             guard clock.now < deadline else { break }
-            try await Task.sleep(for: configuration.connectRetryDelay)
+            // Probe quickly during USB insertion, then back off while the
+            // module boots. Only TCP establishment is retried, never commands.
+            let delay = attempt <= 4
+                ? min(configuration.connectRetryDelay, .milliseconds(150))
+                : configuration.connectRetryDelay
+            try await Task.sleep(for: min(delay, clock.now.duration(to: deadline)))
         }
+        await ConnectionLog.shared.append("本轮控制 TCP 连接结束，共尝试 \(attempt) 次，等待额度已用完")
         throw lastError
     }
 
@@ -654,13 +680,85 @@ actor VoiceControlClient {
     }
 }
 
+/// Network callbacks and the timeout task use different queues. Keep only
+/// sanitized state/code information, never endpoint names or error userInfo.
+private final class TCPAttemptDiagnostic: @unchecked Sendable {
+    private let lock = NSLock()
+    private var state = "尚未收到网络状态"
+    private var path = "网络路径尚未提供"
+    private var timedOut = false
+
+    func markTimedOut() {
+        lock.withLock { timedOut = true }
+    }
+
+    func update(_ value: NWConnection.State, path currentPath: NWPath?) {
+        lock.withLock {
+            switch value {
+            case .setup: state = "等待开始"
+            case .preparing: state = "正在准备连接"
+            case .waiting(let error): state = "网络正在等待：\(Self.describe(error))"
+            case .failed(let error): state = "连接失败：\(Self.describe(error))"
+            case .ready: state = "TCP 已就绪"
+            case .cancelled: break // Preserve the cause preceding timeout cancellation.
+            @unknown default: state = "未知连接状态"
+            }
+            if let currentPath {
+                let status: String
+                switch currentPath.status {
+                case .satisfied: status = "网络路径可用"
+                case .requiresConnection: status = "网络路径等待建立"
+                case .unsatisfied:
+                    switch currentPath.unsatisfiedReason {
+                    case .localNetworkDenied: status = "本地网络权限被拒绝"
+                    case .notAvailable: status = "所需网络路径不可用"
+                    default: status = "网络路径不可用"
+                    }
+                @unknown default: status = "网络路径状态未知"
+                }
+                path = "\(status)，\(currentPath.usesInterfaceType(.wiredEthernet) ? "使用有线网络" : "未使用有线网络")"
+            }
+        }
+    }
+
+    var summary: String {
+        lock.withLock { "\(timedOut ? "单次连接超时；" : "")\(state)；\(path)" }
+    }
+
+    static func elapsed(since start: ContinuousClock.Instant) -> String {
+        let value = start.duration(to: .now).components
+        return String(format: "%.3f 秒", Double(value.seconds) + Double(value.attoseconds) / 1e18)
+    }
+
+    private static func describe(_ error: NWError) -> String {
+        switch error {
+        case .posix(let code):
+            let reason: String
+            switch code {
+            case .ECONNREFUSED: reason = "连接被拒绝（控制端口可能尚未监听）"
+            case .ETIMEDOUT: reason = "连接超时"
+            case .ENETDOWN: reason = "网络接口未就绪"
+            case .ENETUNREACH: reason = "网络不可达"
+            case .EHOSTUNREACH: reason = "模块地址不可达"
+            case .EACCES, .EPERM: reason = "连接受到权限限制"
+            default: reason = "网络系统错误"
+            }
+            return "\(reason)，POSIX \(code.rawValue)"
+        case .dns(let code): return "地址解析错误，DNS \(code)"
+        case .tls(let code): return "安全连接错误，TLS \(code)"
+        default: return "其他网络错误"
+        }
+    }
+}
+
 private extension NWConnection {
-    func startAndWaitUntilReady() async throws {
+    func startAndWaitUntilReady(diagnostic: TCPAttemptDiagnostic) async throws {
         let queue = DispatchQueue(label: "DJOneHub.VoiceControlClient")
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let gate = ContinuationGate(continuation)
 
             stateUpdateHandler = { [weak self] state in
+                diagnostic.update(state, path: self?.currentPath)
                 switch state {
                 case .ready:
                     if gate.resume(with: .success(())) {
