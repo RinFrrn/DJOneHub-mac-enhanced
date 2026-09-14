@@ -26,7 +26,7 @@ struct ModuleBottomAccessory: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content.tabViewBottomAccessory {
-                ModuleAccessoryButton(onOpen: onOpen)
+                AdaptiveModuleAccessory(onOpen: onOpen)
             }
         } else {
             content
@@ -34,48 +34,73 @@ struct ModuleBottomAccessory: ViewModifier {
     }
 }
 
-private struct ModuleAccessoryButton: View {
+@available(iOS 26.0, *)
+private struct AdaptiveModuleAccessory: View {
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
     let onOpen: () -> Void
+
     var body: some View {
-        Button(action: onOpen) {
-            ModuleAccessoryPill()
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("模块状态")
-        .accessibilityHint("打开模块状态、提醒和设置")
+        ModuleAccessoryButton(onOpen: onOpen, compact: placement == .inline)
     }
 }
 
-private struct ModuleAccessoryPill: View {
+private struct ModuleAccessoryButton: View {
+    @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
     @ObservedObject private var network = ConnectionLog.shared
+    let onOpen: () -> Void
+    var compact = false
+
     private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
+    private var title: String { noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle }
 
     var body: some View {
-        HStack(spacing: 12) {
-            ModuleStatusIcon()
-                .frame(width: 32, height: 32)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text("模块提醒 · 录音 · 设置")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            Button(action: onOpen) {
+                HStack(spacing: 10) {
+                    ModuleStatusIcon()
+                    if !compact {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("轻点查看模块详情")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel(title)
+            .accessibilityHint("打开模块状态、提醒和设置")
 
-            Spacer(minLength: 8)
+            if !compact {
+                Button { voiceControl.refreshStatus() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!voiceControl.isConfigured || voiceControl.isBusy || noDevice || !voiceControl.calls.isEmpty)
+                .accessibilityLabel("刷新模块状态")
 
-            Image(systemName: "chevron.up")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                Button(action: onOpen) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("模块设置")
+            }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .padding(.leading, compact ? 4 : 14)
+        .padding(.trailing, compact ? 0 : 6)
+        .padding(.vertical, compact ? 0 : 4)
     }
 }
 
@@ -97,9 +122,9 @@ struct ModuleStatusIcon: View {
                     .foregroundStyle(iconColor)
             }
         }
-        .font(.system(size: 22, weight: .semibold))
-        .imageScale(.large)
-        .frame(width: 44, height: 44)
+        .font(.system(size: 18, weight: .medium))
+        .imageScale(.medium)
+        .frame(width: 28, height: 28)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle)
     }

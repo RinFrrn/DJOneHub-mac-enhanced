@@ -281,6 +281,7 @@ struct ContactsView: View {
                 }
             }
             .navigationTitle("通讯录")
+            .navigationBarTitleDisplayMode(.inline)
             .modifier(LegacyModuleBottomBar(onSettings: onSettings))
         }
     }
@@ -297,8 +298,10 @@ struct ContactsView: View {
                         size: 42
                     )
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(phone.contactName).font(.body.weight(.semibold))
-                        Text("\(phone.label)  \(phone.number)")
+                        Text(phone.contactName)
+                            .font(.body.weight(.semibold))
+                            .lineLimit(1)
+                        Text("\(phone.number)" + (contacts.numbers(for: phone).count > 1 ? " · \(contacts.numbers(for: phone).count) 个号码" : ""))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -311,9 +314,13 @@ struct ContactsView: View {
 
     private var filteredPhones: [ContactPhone] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return contacts.phones }
-        return contacts.phones.filter {
-            $0.contactName.localizedCaseInsensitiveContains(query) || $0.number.contains(query)
+        guard !query.isEmpty else { return contacts.people }
+        return contacts.people.filter { person in
+            person.contactName.localizedCaseInsensitiveContains(query) ||
+            contacts.numbers(for: person).contains {
+                $0.number.contains(ContactsModel.normalizedNumber(query)) &&
+                !ContactsModel.normalizedNumber(query).isEmpty
+            }
         }
     }
 }

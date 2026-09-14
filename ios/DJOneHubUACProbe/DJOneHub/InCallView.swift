@@ -4,6 +4,7 @@ import SwiftUI
 struct InCallView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var callAudio: CallAudioCoordinator
+    @EnvironmentObject private var contacts: ContactsModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
 
     let onAnswer: (UInt8) -> Void
@@ -41,10 +42,10 @@ struct InCallView: View {
         if let callID = lifecycle.phase.callID,
            let call = voiceControl.calls.first(where: { $0.id == callID }) {
             if call.direction == 2 || call.remoteNumberPresentation != nil {
-                return call.remotePartyDisplayText
+                return contacts.matchedContact(for: call.remotePartyDisplayText)?.contactName ?? call.remotePartyDisplayText
             }
         }
-        return number.isEmpty ? "蜂窝电话" : number
+        return number.isEmpty ? "蜂窝电话" : (contacts.matchedContact(for: number)?.contactName ?? number)
     }
 
     private var statusText: String {

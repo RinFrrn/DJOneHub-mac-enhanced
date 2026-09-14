@@ -1,3 +1,4 @@
+import Contacts
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -74,6 +75,9 @@ struct DJOneHubRootView: View {
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             await runAutomaticSMSRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .CNContactStoreDidChange)) { _ in
+            contacts.loadIfAuthorized()
         }
         .onChange(of: voiceControl.shouldPollStatus) { _, ready in
             if ready, scenePhase == .active { refreshSMS() }

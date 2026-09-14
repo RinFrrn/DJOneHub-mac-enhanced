@@ -19,10 +19,16 @@ struct ContactDetailView: View {
         contact?.number ?? number
     }
 
+    private var contactNumbers: [ContactPhone] {
+        contact.map { contacts.numbers(for: $0) } ?? []
+    }
+
     private var callEntries: [CallHistoryEntry] {
         return history.entries.filter {
             guard let entryNumber = $0.number else { return false }
-            return ContactsModel.phoneNumbersMatch(entryNumber, number)
+            return ([number] + contactNumbers.map(\.number)).contains {
+                ContactsModel.phoneNumbersMatch(entryNumber, $0)
+            }
         }
     }
 
@@ -57,22 +63,21 @@ struct ContactDetailView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
                     ContactAvatarView(
                         imageData: contact?.imageData,
                         name: displayName,
-                        size: 88,
-                        font: .system(size: 34, weight: .semibold)
+                        size: 72,
+                        font: .system(size: 28, weight: .semibold)
                     )
-                    .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 6)
 
                     VStack(spacing: 4) {
                         Text(displayName)
                             .font(.title2.weight(.semibold))
                             .multilineTextAlignment(.center)
                         if contact != nil {
-                            Text(displayNumber)
-                                .font(.body)
+                            Text("\(contactNumbers.count) 个电话号码")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         } else {
                             Text("陌生号码")
@@ -84,7 +89,7 @@ struct ContactDetailView: View {
                         }
                     }
 
-                    HStack(spacing: 24) {
+                    HStack(spacing: 12) {
                         DetailActionButton(
                             title: "呼叫",
                             systemImage: "phone.fill",
@@ -103,32 +108,73 @@ struct ContactDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.bottom, 8)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .listRowBackground(Color.clear)
             }
 
+            if !contactNumbers.isEmpty {
+                Section("电话号码") {
+                    ForEach(contactNumbers) { phone in
+                        Button { onDial(phone.number) } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(phone.displayLabel)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(phone.number)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .textSelection(.enabled)
+                                }
+                                Spacer(minLength: 8)
+                                Image(systemName: "phone")
+                                    .font(.body)
+                                    .foregroundStyle(.tint)
+                            }
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("呼叫\(phone.displayLabel)，\(phone.number)")
+                        .contextMenu {
+                            Button("复制号码", systemImage: "doc.on.doc") {
+                                UIPasteboard.general.string = phone.number
+                            }
+                        }
+                    }
+                }
+            }
+
             if callEntries.isEmpty {
-                Section {
-                    ContentUnavailableView(
-                        "暂无通话记录",
-                        systemImage: "clock",
-                        description: Text("与该号码的通话会显示在这里。")
-                    )
-                    .listRowBackground(Color.clear)
+                Section("通话记录") {
+                    Label("暂无通话记录", systemImage: "clock")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                        .listRowBackground(Color.clear)
                 }
             } else {
                 ForEach(groupedEntries, id: \.0) { section in
                     Section(header: Text(section.0)) {
                         ForEach(section.1) { entry in
-                            CallHistoryDetailRow(entry: entry)
+                            CallHistoryDetailRow(
+                                entry: entry,
+                                phoneLabel: contactNumbers.first {
+                                    ContactsModel.phoneNumbersMatch($0.number, entry.number ?? "")
+                                }?.displayLabel
+                            )
                         }
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(contact == nil ? "陌生号码" : displayName)
-        .navigationBarTitleDisplayMode(.large)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .listSectionSpacing(20)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -140,16 +186,11 @@ private struct DetailActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                    .frame(width: 52, height: 52)
-                    .foregroundStyle(.white)
-                    .background(color.gradient, in: Circle())
-                Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
-            }
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .foregroundStyle(color)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
     }
@@ -157,32 +198,43 @@ private struct DetailActionButton: View {
 
 private struct CallHistoryDetailRow: View {
     let entry: CallHistoryEntry
+    let phoneLabel: String?
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: directionIcon)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(statusColor)
-                .frame(width: 28)
+                .frame(width: 24)
+                .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(outcomeText)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(statusColor)
-                Text(entry.startedAt.formatted(date: .omitted, time: .shortened))
-                    .font(.subheadline)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(outcomeText)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                    Spacer(minLength: 4)
+                    if entry.duration >= 1 {
+                        Text(phoneDurationText(entry.duration))
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let number = entry.number {
+                    Text([phoneLabel, number].compactMap { $0 }.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(entry.startedAt.formatted(
+                    .dateTime.year().month().day().hour().minute()
+                ))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if entry.duration >= 1 {
-                Text(phoneDurationText(entry.duration))
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
     }
 
     private var directionIcon: String {

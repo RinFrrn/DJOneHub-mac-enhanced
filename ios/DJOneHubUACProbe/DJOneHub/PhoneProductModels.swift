@@ -133,10 +133,22 @@ final class CallHistoryStore: ObservableObject {
 
 struct ContactPhone: Identifiable, Equatable, Sendable {
     let id: String
+    let contactID: String
     let contactName: String
     let label: String
     let number: String
     let imageData: Data?
+
+    var displayLabel: String {
+        switch label.lowercased() {
+        case "mobile": return "手机"
+        case "main": return "主要"
+        case "work": return "工作"
+        case "home": return "住宅"
+        case "other": return "其他"
+        default: return label
+        }
+    }
 }
 
 @MainActor
@@ -167,6 +179,7 @@ final class ContactsModel: ObservableObject {
     func loadIfAuthorized() {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         guard status == .authorized || Self.isLimited(status) else {
+            contactLoadTask?.cancel()
             updateAuthorizationState()
             return
         }
@@ -193,16 +206,20 @@ final class ContactsModel: ObservableObject {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         switch status {
         case .notDetermined:
+            phones = []
             state = .notDetermined
         case .authorized:
             loadContacts()
         case .denied:
+            phones = []
             state = .denied
         case .restricted:
+            phones = []
             state = .restricted
         case .limited:
             loadContacts()
         @unknown default:
+            phones = []
             state = .restricted
         }
     }
@@ -226,44 +243,32 @@ final class ContactsModel: ObservableObject {
         }
     }
 
+    var people: [ContactPhone] {
+        var seen = Set<String>()
+        return phones.filter { seen.insert($0.contactID).inserted }
+    }
+
+    func numbers(for contact: ContactPhone) -> [ContactPhone] {
+        phones.filter { $0.contactID == contact.contactID }
+    }
+
     func matchedContact(for number: String) -> ContactPhone? {
-        guard !Self.normalizedNumber(number).isEmpty else { return nil }
-        return phones.first { Self.phoneNumbersMatch($0.number, number) }
+        let normalized = Self.normalizedNumber(number)
+        guard !normalized.isEmpty else { return nil }
+        if let exact = phones.first(where: { Self.normalizedNumber($0.number) == normalized }) {
+            return exact
+        }
+        let matches = phones.filter { Self.phoneNumbersMatch($0.number, number) }
+        // Shared or ambiguous numbers must not resolve to an arbitrary person.
+        guard Set(matches.map(\.contactID)).count == 1 else { return nil }
+        return matches.first
     }
 
     nonisolated static func phoneNumbersMatch(_ a: String, _ b: String) -> Bool {
         let na = normalizedNumber(a)
         let nb = normalizedNumber(b)
         guard !na.isEmpty, !nb.isEmpty else { return false }
-        if na == nb { return true }
-
-        let variantsA = phoneNumberVariants(na)
-        let variantsB = phoneNumberVariants(nb)
-        return !variantsA.isDisjoint(with: variantsB)
-    }
-
-    private nonisolated static func phoneNumberVariants(_ number: String) -> Set<String> {
-        var variants: Set<String> = [number]
-        // China country code variants
-        if number.hasPrefix("+86"), number.count > 3 {
-            variants.insert(String(number.dropFirst(3)))
-        }
-        if number.hasPrefix("86"), number.count > 2, number.first != "+" {
-            variants.insert(String(number.dropFirst(2)))
-        }
-        // Generic: strip leading +
-        if number.hasPrefix("+"), number.count > 1 {
-            variants.insert(String(number.dropFirst()))
-        }
-        // Mobile suffix fallback: last 10-11 digits
-        let digitsOnly = number.filter(\.isNumber)
-        if digitsOnly.count >= 10 {
-            variants.insert(String(digitsOnly.suffix(10)))
-        }
-        if digitsOnly.count >= 11 {
-            variants.insert(String(digitsOnly.suffix(11)))
-        }
-        return variants
+        return na == nb
     }
 
     nonisolated private static func fetchContacts() throws -> [ContactPhone] {
@@ -275,20 +280,23 @@ final class ContactsModel: ObservableObject {
         ]
         let request = CNContactFetchRequest(keysToFetch: keys)
         request.sortOrder = .userDefault
+        request.unifyResults = true
         var result: [ContactPhone] = []
         try store.enumerateContacts(with: request) { contact, _ in
             let formatted = CNContactFormatter.string(from: contact, style: .fullName)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let name = formatted?.nilIfEmpty ?? "未命名联系人"
+            var seenNumbers = Set<String>()
             for (index, labeledValue) in contact.phoneNumbers.enumerated() {
                 let number = dialableNumber(labeledValue.value.stringValue)
-                guard !number.isEmpty else { continue }
+                guard !number.isEmpty, seenNumbers.insert(normalizedNumber(number)).inserted else { continue }
                 let label = CNLabeledValue<NSString>.localizedString(
                     forLabel: labeledValue.label ?? CNLabelPhoneNumberMain
                 )
                 let imageData = contact.thumbnailImageData
                 result.append(ContactPhone(
                     id: "\(contact.identifier):\(index)",
+                    contactID: contact.identifier,
                     contactName: name,
                     label: label,
                     number: number,
@@ -300,7 +308,16 @@ final class ContactsModel: ObservableObject {
     }
 
     nonisolated static func normalizedNumber(_ input: String) -> String {
-        dialableNumber(input)
+        var value = dialableNumber(input)
+        if value.hasPrefix("00") { value = "+" + value.dropFirst(2) }
+        let digits = value.hasPrefix("+") ? String(value.dropFirst()) : value
+        // Explicit lengths avoid truncating local numbers that happen to start with a country code.
+        for (code, localLength) in [("86", 11), ("852", 8), ("853", 8)] {
+            if digits.hasPrefix(code), digits.count == code.count + localLength {
+                return String(digits.dropFirst(code.count))
+            }
+        }
+        return value
     }
 
     nonisolated private static func dialableNumber(_ input: String) -> String {
