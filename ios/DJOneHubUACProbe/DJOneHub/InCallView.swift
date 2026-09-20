@@ -398,12 +398,43 @@ struct ModulePanelView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    
+                    Button {
+                        voiceControl.refreshStatus()
+                    } label: {
+                        Label("刷新模块状态", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(noDevice || !voiceControl.isConfigured || voiceControl.isBusy || !voiceControl.calls.isEmpty)
+                }
+                Section {
+                    if let enabled = voiceControl.moduleInternetEnabled {
+                        Toggle(isOn: Binding(
+                            get: { voiceControl.moduleInternetEnabled ?? enabled },
+                            set: { voiceControl.setModuleInternetEnabled($0) }
+                        )) {
+                            Label("使用模块流量上网", systemImage: "network")
+                        }
+                        .disabled(noDevice || !voiceControl.canControlCalls || voiceControl.isBusy || !voiceControl.calls.isEmpty)
+                    } else {
+                        LabeledContent("使用模块流量上网", value: "状态未知")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let error = voiceControl.internetChangeError {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
+                } footer: {
+                    Text("关闭上网仍可使用模块电话和短信。")
                 }
                 Section {
                     NavigationLink(value: Page.notifications) {
                         ModuleNotificationSummaryRow(pairingKey: voiceControl.pairingKeyForUplinkProbe(),
                                                      connected: voiceControl.shouldPollStatus && !noDevice)
                     }
+                } footer: {
+                    Text("App 未运行时，由模块独立发送提醒")
+                }
+                Section {
                     NavigationLink(value: Page.recordings) {
                         LabeledContent { Text("\(recordings.count) 段") } label: {
                             Label("通话录音", systemImage: "waveform")

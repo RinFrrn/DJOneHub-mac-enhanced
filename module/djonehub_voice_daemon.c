@@ -33,6 +33,7 @@ __asm__(".symver fcntl,fcntl@GLIBC_2.4");
 
 #include "djonehub_control_protocol.h"
 #include "djonehub_qmi_voice_engine.h"
+#include "djonehub_internet_policy.h"
 #include "djonehub_voice_daemon_policy.h"
 
 #define CONTROL_ADDRESS "192.168.225.1"
@@ -460,8 +461,27 @@ static int handle_client(int descriptor,
         }
         return 0;
     }
-    if (request.operation == DJONEHUB_USB_AUDIO) {
-        status = execute_usb_audio_request(&request, &control_result);
+    if (request.operation == DJONEHUB_USB_AUDIO || request.operation == DJONEHUB_INTERNET) {
+        if (request.operation == DJONEHUB_INTERNET) {
+            qmi_error = djonehub_qmi_voice_execute(DJONEHUB_VOICE_STATUS, NULL, 0U, &qmi_result);
+            status = map_engine_error(qmi_error);
+            if (qmi_error == DJONEHUB_QMI_VOICE_SUCCESS) {
+                status = DJONEHUB_CONTROL_OK;
+                control_result.snapshot = qmi_result.snapshot;
+                if (request.payload_length == 1U && !snapshot_is_idle(&qmi_result.snapshot))
+                    status = DJONEHUB_CONTROL_PRECONDITION;
+            }
+            if (status == DJONEHUB_CONTROL_OK && request.payload_length == 1U && djonehub_internet_set(request.payload[0]) != 0)
+                status = DJONEHUB_CONTROL_INTERNAL;
+            control_result.operation = DJONEHUB_INTERNET;
+            control_result.snapshot.internet_state = djonehub_internet_state();
+            control_result.snapshot.radio = djonehub_radio_current();
+            control_result.action_call_id = control_result.snapshot.internet_state == 2U;
+            control_result.confirmed = 1U;
+            if (control_result.snapshot.internet_state == 0U) status = DJONEHUB_CONTROL_INTERNAL;
+        } else {
+            status = execute_usb_audio_request(&request, &control_result);
+        }
         if (status == DJONEHUB_CONTROL_OK) {
             frame_length = djonehub_control_encode_response(
                 key, nonce, status, request.request_id, &control_result, frame,
@@ -486,6 +506,7 @@ static int handle_client(int descriptor,
         control_result.confirmed = qmi_result.confirmed;
         control_result.snapshot = qmi_result.snapshot;
         control_result.snapshot.radio = djonehub_radio_current();
+        control_result.snapshot.internet_state = djonehub_internet_state();
         frame_length = djonehub_control_encode_response(
             key, nonce, status, request.request_id, &control_result, frame,
             sizeof(frame));
@@ -562,6 +583,7 @@ int main(int argc, char **argv)
     }
     daemon_logf("authenticated control listening on %s:%u", CONTROL_ADDRESS,
                 CONTROL_PORT);
+    djonehub_internet_restore();
     djonehub_radio_start();
     while (stop_requested == 0) {
         struct sockaddr_in peer;

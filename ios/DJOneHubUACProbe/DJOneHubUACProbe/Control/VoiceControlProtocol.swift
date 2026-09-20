@@ -21,6 +21,7 @@ enum VoiceControlOperation: UInt8, Sendable {
     case answer = 3
     case end = 4
     case usbAudio = 5
+    case internet = 6
 }
 
 enum VoiceControlStatus: UInt8, Sendable {
@@ -89,6 +90,7 @@ struct VoiceControlResult: Equatable, Sendable {
     let confirmed: Bool
     let calls: [VoiceCallSnapshot]
     var radio: ModuleRadioStatus? = nil
+    var internetEnabled: Bool? = nil
 }
 
 struct VoiceControlReply: Equatable, Sendable {
@@ -110,7 +112,7 @@ enum VoiceControlProtocol {
     static let resultExtensionHeaderBytes = 3
     static let remotePartyNumbersExtensionType: UInt8 = 1
     static let maxSnapshotBytes = snapshotBaseBytes + maxCalls * callRecordBytes
-        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes) + 6
+        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes) + 10
     static let maxPayloadBytes = 81
     static let maxDialBytes = 80
     static let maxResponseFrameBytes = headerBytes + maxSnapshotBytes + tagBytes
@@ -218,7 +220,8 @@ enum VoiceControlProtocol {
         for operation: VoiceControlOperation,
         phoneNumber: String? = nil,
         callID: UInt8? = nil,
-        usbAudioEnabled: Bool? = nil
+        usbAudioEnabled: Bool? = nil,
+        internetEnabled: Bool? = nil
     ) throws -> Data {
         switch operation {
         case .status:
@@ -243,6 +246,9 @@ enum VoiceControlProtocol {
         case .answer, .end:
             guard let callID, callID != 0 else { throw VoiceControlProtocolError.invalidCallID }
             return Data([callID])
+        case .internet:
+            guard let internetEnabled else { return Data() }
+            return Data([internetEnabled ? 1 : 0])
         case .usbAudio:
             guard let usbAudioEnabled else { return Data() }
             return Data([usbAudioEnabled ? 1 : 0])
@@ -268,7 +274,7 @@ enum VoiceControlProtocol {
             guard payload.count == 1, payload[0] != 0 else {
                 throw VoiceControlProtocolError.invalidCallID
             }
-        case .usbAudio:
+        case .usbAudio, .internet:
             guard payload.isEmpty || (payload.count == 1 && payload[0] <= 1) else {
                 throw VoiceControlProtocolError.invalidOperation
             }
@@ -298,6 +304,11 @@ enum VoiceControlProtocol {
                 throw VoiceControlProtocolError.invalidSnapshot
             }
             if let call = result.calls.first(where: { $0.id == result.actionCallID }), call.state != 0x09 {
+                throw VoiceControlProtocolError.invalidSnapshot
+            }
+        case .internet:
+            guard result.confirmed, let enabled = result.internetEnabled,
+                  result.actionCallID == (enabled ? 1 : 0) else {
                 throw VoiceControlProtocolError.invalidSnapshot
             }
         case .usbAudio:
@@ -343,6 +354,7 @@ enum VoiceControlProtocol {
         }
 
         var radio: ModuleRadioStatus?
+        var internetEnabled: Bool?
         var extensionOffset = fixedRecordsEnd
         while extensionOffset < payload.count {
             guard payload.count - extensionOffset >= resultExtensionHeaderBytes else {
@@ -404,6 +416,13 @@ enum VoiceControlProtocol {
                 guard extensionOffset == extensionEnd else {
                     throw VoiceControlProtocolError.invalidSnapshot
                 }
+            } else if extensionType == 3 {
+                guard extensionLength == 1, internetEnabled == nil,
+                      (1...2).contains(payload[extensionOffset]) else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                internetEnabled = payload[extensionOffset] == 2
+                extensionOffset = extensionEnd
             } else if extensionType == 2 {
                 guard extensionLength == 3, radio == nil,
                       payload[extensionOffset] == 1 else {
@@ -426,7 +445,8 @@ enum VoiceControlProtocol {
             actionCallID: payload[1],
             confirmed: payload[2] != 0,
             calls: calls,
-            radio: radio
+            radio: radio,
+            internetEnabled: internetEnabled
         )
     }
 

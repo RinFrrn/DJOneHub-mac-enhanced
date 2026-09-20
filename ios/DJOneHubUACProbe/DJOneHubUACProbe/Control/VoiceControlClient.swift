@@ -9,6 +9,9 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var moduleIdentifier: String?
     @Published private(set) var availableModuleIdentifiers: [String] = []
     @Published private(set) var access: VoiceControlAccess?
+    @Published private(set) var internetUpdatedAt: Date?
+    @Published private(set) var moduleInternetEnabled: Bool?
+    @Published private(set) var internetChangeError: String?
     @Published private(set) var radio: ModuleRadioStatus?
     @Published private(set) var radioUpdatedAt: Date?
     @Published private(set) var calls: [VoiceCallSnapshot] = []
@@ -185,6 +188,9 @@ final class VoiceControlModel: ObservableObject {
         keyStore = nil
         moduleIdentifier = nil
         access = nil
+        internetUpdatedAt = nil
+        moduleInternetEnabled = nil
+        internetChangeError = nil
         radio = nil
         radioUpdatedAt = nil
         calls = []
@@ -201,6 +207,9 @@ final class VoiceControlModel: ObservableObject {
 
     private func selectPairing(moduleIdentifier: String, credential: StoredPairingCredential) throws {
         let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
+        internetUpdatedAt = nil
+        moduleInternetEnabled = nil
+        internetChangeError = nil
         radio = nil
         radioUpdatedAt = nil
         client = try VoiceControlClient(pairingKey: credential.key)
@@ -256,6 +265,26 @@ final class VoiceControlModel: ObservableObject {
             },
             enablePollingOnSuccess: false,
             disablePollingOnFailure: true
+        )
+    }
+
+    func setModuleInternetEnabled(_ enabled: Bool) {
+        guard let client, canControlCalls, !isBusy, calls.isEmpty,
+              moduleInternetEnabled != nil else { return }
+        internetChangeError = nil
+        perform(
+            state: "正在切换模块上网…",
+            success: enabled ? "模块上网已开启" : "模块上网已关闭",
+            operation: { [weak self] in
+                do {
+                    return try await client.internet(enabled: enabled)
+                } catch {
+                    await MainActor.run {
+                        self?.internetChangeError = "未能确认切换结果，请刷新后重试。"
+                    }
+                    throw error
+                }
+            }
         )
     }
 
@@ -382,6 +411,11 @@ final class VoiceControlModel: ObservableObject {
                     self.isBusy = self.requestArbitration.isForegroundBusy
                     if result.operation == .status {
                         self.statusSuccessGeneration &+= 1
+                    }
+                    if result.operation == .status || result.operation == .internet {
+                        self.moduleInternetEnabled = result.internetEnabled
+                        self.internetUpdatedAt = result.internetEnabled == nil ? nil : Date()
+                        if result.internetEnabled != nil { self.internetChangeError = nil }
                     }
                     self.radio = result.radio
                     self.radioUpdatedAt = result.radio == nil ? nil : Date()
@@ -524,6 +558,11 @@ actor VoiceControlClient {
     func end(callID: UInt8) async throws -> VoiceControlResult {
         let payload = try VoiceControlProtocol.payload(for: .end, callID: callID)
         return try await perform(.end, payload: payload)
+    }
+
+    func internet(enabled: Bool?) async throws -> VoiceControlResult {
+        let payload = try VoiceControlProtocol.payload(for: .internet, internetEnabled: enabled)
+        return try await perform(.internet, payload: payload)
     }
 
     func usbAudio(enabled: Bool?) async throws -> VoiceControlResult {

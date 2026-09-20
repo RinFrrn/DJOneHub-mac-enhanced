@@ -93,6 +93,8 @@ static int operation_from_wire(uint8_t wire,
         *operation = DJONEHUB_VOICE_ANSWER;
     } else if (wire == 4U) {
         *operation = DJONEHUB_VOICE_END;
+    } else if (wire == 6U) {
+        *operation = DJONEHUB_INTERNET;
     } else if (wire == 5U) {
         *operation = DJONEHUB_USB_AUDIO;
     } else {
@@ -114,6 +116,8 @@ static uint8_t operation_to_wire(enum djonehub_voice_operation operation)
         return 4U;
     case DJONEHUB_USB_AUDIO:
         return 5U;
+    case DJONEHUB_INTERNET:
+        return 6U;
     default:
         return 0U;
     }
@@ -153,7 +157,7 @@ static int valid_operation_payload(enum djonehub_voice_operation operation,
         operation == DJONEHUB_VOICE_END) {
         return length == 1U && payload != NULL && payload[0] != 0U;
     }
-    if (operation == DJONEHUB_USB_AUDIO) {
+    if (operation == DJONEHUB_USB_AUDIO || operation == DJONEHUB_INTERNET) {
         return length == 0U ||
                (length == 1U && payload != NULL && payload[0] <= 1U);
     }
@@ -313,6 +317,7 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         required += 3U + extension_length;
     }
     if (result->snapshot.radio.valid) required += 6U;
+    if (result->snapshot.internet_state != 0U) required += 4U;
     if (capacity < required || operation_to_wire(result->operation) == 0U) {
         return 0U;
     }
@@ -357,12 +362,19 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         }
     }
     if (result->snapshot.radio.valid) {
-        size_t offset = required - 6U;
+        size_t offset = required - 6U - (result->snapshot.internet_state != 0U ? 4U : 0U);
         output[offset] = 2U;
         store_be16(output + offset + 1U, 3U);
         output[offset + 3U] = 1U;
         output[offset + 4U] = (uint8_t)result->snapshot.radio.dbm;
         output[offset + 5U] = result->snapshot.radio.technology;
+    }
+    if (result->snapshot.internet_state != 0U) {
+        size_t offset = required - 4U;
+        if (result->snapshot.internet_state > 2U) return 0U;
+        output[offset] = 3U;
+        store_be16(output + offset + 1U, 1U);
+        output[offset + 3U] = result->snapshot.internet_state;
     }
     return required;
 }
@@ -513,6 +525,11 @@ static int decode_result_payload(const uint8_t *payload, size_t length,
                 if (offset != extension_end) {
                     return -1;
                 }
+            } else if (extension_type == 3U) {
+                if (extension_length != 1U || result->snapshot.internet_state != 0U ||
+                    payload[offset] < 1U || payload[offset] > 2U) return -1;
+                result->snapshot.internet_state = payload[offset];
+                offset = extension_end;
             } else if (extension_type == 2U) {
                 if (extension_length != 3U || result->snapshot.radio.valid ||
                     payload[offset] != 1U || (int8_t)payload[offset+1U] >= 0 ||

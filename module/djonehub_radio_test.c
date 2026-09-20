@@ -20,10 +20,12 @@ int main(void) {
     assert(radio_parse(tlv,sizeof(tlv),&radio) == 0);
     input.operation=DJONEHUB_VOICE_STATUS;
     input.snapshot.radio=radio;
+    input.snapshot.internet_state=1;
     length=djonehub_control_encode_response(key,nonce,DJONEHUB_CONTROL_OK,1,&input,frame,sizeof(frame));
     assert(length>0);
     assert(djonehub_control_decode_response(key,nonce,frame,length,&status,&request_id,&output)==0);
     assert(output.snapshot.radio.valid && output.snapshot.radio.dbm == -56 && output.snapshot.radio.technology == 8);
+    assert(output.snapshot.internet_state == 1);
     puts("Radio TLV parsing and authenticated round trip: PASS");
     return 0;
 }

@@ -57,51 +57,16 @@ private struct ModuleAccessoryButton: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: onOpen) {
-                HStack(spacing: 10) {
-                    ModuleStatusIcon()
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        TimelineView(.periodic(from: .now, by: 5)) { context in
-                            if !noDevice, let radio = voiceControl.radio,
-                               let updated = voiceControl.radioUpdatedAt,
-                               context.date.timeIntervalSince(updated) < 30 {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "cellularbars", variableValue: Double(radio.bars) / 4)
-                                        .font(.system(size: 12, weight: .medium))
-                                    Text(radio.networkType)
-                                    Text("\(radio.dbm) dBm")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("模块网络 \(radio.networkType)，信号 \(radio.bars) 格，\(radio.dbm) dBm")
-                            } else {
-                                Text(noDevice ? "轻点查看模块详情" : "信号未知")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .font(.caption)
-                    }
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                TimelineView(.periodic(from: .now, by: 5)) { context in
+                    statusContent(at: context.date)
                 }
                 .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .accessibilityLabel(title)
+            .accessibilityElement(children: .combine)
             .accessibilityHint("打开模块状态、提醒和设置")
 
             if !compact {
-                Button { voiceControl.refreshStatus() } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 18, weight: .medium))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(!voiceControl.isConfigured || voiceControl.isBusy || noDevice || !voiceControl.calls.isEmpty)
-                .accessibilityLabel("刷新模块状态")
-
                 Button(action: onOpen) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 18, weight: .medium))
@@ -116,6 +81,64 @@ private struct ModuleAccessoryButton: View {
         .padding(.trailing, compact ? 0 : 6)
         .padding(.vertical, compact ? 0 : 4)
     }
+
+    @ViewBuilder
+    private func statusContent(at date: Date) -> some View {
+        let radio = freshRadio(at: date)
+        let connected = !noDevice && lifecycle.phase == .ready
+        HStack(spacing: 10) {
+            if connected, let radio {
+                Image(systemName: "cellularbars", variableValue: Double(radio.bars) / 4)
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("信号 \(radio.bars) 格")
+            } else {
+                ModuleStatusIcon()
+                    .accessibilityHidden(true)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(connected ? (radio?.networkType ?? "模块") : title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 5) {
+                    if let radio {
+                        if !connected { Text(radio.networkType) }
+                        Text("\(radio.dbm) dBm")
+                            .monospacedDigit()
+                    } else if !noDevice {
+                        Text("信号未知")
+                    }
+                    if !noDevice {
+                        Text(internetStatusText(at: date))
+                            .foregroundStyle(.tertiary)
+                    } else if noDevice {
+                        Text("轻点查看模块详情")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func internetStatusText(at date: Date) -> String {
+        guard let updated = voiceControl.internetUpdatedAt,
+              date.timeIntervalSince(updated) < 30,
+              let enabled = voiceControl.moduleInternetEnabled else { return "· 上网状态未知" }
+        return enabled ? "· 以太网开启" : "· 以太网关闭"
+    }
+
+    private func freshRadio(at date: Date) -> ModuleRadioStatus? {
+        guard !noDevice, let updated = voiceControl.radioUpdatedAt,
+              date.timeIntervalSince(updated) < 30 else { return nil }
+        return voiceControl.radio
+    }
+
 }
 
 struct ModuleStatusIcon: View {

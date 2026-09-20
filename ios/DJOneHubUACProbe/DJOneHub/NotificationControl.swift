@@ -498,14 +498,10 @@ struct ModuleNotificationSummaryRow: View {
     @StateObject private var model = NotificationControlModel()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            LabeledContent {
-                Text(summary).font(.subheadline)
-            } label: {
-                Label("模块提醒", systemImage: "bell.badge")
-            }
-            Text("App 未运行时，由模块独立发送提醒")
-                .font(.caption).foregroundStyle(.secondary)
+        LabeledContent {
+            Text(summary).font(.subheadline)
+        } label: {
+            Label("模块提醒", systemImage: "bell.badge")
         }
         .task(id: connected ? pairingKey : nil) {
             if connected, pairingKey != nil { model.refresh(pairingKey: pairingKey) }

@@ -29,6 +29,7 @@ struct djonehub_radio_status {
 };
 
 struct djonehub_voice_snapshot {
+    uint8_t internet_state;
     struct djonehub_radio_status radio;
     size_t count;
     struct djonehub_voice_call calls[DJONEHUB_VOICE_MAX_CALLS];

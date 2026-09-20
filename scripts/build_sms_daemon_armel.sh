@@ -36,6 +36,7 @@ case ${DJONEHUB_QMI_BUILD_TARGET:-sms} in
         AUDIT_SCOPE=status/dial/answer/end/usb-audio/read-only-nas-signal
         SOURCES="
 $PROJECT_DIR/module/djonehub_voice_daemon.c
+$PROJECT_DIR/module/djonehub_internet_policy.c
 $PROJECT_DIR/module/djonehub_qmi_voice_engine.c
 $PROJECT_DIR/module/djonehub_voice_codec.c
 $PROJECT_DIR/module/djonehub_voice_policy.c

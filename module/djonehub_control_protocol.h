@@ -16,7 +16,7 @@
 #define DJONEHUB_CONTROL_HELLO_BYTES                                      \
     (DJONEHUB_CONTROL_HEADER_BYTES + DJONEHUB_CONTROL_NONCE_BYTES)
 #define DJONEHUB_CONTROL_SNAPSHOT_BYTES                                  \
-    (4U + 6U + DJONEHUB_VOICE_MAX_CALLS * 7U + 3U + 1U +                     \
+    (4U + 10U + DJONEHUB_VOICE_MAX_CALLS * 7U + 3U + 1U +                     \
      DJONEHUB_VOICE_MAX_CALLS *                                         \
          (3U + DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES))
 #define DJONEHUB_CONTROL_MAX_PAYLOAD DJONEHUB_CONTROL_SNAPSHOT_BYTES

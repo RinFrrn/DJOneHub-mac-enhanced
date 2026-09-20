@@ -149,8 +149,8 @@ struct VoiceControlProtocolOfflineTest {
         } catch VoiceControlProtocolError.invalidCallID {
         }
 
-        func radioReply(_ extensionBytes: [UInt8]) throws -> VoiceControlReply {
-            let payload = Data([1, 0, 0, 0] + extensionBytes)
+        func radioReply(_ extensionBytes: [UInt8], operation: VoiceControlOperation = .status, action: UInt8 = 0, confirmed: UInt8 = 0) throws -> VoiceControlReply {
+            let payload = Data([operation.rawValue, action, confirmed, 0] + extensionBytes)
             var frame = Data(hex: "444a4f4801030000000000000102030405060708")
             frame[8] = UInt8(payload.count >> 8)
             frame[9] = UInt8(payload.count & 255)
@@ -160,7 +160,7 @@ struct VoiceControlProtocolOfflineTest {
             ))
             return try VoiceControlProtocol.decodeResponse(
                 pairingKey: key, nonce: nonce, frame: frame,
-                expectedRequestID: requestID, expectedOperation: .status
+                expectedRequestID: requestID, expectedOperation: operation
             )
         }
         let radio = try radioReply([2, 0, 3, 1, 200, 8]).result?.radio
@@ -175,6 +175,26 @@ struct VoiceControlProtocolOfflineTest {
             } catch VoiceControlProtocolError.invalidSnapshot {}
         }
 
+        let internetOn = try radioReply([3,0,1,2])
+        let internetOff = try radioReply([3,0,1,1])
+        precondition(internetOn.result?.internetEnabled == true)
+        precondition(internetOff.result?.internetEnabled == false)
+        let mixed = try radioReply([2,0,3,1,200,8,3,0,1,1])
+        precondition(mixed.result?.radio?.dbm == -56 && mixed.result?.internetEnabled == false)
+        let offPayload = try VoiceControlProtocol.payload(for: .internet, internetEnabled: false)
+        precondition(offPayload == Data([0]))
+        for invalid: [UInt8] in [[3,0,1,0], [3,0,1,3], [3,0,2,1], [3,0,1,1,3,0,1,2]] {
+            do {
+                _ = try radioReply(invalid)
+                preconditionFailure("Invalid internet extension accepted")
+            } catch VoiceControlProtocolError.invalidSnapshot {}
+        }
+        let internetChanged = try radioReply([3,0,1,1], operation: .internet, confirmed: 1)
+        precondition(internetChanged.result?.internetEnabled == false)
+        do {
+            _ = try radioReply([3,0,1,2], operation: .internet, action: 0, confirmed: 1)
+            preconditionFailure("Conflicting internet acknowledgement accepted")
+        } catch VoiceControlProtocolError.invalidSnapshot {}
         print("VoiceControlProtocolOfflineTest: PASS")
     }
 }
