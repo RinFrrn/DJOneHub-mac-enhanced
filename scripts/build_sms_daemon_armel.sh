@@ -30,6 +30,19 @@ AUDIT_LISTEN=192.168.225.1:45752
 AUDIT_SCOPE=status/list/read/send-raw/delete
 case ${DJONEHUB_QMI_BUILD_TARGET:-sms} in
     sms) ;;
+    voice)
+        BINARY_BASE=djonehub-voice-daemon
+        AUDIT_LISTEN=192.168.225.1:45750
+        AUDIT_SCOPE=status/dial/answer/end/usb-audio/read-only-nas-signal
+        SOURCES="
+$PROJECT_DIR/module/djonehub_voice_daemon.c
+$PROJECT_DIR/module/djonehub_qmi_voice_engine.c
+$PROJECT_DIR/module/djonehub_voice_codec.c
+$PROJECT_DIR/module/djonehub_voice_policy.c
+$PROJECT_DIR/module/djonehub_control_protocol.c
+$PROJECT_DIR/module/djonehub_crypto.c
+"
+        ;;
     notify-monitor)
         BINARY_BASE=djonehub-notify-monitor
         AUDIT_LISTEN=none
@@ -113,7 +126,7 @@ build_local()
     audit_report="$OUT_DIR/$BINARY_BASE.armv7.audit.txt"
     checksum_file="$OUT_DIR/$BINARY_BASE.armv7.sha256"
     common_flags="-std=c11 -O2 -g -march=armv7-a -marm -mfloat-abi=softfp -mfpu=neon -fno-pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 -U_TIME_BITS -U_FILE_OFFSET_BITS -ffile-prefix-map=$PROJECT_DIR=/usr/src/djonehub -fdebug-prefix-map=$PROJECT_DIR=/usr/src/djonehub -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes -Wundef -Werror"
-    if [ "$BINARY_BASE" = djonehub-notify-monitor ]; then
+    if [ "$BINARY_BASE" = djonehub-notify-monitor ] || [ "$BINARY_BASE" = djonehub-voice-daemon ]; then
         common_flags="$common_flags -DDJONEHUB_QMI_QUIET"
     fi
 

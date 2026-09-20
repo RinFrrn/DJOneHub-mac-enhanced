@@ -22,7 +22,14 @@ struct djonehub_voice_call {
     char remote_number[DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES + 1U];
 };
 
+struct djonehub_radio_status {
+    uint8_t valid;
+    int8_t dbm;
+    uint8_t technology; /* QMI NAS radio interface */
+};
+
 struct djonehub_voice_snapshot {
+    struct djonehub_radio_status radio;
     size_t count;
     struct djonehub_voice_call calls[DJONEHUB_VOICE_MAX_CALLS];
 };

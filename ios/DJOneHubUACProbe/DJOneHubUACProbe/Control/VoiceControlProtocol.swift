@@ -58,11 +58,37 @@ struct VoiceCallSnapshot: Equatable, Sendable {
     }
 }
 
+struct ModuleRadioStatus: Equatable, Sendable {
+    let dbm: Int
+    let technology: UInt8
+
+    var networkType: String {
+        switch technology {
+        case 1: return "2G"
+        case 2: return "3G"
+        case 4: return "2G"
+        case 5, 9: return "3G"
+        case 8: return "4G"
+        case 12: return "5G"
+        default: return "蜂窝"
+        }
+    }
+
+    // RSSI presentation only; this is not an RSRP or throughput estimate.
+    var bars: Int {
+        if dbm >= -75 { return 4 }
+        if dbm >= -85 { return 3 }
+        if dbm >= -95 { return 2 }
+        return 1
+    }
+}
+
 struct VoiceControlResult: Equatable, Sendable {
     let operation: VoiceControlOperation
     let actionCallID: UInt8
     let confirmed: Bool
     let calls: [VoiceCallSnapshot]
+    var radio: ModuleRadioStatus? = nil
 }
 
 struct VoiceControlReply: Equatable, Sendable {
@@ -84,7 +110,7 @@ enum VoiceControlProtocol {
     static let resultExtensionHeaderBytes = 3
     static let remotePartyNumbersExtensionType: UInt8 = 1
     static let maxSnapshotBytes = snapshotBaseBytes + maxCalls * callRecordBytes
-        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes)
+        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes) + 6
     static let maxPayloadBytes = 81
     static let maxDialBytes = 80
     static let maxResponseFrameBytes = headerBytes + maxSnapshotBytes + tagBytes
@@ -316,6 +342,7 @@ enum VoiceControlProtocol {
             ))
         }
 
+        var radio: ModuleRadioStatus?
         var extensionOffset = fixedRecordsEnd
         while extensionOffset < payload.count {
             guard payload.count - extensionOffset >= resultExtensionHeaderBytes else {
@@ -377,6 +404,18 @@ enum VoiceControlProtocol {
                 guard extensionOffset == extensionEnd else {
                     throw VoiceControlProtocolError.invalidSnapshot
                 }
+            } else if extensionType == 2 {
+                guard extensionLength == 3, radio == nil,
+                      payload[extensionOffset] == 1 else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                let dbm = Int(Int8(bitPattern: payload[extensionOffset + 1]))
+                let technology = payload[extensionOffset + 2]
+                guard (-125 ... -1).contains(dbm), technology != 0 else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                radio = ModuleRadioStatus(dbm: dbm, technology: technology)
+                extensionOffset = extensionEnd
             } else {
                 extensionOffset = extensionEnd
             }
@@ -386,7 +425,8 @@ enum VoiceControlProtocol {
             operation: operation,
             actionCallID: payload[1],
             confirmed: payload[2] != 0,
-            calls: calls
+            calls: calls,
+            radio: radio
         )
     }
 

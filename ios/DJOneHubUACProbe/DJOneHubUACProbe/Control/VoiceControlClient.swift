@@ -9,6 +9,8 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var moduleIdentifier: String?
     @Published private(set) var availableModuleIdentifiers: [String] = []
     @Published private(set) var access: VoiceControlAccess?
+    @Published private(set) var radio: ModuleRadioStatus?
+    @Published private(set) var radioUpdatedAt: Date?
     @Published private(set) var calls: [VoiceCallSnapshot] = []
     @Published private(set) var shouldPollStatus = false
     @Published private(set) var statusSuccessGeneration: UInt64 = 0
@@ -183,6 +185,8 @@ final class VoiceControlModel: ObservableObject {
         keyStore = nil
         moduleIdentifier = nil
         access = nil
+        radio = nil
+        radioUpdatedAt = nil
         calls = []
         moduleUSBAudioEnabled = nil
         didAttemptUSBAudioQuery = false
@@ -197,6 +201,8 @@ final class VoiceControlModel: ObservableObject {
 
     private func selectPairing(moduleIdentifier: String, credential: StoredPairingCredential) throws {
         let keyStore = try PairingKeyStore(moduleIdentifier: moduleIdentifier)
+        radio = nil
+        radioUpdatedAt = nil
         client = try VoiceControlClient(pairingKey: credential.key)
         mediaPairingKey = credential.key
         self.keyStore = keyStore
@@ -377,6 +383,8 @@ final class VoiceControlModel: ObservableObject {
                     if result.operation == .status {
                         self.statusSuccessGeneration &+= 1
                     }
+                    self.radio = result.radio
+                    self.radioUpdatedAt = result.radio == nil ? nil : Date()
                     self.calls = result.calls.filter { $0.state != 0x09 }
                     if enablePollingOnSuccess {
                         self.shouldPollStatus = true

@@ -149,6 +149,32 @@ struct VoiceControlProtocolOfflineTest {
         } catch VoiceControlProtocolError.invalidCallID {
         }
 
+        func radioReply(_ extensionBytes: [UInt8]) throws -> VoiceControlReply {
+            let payload = Data([1, 0, 0, 0] + extensionBytes)
+            var frame = Data(hex: "444a4f4801030000000000000102030405060708")
+            frame[8] = UInt8(payload.count >> 8)
+            frame[9] = UInt8(payload.count & 255)
+            frame.append(payload)
+            frame.append(contentsOf: HMAC<SHA256>.authenticationCode(
+                for: nonce + frame, using: SymmetricKey(data: key)
+            ))
+            return try VoiceControlProtocol.decodeResponse(
+                pairingKey: key, nonce: nonce, frame: frame,
+                expectedRequestID: requestID, expectedOperation: .status
+            )
+        }
+        let radio = try radioReply([2, 0, 3, 1, 200, 8]).result?.radio
+        precondition(radio?.dbm == -56 && radio?.networkType == "4G" && radio?.bars == 4)
+        let legacy = try radioReply([])
+        precondition(legacy.result?.radio == nil)
+        for invalid: [UInt8] in [[2,0,2,1,200], [2,0,3,1,0,8], [2,0,3,1,200,0],
+                                 [2,0,3,1,200,8,2,0,3,1,200,8]] {
+            do {
+                _ = try radioReply(invalid)
+                preconditionFailure("Invalid radio extension accepted")
+            } catch VoiceControlProtocolError.invalidSnapshot {}
+        }
+
         print("VoiceControlProtocolOfflineTest: PASS")
     }
 }

@@ -431,3 +431,130 @@ const char *djonehub_qmi_voice_error_name(
         return "unknown";
     }
 }
+
+/* NAS uses its own client and worker: optional telemetry never delays call control. */
+static pthread_mutex_t radio_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t radio_thread;
+static int radio_started, radio_stopping;
+static struct djonehub_radio_status radio_status;
+static time_t radio_updated;
+
+static int radio_parse(const uint8_t *bytes, size_t length,
+                       struct djonehub_radio_status *value)
+{
+    size_t offset = 0;
+    int success = 0, signal = 0;
+    memset(value, 0, sizeof(*value));
+    while (offset < length) {
+        size_t size;
+        uint8_t type;
+        if (length - offset < 3) return -1;
+        type = bytes[offset];
+        size = (size_t)bytes[offset + 1] | ((size_t)bytes[offset + 2] << 8);
+        offset += 3;
+        if (size > length - offset) return -1;
+        if (type == 2) {
+            if (size != 4 || success || bytes[offset] || bytes[offset+1] ||
+                bytes[offset+2] || bytes[offset+3]) return -1;
+            success = 1;
+        } else if (type == 1) {
+            if (size != 2 || signal) return -1;
+            value->dbm = (int8_t)bytes[offset];
+            value->technology = bytes[offset+1];
+            signal = 1;
+        }
+        offset += size;
+    }
+    if (!success || !signal || value->dbm >= 0 || value->dbm < -125 ||
+        value->technology == 0) return -1;
+    value->valid = 1;
+    return 0;
+}
+
+static void *radio_worker(void *unused)
+{
+    struct qmi_api api;
+    struct qmi_client_os_params params;
+    qmi_client_type client = NULL;
+    qmi_idl_service_object_type service = NULL;
+    voice_get_service_object_fn get_nas = NULL;
+    int loaded = 0;
+    (void)unused;
+    memset(&api, 0, sizeof(api));
+    memset(&params, 0, sizeof(params));
+    for (;;) {
+        int stop, minor;
+        struct djonehub_radio_status current = {0};
+        pthread_mutex_lock(&radio_mutex);
+        stop = radio_stopping;
+        pthread_mutex_unlock(&radio_mutex);
+        if (stop) break;
+        if (!loaded && load_qmi_api(&api) == 0) {
+            loaded = 1;
+            if (load_symbol(api.services_library, "nas_get_service_object_internal_v01",
+                            &get_nas, sizeof(get_nas)) == 0) {
+                /* Vendor IDL entry point returns NULL for incompatible versions. */
+                for (minor = 0; minor <= 255 && service == NULL; ++minor)
+                    service = get_nas(1, minor, 6);
+            }
+        }
+        if (service && !client) {
+            if (api.client_init_instance(service, QMI_CLIENT_INSTANCE_ANY, NULL,
+                  NULL, &params, 1000, &client) != 0) client = NULL;
+        }
+        if (client) {
+            uint8_t response[1024], empty = 0;
+            unsigned int length = 0;
+            if (api.send_raw_sync(client, 0x20, &empty, 0, response,
+                                  sizeof(response), &length, 1000) == 0 &&
+                length <= sizeof(response) && radio_parse(response, length, &current) == 0) {
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                pthread_mutex_lock(&radio_mutex);
+                radio_status = current;
+                radio_updated = now.tv_sec;
+                pthread_mutex_unlock(&radio_mutex);
+            } else {
+                pthread_mutex_lock(&radio_mutex);
+                memset(&radio_status, 0, sizeof(radio_status));
+                pthread_mutex_unlock(&radio_mutex);
+            }
+        }
+        for (minor = 0; minor < 10; ++minor) {
+            struct timespec delay = {1, 0};
+            pthread_mutex_lock(&radio_mutex);
+            stop = radio_stopping;
+            pthread_mutex_unlock(&radio_mutex);
+            if (stop) break;
+            nanosleep(&delay, NULL);
+        }
+    }
+    if (client) api.client_release(client);
+    /* Keep vendor libraries mapped until process exit (CCI callback lifetime). */
+    return NULL;
+}
+
+void djonehub_radio_start(void)
+{
+    radio_started = pthread_create(&radio_thread, NULL, radio_worker, NULL) == 0;
+}
+
+void djonehub_radio_stop(void)
+{
+    pthread_mutex_lock(&radio_mutex);
+    radio_stopping = 1;
+    pthread_mutex_unlock(&radio_mutex);
+    if (radio_started) pthread_join(radio_thread, NULL);
+}
+
+struct djonehub_radio_status djonehub_radio_current(void)
+{
+    struct djonehub_radio_status result;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    pthread_mutex_lock(&radio_mutex);
+    result = radio_status;
+    if (now.tv_sec - radio_updated > 30) memset(&result, 0, sizeof(result));
+    pthread_mutex_unlock(&radio_mutex);
+    return result;
+}

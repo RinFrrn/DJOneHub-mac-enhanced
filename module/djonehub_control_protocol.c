@@ -312,6 +312,7 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
     if (number_count != 0U) {
         required += 3U + extension_length;
     }
+    if (result->snapshot.radio.valid) required += 6U;
     if (capacity < required || operation_to_wire(result->operation) == 0U) {
         return 0U;
     }
@@ -354,6 +355,14 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
             }
             offset += 3U + call->remote_number_length;
         }
+    }
+    if (result->snapshot.radio.valid) {
+        size_t offset = required - 6U;
+        output[offset] = 2U;
+        store_be16(output + offset + 1U, 3U);
+        output[offset + 3U] = 1U;
+        output[offset + 4U] = (uint8_t)result->snapshot.radio.dbm;
+        output[offset + 5U] = result->snapshot.radio.technology;
     }
     return required;
 }
@@ -504,6 +513,15 @@ static int decode_result_payload(const uint8_t *payload, size_t length,
                 if (offset != extension_end) {
                     return -1;
                 }
+            } else if (extension_type == 2U) {
+                if (extension_length != 3U || result->snapshot.radio.valid ||
+                    payload[offset] != 1U || (int8_t)payload[offset+1U] >= 0 ||
+                    (int8_t)payload[offset+1U] < -125 || payload[offset+2U] == 0U)
+                    return -1;
+                result->snapshot.radio.valid = 1;
+                result->snapshot.radio.dbm = (int8_t)payload[offset+1U];
+                result->snapshot.radio.technology = payload[offset+2U];
+                offset = extension_end;
             } else {
                 offset = extension_end;
             }

@@ -12,6 +12,11 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+
+#if defined(__arm__) && defined(__GLIBC__)
+/* Only F_GETFD/F_SETFD are used; retain the module glibc 2.22 ABI. */
+__asm__(".symver fcntl,fcntl@GLIBC_2.4");
+#endif
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -480,6 +485,7 @@ static int handle_client(int descriptor,
         control_result.action_call_id = qmi_result.action_call_id;
         control_result.confirmed = qmi_result.confirmed;
         control_result.snapshot = qmi_result.snapshot;
+        control_result.snapshot.radio = djonehub_radio_current();
         frame_length = djonehub_control_encode_response(
             key, nonce, status, request.request_id, &control_result, frame,
             sizeof(frame));
@@ -556,6 +562,7 @@ int main(int argc, char **argv)
     }
     daemon_logf("authenticated control listening on %s:%u", CONTROL_ADDRESS,
                 CONTROL_PORT);
+    djonehub_radio_start();
     while (stop_requested == 0) {
         struct sockaddr_in peer;
         socklen_t peer_length = (socklen_t)sizeof(peer);
@@ -588,6 +595,7 @@ int main(int argc, char **argv)
         }
     }
     (void)close(listener);
+    djonehub_radio_stop();
     djonehub_qmi_voice_shutdown();
     memset(key, 0, sizeof(key));
     return exit_status;

@@ -59,18 +59,32 @@ private struct ModuleAccessoryButton: View {
             Button(action: onOpen) {
                 HStack(spacing: 10) {
                     ModuleStatusIcon()
-                    if !compact {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text("轻点查看模块详情")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        TimelineView(.periodic(from: .now, by: 5)) { context in
+                            if !noDevice, let radio = voiceControl.radio,
+                               let updated = voiceControl.radioUpdatedAt,
+                               context.date.timeIntervalSince(updated) < 30 {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "cellularbars", variableValue: Double(radio.bars) / 4)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text(radio.networkType)
+                                    Text("\(radio.dbm) dBm")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("模块网络 \(radio.networkType)，信号 \(radio.bars) 格，\(radio.dbm) dBm")
+                            } else {
+                                Text(noDevice ? "轻点查看模块详情" : "信号未知")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.caption)
                     }
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())

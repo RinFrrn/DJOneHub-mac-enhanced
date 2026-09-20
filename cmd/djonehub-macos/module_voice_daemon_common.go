@@ -59,7 +59,7 @@ const (
 	voiceControlTagBytes           = 32
 	voiceControlMaxRequestPayload  = 81
 	voiceControlMaxRemoteNumber    = 81
-	voiceControlMaxResponsePayload = 4 + 8*7 + 3 + 1 + 8*(3+voiceControlMaxRemoteNumber)
+	voiceControlMaxResponsePayload = 6 + 4 + 8*7 + 3 + 1 + 8*(3+voiceControlMaxRemoteNumber)
 	voiceControlRemoteNumbersExt   = 1
 )
 
