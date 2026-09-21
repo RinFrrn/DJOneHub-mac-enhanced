@@ -111,10 +111,7 @@ private struct ModuleAccessoryButton: View {
                     } else if !noDevice {
                         Text("信号未知")
                     }
-                    if !noDevice {
-                        Text(internetStatusText(at: date))
-                            .foregroundStyle(.tertiary)
-                    } else if noDevice {
+                    if noDevice {
                         Text("轻点查看模块详情")
                     }
                 }
@@ -123,14 +120,30 @@ private struct ModuleAccessoryButton: View {
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !noDevice {
+                HStack(spacing: compact ? 8 : 12) {
+                    internetStatusIcon(at: date)
+                    ModuleNotificationStatusIcon(
+                        pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                        connected: voiceControl.shouldPollStatus
+                    )
+                }
+                .font(.system(size: 15, weight: .medium))
+                .fixedSize()
+                .padding(.trailing, compact ? 4 : 8)
+            }
         }
     }
 
-    private func internetStatusText(at date: Date) -> String {
-        guard let updated = voiceControl.internetUpdatedAt,
-              date.timeIntervalSince(updated) < 30,
-              let enabled = voiceControl.moduleInternetEnabled else { return "· 上网状态未知" }
-        return enabled ? "· 以太网开启" : "· 以太网关闭"
+    private func internetStatusIcon(at date: Date) -> some View {
+        let enabled: Bool? = voiceControl.internetUpdatedAt.flatMap { updated in
+            date.timeIntervalSince(updated) < 30 ? voiceControl.moduleInternetEnabled : nil
+        }
+        return Image(systemName: enabled == false ? "network.slash" : "network")
+            .foregroundStyle(enabled == true ? Color.accentColor : Color.secondary)
+            .opacity(enabled == nil ? 0.4 : 1)
+            .accessibilityLabel(enabled.map { $0 ? "模块以太网上网已开启" : "模块以太网上网已关闭" } ?? "模块以太网状态未知")
     }
 
     private func freshRadio(at date: Date) -> ModuleRadioStatus? {

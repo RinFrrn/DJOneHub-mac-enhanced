@@ -434,6 +434,7 @@ private final class NotificationControlModel: ObservableObject {
         do {
             let latest = try await client.status()
             status = latest
+            NotificationCenter.default.post(name: .moduleNotificationSettingsChanged, object: nil)
             stateText = message
             lastError = nil
         } catch {
@@ -507,6 +508,54 @@ private final class NotificationControlModel: ObservableObject {
             lastError = error.localizedDescription
             stateText = error.localizedDescription
         }
+    }
+}
+
+private extension Notification.Name {
+    static let moduleNotificationSettingsChanged = Notification.Name("DJOneHub.moduleNotificationSettingsChanged")
+}
+
+struct ModuleNotificationStatusIcon: View {
+    @Environment(\.scenePhase) private var scenePhase
+    let pairingKey: Data?
+    let connected: Bool
+    @State private var enabled: Bool?
+    @State private var detail = "模块提醒状态未知"
+    @State private var revision = 0
+
+    private struct Request: Hashable {
+        let key: Data?
+        let revision: Int
+    }
+
+    var body: some View {
+        Image(systemName: enabled == true ? "bell.badge.fill" : enabled == false ? "bell.slash" : "bell")
+            .foregroundStyle(enabled == true ? Color.accentColor : Color.secondary)
+            .opacity(enabled == nil ? 0.4 : 1)
+            .accessibilityLabel(detail)
+            .task(id: Request(key: connected && scenePhase == .active ? pairingKey : nil, revision: revision)) {
+                enabled = nil
+                detail = "模块提醒状态未知"
+                guard connected, scenePhase == .active, let pairingKey else { return }
+                while !Task.isCancelled {
+                    do {
+                        let client = try NotificationControlClient(pairingKey: pairingKey)
+                        let status = try await client.status()
+                        guard !Task.isCancelled else { return }
+                        enabled = status.barkConfigured || status.webPushConfigured
+                        let services = [status.barkConfigured ? "Bark" : nil, status.webPushConfigured ? "Web Push" : nil].compactMap { $0 }
+                        detail = services.isEmpty ? "模块提醒未开启" : "模块提醒已配置：" + services.joined(separator: "、")
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        enabled = nil
+                        detail = "模块提醒状态暂时无法读取"
+                    }
+                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .moduleNotificationSettingsChanged)) { _ in
+                revision += 1
+            }
     }
 }
 
