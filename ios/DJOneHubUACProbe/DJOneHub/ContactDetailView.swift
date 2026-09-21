@@ -3,6 +3,9 @@ import SwiftUI
 struct ContactDetailView: View {
     @EnvironmentObject private var history: CallHistoryStore
     @EnvironmentObject private var contacts: ContactsModel
+    @StateObject private var recordingPlayer = CallRecordingPlayer()
+    @State private var recordings: [String: CallRecordingInfo] = [:]
+    @State private var expandedEntryID: UUID?
 
     let number: String
     let onDial: (String) -> Void
@@ -63,15 +66,15 @@ struct ContactDetailView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 14) {
+                VStack(spacing: 10) {
                     ContactAvatarView(
                         imageData: contact?.imageData,
                         name: displayName,
-                        size: 72,
-                        font: .system(size: 28, weight: .semibold)
+                        size: 64,
+                        font: .system(size: 26, weight: .semibold)
                     )
 
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
                         Text(displayName)
                             .font(.title2.weight(.semibold))
                             .multilineTextAlignment(.center)
@@ -108,7 +111,7 @@ struct ContactDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 8)
+                .padding(.vertical, 4)
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .listRowBackground(Color.clear)
             }
@@ -118,7 +121,7 @@ struct ContactDetailView: View {
                     ForEach(contactNumbers) { phone in
                         Button { onDial(phone.number) } label: {
                             HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 5) {
+                                VStack(alignment: .leading, spacing: 3) {
                                     Text(phone.displayLabel)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -132,10 +135,11 @@ struct ContactDetailView: View {
                                     .font(.body)
                                     .foregroundStyle(.tint)
                             }
-                            .padding(.vertical, 3)
+                            .padding(.vertical, 8)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                         .accessibilityLabel("呼叫\(phone.displayLabel)，\(phone.number)")
                         .contextMenu {
                             Button("复制号码", systemImage: "doc.on.doc") {
@@ -152,7 +156,7 @@ struct ContactDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 10)
                         .listRowBackground(Color.clear)
                 }
             } else {
@@ -163,8 +167,13 @@ struct ContactDetailView: View {
                                 entry: entry,
                                 phoneLabel: contactNumbers.first {
                                     ContactsModel.phoneNumbersMatch($0.number, entry.number ?? "")
-                                }?.displayLabel
+                                }?.displayLabel,
+                                recording: recording(for: entry),
+                                isExpanded: expandedEntryID == entry.id,
+                                player: recordingPlayer,
+                                expandedID: $expandedEntryID
                             )
+                            .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                         }
                     }
                 }
@@ -172,9 +181,106 @@ struct ContactDetailView: View {
         }
         .listStyle(.insetGrouped)
         .contentMargins(.top, 0, for: .scrollContent)
-        .listSectionSpacing(20)
+        .listSectionSpacing(10)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .task { reloadRecordings() }
+        .onChange(of: history.entries) { reloadRecordings() }
+        .onChange(of: expandedEntryID) { recordingPlayer.stop() }
+        .onDisappear { recordingPlayer.stop() }
+    }
+
+    private func recording(for entry: CallHistoryEntry) -> CallRecordingInfo? {
+        guard let filename = entry.recordingFilename else { return nil }
+        return recordings[filename]
+    }
+
+    private func reloadRecordings() {
+        let items = CallRecordingController.recordingItems()
+        recordings = Dictionary(uniqueKeysWithValues: items.map { ($0.filename, $0) })
+    }
+}
+
+private struct InlineRecordingPlayer: View {
+    let recording: CallRecordingInfo
+    @ObservedObject var player: CallRecordingPlayer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Button { player.toggle(recording) } label: {
+                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 40, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPlaying ? "暂停录音" : "播放录音")
+
+                Slider(
+                    value: Binding(
+                        get: { min(elapsedTime, totalDuration) },
+                        set: { player.seek(to: $0) }
+                    ),
+                    in: 0 ... totalDuration
+                )
+                .disabled(!player.canSeek(recording))
+                .accessibilityLabel("录音播放进度")
+                .accessibilityValue(
+                    "\(phoneDurationText(elapsedTime))，共 \(phoneDurationText(totalDuration))"
+                )
+
+                ShareLink(item: recording.url) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.body)
+                        .frame(width: 34, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("分享录音")
+            }
+
+            HStack(spacing: 6) {
+                Text("\(phoneDurationText(elapsedTime)) / \(phoneDurationText(totalDuration))")
+                Spacer(minLength: 8)
+                Text(fileSizeText)
+                Text("·")
+                Text(recording.createdAt.formatted(date: .abbreviated, time: .shortened))
+            }
+            .font(.footnote.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+
+            if let error = player.errorText {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var isPlaying: Bool {
+        player.isPlaying(recording)
+    }
+
+    private var isLoaded: Bool {
+        player.playingURL == recording.url
+    }
+
+    private var elapsedTime: TimeInterval {
+        isLoaded ? player.currentTime : 0
+    }
+
+    private var totalDuration: TimeInterval {
+        max(recording.duration, isLoaded ? player.duration : 0, 0.001)
+    }
+
+    private var fileSizeText: String {
+        ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file)
     }
 }
 
@@ -188,7 +294,7 @@ private struct DetailActionButton: View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 46)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .foregroundStyle(color)
                 .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         }
@@ -199,42 +305,77 @@ private struct DetailActionButton: View {
 private struct CallHistoryDetailRow: View {
     let entry: CallHistoryEntry
     let phoneLabel: String?
+    let recording: CallRecordingInfo?
+    let isExpanded: Bool
+    @ObservedObject var player: CallRecordingPlayer
+    @Binding var expandedID: UUID?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: directionIcon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(statusColor)
-                .frame(width: 24)
-                .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: directionIcon)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                    .frame(width: 24)
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(outcomeText)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(statusColor)
-                    Spacer(minLength: 4)
-                    if entry.duration >= 1 {
-                        Text(phoneDurationText(entry.duration))
-                            .font(.subheadline.monospacedDigit())
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(outcomeText)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(statusColor)
+                        Spacer(minLength: 4)
+                        if entry.duration >= 1 {
+                            Text(phoneDurationText(entry.duration))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if let number = entry.number {
+                            Text([phoneLabel, number].compactMap { $0 }.joined(separator: " · "))
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                        }
+                        Spacer(minLength: 4)
+                        Text(dateText)
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-                if let number = entry.number {
-                    Text([phoneLabel, number].compactMap { $0 }.joined(separator: " · "))
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
+
+                if recording != nil {
+                    Button {
+                        expandedID = isExpanded ? nil : entry.id
+                    } label: {
+                        Image(systemName: isExpanded ? "waveform.circle.fill" : "waveform.circle")
+                            .font(.title3)
+                            .foregroundStyle(isExpanded ? Color.accentColor : Color.secondary)
+                            .frame(width: 34, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "收起通话录音" : "展开通话录音")
                 }
-                Text(entry.startedAt.formatted(
-                    .dateTime.year().month().day().hour().minute()
-                ))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isExpanded, let recording {
+                InlineRecordingPlayer(recording: recording, player: player)
+                    .padding(.top, 4)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 11)
+    }
+
+    private var dateText: String {
+        let calendar = Calendar.current
+        let sameYear = calendar.component(.year, from: entry.startedAt) == calendar.component(.year, from: Date())
+        let style = Date.FormatStyle.dateTime
+        return entry.startedAt.formatted(
+            sameYear ? style.month().day().hour().minute() : style.year().month().day().hour().minute()
+        )
     }
 
     private var directionIcon: String {

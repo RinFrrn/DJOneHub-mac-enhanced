@@ -3,7 +3,7 @@ import SwiftUI
 struct RecentsView: View {
     @EnvironmentObject private var history: CallHistoryStore
     @EnvironmentObject private var contacts: ContactsModel
-    @State private var selectedRecording: CallRecordingInfo?
+    @State private var recordingIndex: [String: CallRecordingInfo] = [:]
     let onDial: (String) -> Void
     let onSettings: () -> Void
 
@@ -19,31 +19,19 @@ struct RecentsView: View {
                 } else {
                     List {
                         ForEach(history.entries) { entry in
-                            HStack(spacing: 8) {
-                                NavigationLink {
-                                    if let number = entry.number {
-                                        ContactDetailView(number: number, onDial: onDial)
-                                    }
-                                } label: {
-                                    CallHistoryRow(
-                                        entry: entry,
-                                        contact: matchedContact(for: entry)
-                                    )
+                            NavigationLink {
+                                if let number = entry.number {
+                                    ContactDetailView(number: number, onDial: onDial)
                                 }
-                                .disabled(entry.number == nil)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if let recording = recording(for: entry) {
-                                    Button {
-                                        selectedRecording = recording
-                                    } label: {
-                                        Image(systemName: "waveform.circle.fill")
-                                            .font(.title2)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("打开通话录音")
-                                }
+                            } label: {
+                                CallHistoryRow(
+                                    entry: entry,
+                                    contact: matchedContact(for: entry),
+                                    hasRecording: recording(for: entry) != nil
+                                )
                             }
+                            .disabled(entry.number == nil)
+                            .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                             .swipeActions {
                                 Button("删除", role: .destructive) { history.remove(entry.id) }
                             }
@@ -54,9 +42,8 @@ struct RecentsView: View {
             }
             .navigationTitle("最近通话")
             .modifier(LegacyModuleBottomBar(onSettings: onSettings))
-            .sheet(item: $selectedRecording) { recording in
-                RecordingPlaybackView(recording: recording)
-            }
+            .task { reloadRecordings() }
+            .onChange(of: history.entries) { reloadRecordings() }
         }
     }
 
@@ -67,95 +54,19 @@ struct RecentsView: View {
 
     private func recording(for entry: CallHistoryEntry) -> CallRecordingInfo? {
         guard let filename = entry.recordingFilename else { return nil }
-        return CallRecordingController.recording(named: filename)
-    }
-}
-
-private struct RecordingPlaybackView: View {
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var player = CallRecordingPlayer()
-    let recording: CallRecordingInfo
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                Spacer()
-                Image(systemName: "waveform.circle.fill")
-                    .font(.system(size: 88))
-                    .foregroundStyle(.tint)
-                Text(recording.createdAt.formatted(date: .long, time: .shortened))
-                    .font(.title3.weight(.semibold))
-                Text("\(phoneDurationText(recording.duration)) · \(fileSizeText)")
-                    .font(.body.monospacedDigit())
-                    .foregroundStyle(.secondary)
-
-                VStack(spacing: 5) {
-                    Slider(
-                        value: Binding(
-                            get: { min(player.currentTime, progressDuration) },
-                            set: { player.seek(to: $0) }
-                        ),
-                        in: 0 ... progressDuration
-                    )
-                    .disabled(!player.canSeek(recording))
-                    .accessibilityLabel("录音播放进度")
-                    .accessibilityValue(
-                        "\(phoneDurationText(player.currentTime))，共 \(phoneDurationText(progressDuration))"
-                    )
-
-                    HStack {
-                        Text(phoneDurationText(player.currentTime))
-                        Spacer()
-                        Text(phoneDurationText(progressDuration))
-                    }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 8)
-
-                Button {
-                    player.toggle(recording)
-                } label: {
-                    Label(
-                        player.isPlaying(recording) ? "暂停" : "播放",
-                        systemImage: player.isPlaying(recording) ? "pause.fill" : "play.fill"
-                    )
-                    .frame(minWidth: 120)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                if let error = player.errorText {
-                    Text(error).font(.footnote).foregroundStyle(.red)
-                }
-                ShareLink(item: recording.url) {
-                    Label("分享录音", systemImage: "square.and.arrow.up")
-                }
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("通话录音")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
-            }
-            .onDisappear { player.stop() }
-        }
+        return recordingIndex[filename]
     }
 
-    private var fileSizeText: String {
-        ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file)
-    }
-
-    private var progressDuration: TimeInterval {
-        max(recording.duration, max(player.duration, 0.001))
+    private func reloadRecordings() {
+        let items = CallRecordingController.recordingItems()
+        recordingIndex = Dictionary(uniqueKeysWithValues: items.map { ($0.filename, $0) })
     }
 }
 
 private struct CallHistoryRow: View {
     let entry: CallHistoryEntry
     let contact: ContactPhone?
+    let hasRecording: Bool
 
     private var displayName: String {
         contact?.contactName ?? entry.number ?? "未知号码"
@@ -172,12 +83,13 @@ private struct CallHistoryRow: View {
                 ContactAvatarView(
                     imageData: contact?.imageData,
                     name: displayName,
-                    size: 42
+                    size: 38
                 )
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(displayName)
                         .font(.body.weight(.semibold))
+                        .lineLimit(1)
                         .foregroundStyle(isUnsuccessful ? .red : .primary)
                     if let displayNumber {
                         Text(displayNumber)
@@ -188,24 +100,33 @@ private struct CallHistoryRow: View {
                         Text(outcomeText)
                             .font(.subheadline)
                             .foregroundStyle(isUnsuccessful ? .red : .secondary)
+                            .lineLimit(1)
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 6)
 
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(callRelativeTime(entry.startedAt, relativeTo: context.date))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if entry.duration >= 1 {
-                        Text(phoneDurationText(entry.duration))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    if hasRecording {
+                        Image(systemName: "waveform")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.tint)
+                            .accessibilityLabel("有通话录音")
+                    }
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(callRelativeTime(entry.startedAt, relativeTo: context.date))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if entry.duration >= 1 {
+                            Text(phoneDurationText(entry.duration))
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
             }
             .contentShape(Rectangle())
-            .padding(.vertical, 5)
+            .padding(.vertical, 10)
         }
     }
 
@@ -295,18 +216,21 @@ struct ContactsView: View {
                     ContactAvatarView(
                         imageData: phone.imageData,
                         name: phone.contactName,
-                        size: 42
+                        size: 38
                     )
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(phone.contactName)
                             .font(.body.weight(.semibold))
                             .lineLimit(1)
                         Text("\(phone.number)" + (contacts.numbers(for: phone).count > 1 ? " · \(contacts.numbers(for: phone).count) 个号码" : ""))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
+                .padding(.vertical, 10)
             }
+            .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
         }
         .listStyle(.plain)
         .searchable(text: $searchText, prompt: "姓名或号码")
