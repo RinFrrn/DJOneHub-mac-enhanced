@@ -16,8 +16,8 @@ struct InCallView: View {
         CallScreenLayout(
             callTitle: callTitle, statusText: statusText,
             isRecording: callAudio.isRecording, isMuted: lifecycle.isMuted,
-            isActive: isActive, incomingCallID: incomingCallID,
-            callID: lifecycle.phase.callID, canSelectAudioRoute: callAudio.canSelectAudioRoute,
+            isActive: isActive, isRecovering: isRecovering, incomingCallID: incomingCallID,
+            callID: displayedPhase?.callID, canSelectAudioRoute: callAudio.canSelectAudioRoute,
             recordingErrorText: callAudio.recordingErrorText, audioRouteErrorText: callAudio.audioRouteErrorText,
             onAnswer: onAnswer, onEnd: onEnd, onToggleMute: onToggleMute,
             onToggleRecording: onToggleRecording
@@ -25,6 +25,15 @@ struct InCallView: View {
             CallAudioRouteControl(audio: callAudio)
         }
         .onAppear { callAudio.refreshAvailableAudioRoutes() }
+    }
+
+    private var displayedPhase: ProductCallPhase? {
+        lifecycle.presentedCallPhase
+    }
+
+    private var isRecovering: Bool {
+        if case .recovering = lifecycle.phase { return true }
+        return false
     }
 
     private var incomingCallID: UInt8? {
@@ -39,7 +48,7 @@ struct InCallView: View {
 
     private var callTitle: String {
         let number = voiceControl.dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let callID = lifecycle.phase.callID,
+        if let callID = displayedPhase?.callID,
            let call = voiceControl.calls.first(where: { $0.id == callID }) {
             if call.direction == 2 || call.remoteNumberPresentation != nil {
                 return contacts.matchedContact(for: call.remotePartyDisplayText)?.contactName ?? call.remotePartyDisplayText
@@ -72,6 +81,7 @@ private struct CallScreenLayout<RouteControl: View>: View {
     let isRecording: Bool
     let isMuted: Bool
     let isActive: Bool
+    let isRecovering: Bool
     let incomingCallID: UInt8?
     let callID: UInt8?
     let canSelectAudioRoute: Bool
@@ -112,7 +122,16 @@ private struct CallScreenLayout<RouteControl: View>: View {
                             .foregroundStyle(.white.opacity(0.82))
                     }
 
-                if let callID = incomingCallID {
+                if isRecovering {
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                    Text("正在重新连接模块，通话控制暂时不可用")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.68))
+                        .multilineTextAlignment(.center)
+                } else if let callID = incomingCallID {
                     Spacer()
                     HStack(spacing: 76) {
                         CallActionButton(title: "拒绝", systemImage: "phone.down.fill", color: .red) {
@@ -196,7 +215,7 @@ private struct CallScreenPreview: View {
             CallScreenLayout(
                 callTitle: "示例联系人", statusText: status(at: context.date),
                 isRecording: recordingStarted != nil, isMuted: muted,
-                isActive: !incoming, incomingCallID: incoming ? 1 : nil,
+                isActive: !incoming, isRecovering: false, incomingCallID: incoming ? 1 : nil,
                 callID: 1, canSelectAudioRoute: true,
                 recordingErrorText: "", audioRouteErrorText: "",
                 onAnswer: { _ in reset(incoming: false) },

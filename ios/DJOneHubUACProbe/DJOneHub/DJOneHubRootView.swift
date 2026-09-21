@@ -157,10 +157,7 @@ struct DJOneHubRootView: View {
     }
 
     private var shouldPresentCallScreen: Bool {
-        switch lifecycle.phase {
-        case .placingCall, .dialing, .incoming, .answering, .active, .ending: return true
-        default: return false
-        }
+        lifecycle.shouldPresentCallScreen
     }
 
     private func prepareNumber(_ number: String) {

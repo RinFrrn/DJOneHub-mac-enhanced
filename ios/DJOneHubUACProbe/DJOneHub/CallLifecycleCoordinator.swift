@@ -21,9 +21,13 @@ final class CallLifecycleCoordinator: ObservableObject {
     private var trackedDirection: CallHistoryDirection?
     private var trackedWasConnected = false
     private var trackedUserEnded = false
+    private var callPresentation = CallPresentationState()
 
     private let normalStatusPollInterval: Duration = .seconds(1)
     private let setupStatusPollInterval: Duration = .milliseconds(250)
+
+    var shouldPresentCallScreen: Bool { callPresentation.shouldPresentCallScreen }
+    var presentedCallPhase: ProductCallPhase? { callPresentation.lastCallPhase }
 
     init(
         voiceControl: VoiceControlModel,
@@ -65,6 +69,7 @@ final class CallLifecycleCoordinator: ObservableObject {
         callDurationTracker.reset()
         activeCallDurationSeconds = 0
         isMuted = false
+        callPresentation.update(with: .connecting)
         if callAudio.isRunning || callAudio.hasActiveRequest || callAudio.isAwaitingRecovery {
             callAudio.stop()
         }
@@ -175,6 +180,7 @@ final class CallLifecycleCoordinator: ObservableObject {
             calls: voiceControl.calls,
             stateText: voiceControl.stateText
         )
+        callPresentation.update(with: derivedPhase)
         synchronizeCallHistory(with: derivedPhase)
         if phase != derivedPhase {
             ConnectionLog.shared.append("连接状态：\(derivedPhase.title)")

@@ -198,3 +198,23 @@ enum ProductCallPhase: Equatable {
         return .ready
     }
 }
+
+struct CallPresentationState {
+    private(set) var lastCallPhase: ProductCallPhase?
+
+    var shouldPresentCallScreen: Bool { lastCallPhase != nil }
+
+    mutating func update(with phase: ProductCallPhase) {
+        switch phase {
+        case .placingCall, .dialing, .incoming, .answering, .active, .ending:
+            lastCallPhase = phase
+        case .recovering:
+            // A transient STATUS failure must not dismiss an in-progress call.
+            // Keep only presentation context; the live phase still gates media
+            // and controls until a newly authenticated STATUS succeeds.
+            break
+        case .needsPairing, .needsControlPairing, .connecting, .ready:
+            lastCallPhase = nil
+        }
+    }
+}
