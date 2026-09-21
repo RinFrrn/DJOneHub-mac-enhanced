@@ -6,15 +6,20 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/iniwex5/vohive/internal/modulepairing"
 	"github.com/iniwex5/vohive/internal/modulepush"
 )
 
 func runModuleNotify(options moduleNotifyOptions) error {
+	if options.Action == "install-authorization" {
+		return installModuleAuthorization(options.PairingRegistryPath)
+	}
 	if options.Action != "install" {
 		command, err := moduleNotifyCommand(options.Action)
 		if err != nil {
@@ -124,5 +129,89 @@ func runModuleNotify(options moduleNotifyOptions) error {
 		return fmt.Errorf("notification files installed, but boot service could not be enabled: %w", err)
 	}
 	fmt.Println("Installed module notifications and enabled boot startup. Run test-bark or test-webpush, then start.")
+	return nil
+}
+
+func installModuleAuthorization(registryPath string) error {
+	if strings.TrimSpace(registryPath) == "" {
+		return errors.New("长期授权安装需要 -notify-pairing-registry")
+	}
+	absPath, err := filepath.Abs(registryPath)
+	if err != nil {
+		return errors.New("无法解析长期授权注册表路径")
+	}
+	info, err := os.Lstat(absPath)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("长期授权注册表必须是权限 0600 的普通文件")
+	}
+	store, err := modulepairing.Open(absPath)
+	if err != nil {
+		return fmt.Errorf("长期授权注册表无效: %w", err)
+	}
+	if _, err = store.TLSConfig(); err != nil {
+		store.Close()
+		return fmt.Errorf("模块 TLS 身份无效: %w", err)
+	}
+	store.Close()
+	registryData, err := os.ReadFile(absPath)
+	if err != nil {
+		return err
+	}
+	scriptData := []byte(moduleNotifyStartScript)
+	adb, err := openDJIUSBADB()
+	if err != nil {
+		return err
+	}
+	defer adb.Close()
+	if err := sentinelRequireRoot(adb); err != nil {
+		return err
+	}
+	if err := sentinelShell(adb,
+		"test ! -e '/usrdata/djonehub/pairing/registry.json' && "+
+			"test -x '"+moduleNotifyDir+"/djonehub-notify.armv7' && "+
+			"strings '"+moduleNotifyDir+"/djonehub-notify.armv7' | grep -q 'experimental-pairing-registry' && "+
+			"mkdir -p '/usrdata/djonehub/pairing' && chmod 700 '/usrdata/djonehub/pairing'",
+		10*time.Second); err != nil {
+		return errors.New("模块已有长期身份，或当前提醒程序不支持长期授权；已拒绝覆盖")
+	}
+	stop, _ := moduleNotifyCommand("stop")
+	if err := sentinelShell(adb, stop, 15*time.Second); err != nil {
+		return fmt.Errorf("停止提醒服务失败: %w", err)
+	}
+	for _, file := range []struct {
+		data []byte
+		path string
+	}{
+		{registryData, "/usrdata/djonehub/pairing/registry.json.new"},
+		{scriptData, moduleNotifyDir + "/start-on-boot.sh.new"},
+	} {
+		if err := adb.push(file.data, file.path, 0100600, 30*time.Second); err != nil {
+			return errors.New("长期授权文件上传失败；原服务可直接重新启动")
+		}
+		digest := sha256.Sum256(file.data)
+		if err := sentinelShell(adb, fmt.Sprintf(
+			"chmod 600 '%s' && test \"$(sha256sum '%s' | cut -d ' ' -f 1)\" = '%x'",
+			file.path, file.path, digest), 10*time.Second); err != nil {
+			return errors.New("长期授权文件校验失败；原服务可直接重新启动")
+		}
+	}
+	commit := "cp '" + moduleNotifyDir + "/start-on-boot.sh' '" + moduleNotifyDir + "/start-on-boot.sh.before-authorization' && " +
+		"mv '/usrdata/djonehub/pairing/registry.json.new' '/usrdata/djonehub/pairing/registry.json' && " +
+		"mv '" + moduleNotifyDir + "/start-on-boot.sh.new' '" + moduleNotifyDir + "/start-on-boot.sh' && " +
+		"chmod 600 '/usrdata/djonehub/pairing/registry.json' && chmod 700 '" + moduleNotifyDir + "/start-on-boot.sh' && sync"
+	if err := sentinelShell(adb, commit, 12*time.Second); err != nil {
+		return fmt.Errorf("提交长期授权身份失败: %w", err)
+	}
+	start, _ := moduleNotifyCommand("start")
+	if err := sentinelShell(adb, start, 15*time.Second); err != nil {
+		return errors.New("长期授权已安装，但提醒服务启动失败；请保留初始化资料并检查模块日志")
+	}
+	adb.Close()
+	connection, err := net.DialTimeout("tcp4", net.JoinHostPort(modulepairing.Host, fmt.Sprint(modulepairing.Port)), 5*time.Second)
+	if err != nil {
+		return errors.New("提醒服务已启动，但长期授权端口尚不可达")
+	}
+	connection.Close()
+	fmt.Println("Installed module long-term identity. Existing call, SMS, audio and notification pairing was preserved.")
 	return nil
 }

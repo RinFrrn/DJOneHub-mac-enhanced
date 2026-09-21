@@ -6,7 +6,9 @@ import (
 	"strings"
 )
 
-type moduleNotifyOptions struct{ Action, ArtifactDir, ConfigPath, CAPath string }
+type moduleNotifyOptions struct {
+	Action, ArtifactDir, ConfigPath, CAPath, PairingRegistryPath string
+}
 
 const moduleNotifyDir = "/usrdata/djonehub/notify"
 const moduleNotifyInitLink = "/etc/rc5.d/S97djonehub-notify"
@@ -15,6 +17,7 @@ const moduleNotifyStartScript = `#!/bin/sh
 directory=/usrdata/djonehub/notify
 binary=$directory/djonehub-notify.armv7
 pidfile=$directory/notify.pid
+registry=/usrdata/djonehub/pairing/registry.json
 owned() {
     test -s "$pidfile" || return 1
     read pid < "$pidfile"
@@ -26,11 +29,13 @@ start)
     if owned; then exit 0; fi
     rm -f "$pidfile"
     ulimit -c 0
+    registry_arg=
+    if test -f "$registry"; then registry_arg="-experimental-pairing-registry $registry"; fi
     env GOMEMLIMIT=6MiB GOGC=25 GOMAXPROCS=1 \
         SSL_CERT_FILE="$directory/ca.pem" LD_LIBRARY_PATH=/usr/lib \
         "$binary" -config "$directory/config.json" \
         -monitor "$directory/djonehub-notify-monitor.armv7" \
-        -log-file "$directory/notify.log" </dev/null >/dev/null 2>&1 &
+        -log-file "$directory/notify.log" $registry_arg </dev/null >/dev/null 2>&1 &
     printf '%s\n' "$!" > "$pidfile"
     ;;
 stop)
@@ -53,9 +58,10 @@ func moduleNotifyCommand(action string) (string, error) {
 	case "stop":
 		return owned + `if owned; then kill -TERM "$pid"; attempt=0; while owned && test "$attempt" -lt 100; do sleep 0.1; attempt=$((attempt+1)); done; owned && exit 1; fi; rm -f '` + moduleNotifyDir + `/notify.pid'; echo 'stopped'`, nil
 	case "start":
+		registry := `registry_arg=''; test ! -f '/usrdata/djonehub/pairing/registry.json' || registry_arg='-experimental-pairing-registry /usrdata/djonehub/pairing/registry.json'; `
 		return owned + `if owned; then echo 'already running'; else ` +
 			base + binary + config + ` -check && { ` +
-			`(trap '' HUP; exec ` + "env " + base + binary + config + " -monitor " + moduleNotifyDir + `/djonehub-notify-monitor.armv7 -log-file ` + moduleNotifyDir + `/notify.log) </dev/null >/dev/null 2>&1 & pid=$!; ` +
+			registry + `(trap '' HUP; exec ` + "env " + base + binary + config + " -monitor " + moduleNotifyDir + `/djonehub-notify-monitor.armv7 -log-file ` + moduleNotifyDir + `/notify.log $registry_arg) </dev/null >/dev/null 2>&1 & pid=$!; ` +
 			`printf '%s\n' "$pid" > '` + moduleNotifyDir + `/notify.pid'; sleep 1; owned; }; fi`, nil
 	case "test-bark", "test-webpush":
 		return base + binary + config + " -test " + strings.TrimPrefix(action, "test-"), nil

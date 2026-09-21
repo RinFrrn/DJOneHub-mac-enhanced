@@ -1,5 +1,6 @@
 import AVFAudio
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct InCallView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
@@ -391,7 +392,7 @@ struct ModulePanelView: View {
     @State private var recordingPendingDeletion: CallRecordingInfo?
     @State private var isShowingCallPreview = false
 
-    private enum Page: Hashable { case notifications, recordings, settings, diagnostics, logs }
+    private enum Page: Hashable { case notifications, recordings, settings, authorization, diagnostics, logs }
     @State private var path: [Page] = []
     @State private var detent: PresentationDetent = .medium
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -524,6 +525,7 @@ struct ModulePanelView: View {
                     )
                 case .recordings: recordingsPage
                 case .settings: moduleSettingsPage
+                case .authorization: ModuleAuthorizationSettingsView()
                 case .diagnostics: diagnosticsPage
                 case .logs: ConnectionLogView()
                 }
@@ -588,6 +590,24 @@ struct ModulePanelView: View {
                         isConfirmingUnpair = true
                     }
                 }
+            }
+            Section {
+                NavigationLink(value: Page.authorization) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("iPhone 长期授权")
+                            Text("绑定、恢复及授权设备管理")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "checkmark.shield")
+                    }
+                }
+            } header: {
+                Text("长期授权")
+            } footer: {
+                Text("长期授权目前与旧通话配对并行，不会影响现有电话、短信和提醒。")
             }
 
         }
@@ -703,6 +723,160 @@ struct ModulePanelView: View {
         } catch {
             recordingPlayer.report(error)
             recordingPendingDeletion = nil
+        }
+    }
+}
+
+private struct AuthorizationInvitationDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    let data: Data
+
+    init(invitation: ModuleInvitation) throws {
+        data = try JSONEncoder().encode(invitation)
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw ModuleAuthorizationError.invalidData
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private struct ModuleAuthorizationSettingsView: View {
+    @State private var model = ModuleAuthorizationModel()
+    @State private var isImporting = false
+    @State private var isExportingRecovery = false
+    @State private var recoveryDocument: AuthorizationInvitationDocument?
+    @State private var pendingModuleID: String?
+    @State private var isBusy = false
+    @State private var message = "导入首次绑定资料或恢复资料，将此 iPhone 注册为模块管理员。"
+    @State private var errorMessage: String?
+    @State private var authorizedDeviceCount: Int?
+
+    var body: some View {
+        List {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(authorizedDeviceCount == nil ? "尚未验证长期授权" : "长期授权已启用")
+                            .font(.headline)
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: authorizedDeviceCount == nil ? "shield" : "checkmark.shield.fill")
+                        .foregroundStyle(authorizedDeviceCount == nil ? Color.secondary : Color.green)
+                }
+                if let authorizedDeviceCount {
+                    LabeledContent("已授权设备", value: "\(authorizedDeviceCount) 台")
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("授权状态")
+            }
+
+            Section {
+                Button {
+                    isImporting = true
+                } label: {
+                    Label("导入绑定或恢复资料", systemImage: "doc.badge.plus")
+                }
+                .disabled(isBusy)
+
+                if let moduleID = pendingModuleID, recoveryDocument == nil {
+                    Button("已安全保存恢复资料，完成绑定") {
+                        finishEnrollment(moduleID: moduleID)
+                    }
+                    .disabled(isBusy)
+                }
+            } footer: {
+                Text("恢复资料拥有模块管理权限，请保存在密码管理器或离线位置，不要发送到聊天软件。")
+            }
+
+            Section {
+                Text("此阶段仅建立长期设备身份，旧通话配对仍继续工作。后续迁移完成前，撤销长期授权不会撤销旧通话密钥。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("iPhone 长期授权")
+        .navigationBarTitleDisplayMode(.inline)
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false,
+            onCompletion: importInvitation
+        )
+        .fileExporter(
+            isPresented: $isExportingRecovery,
+            document: recoveryDocument,
+            contentType: .json,
+            defaultFilename: "DJOneHub-Recovery"
+        ) { result in
+            switch result {
+            case .success:
+                guard let moduleID = pendingModuleID else { return }
+                recoveryDocument = nil
+                finishEnrollment(moduleID: moduleID)
+            case .failure(let error):
+                errorMessage = "恢复资料未保存：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func importInvitation(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else {
+            if case .failure(let error) = result { errorMessage = error.localizedDescription }
+            return
+        }
+        isBusy = true
+        errorMessage = nil
+        Task {
+            do {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let invitation = try ModuleInvitation.decode(Data(contentsOf: url, options: .mappedIfSafe))
+                try model.begin(invitation: invitation, name: UIDevice.current.name)
+                _ = try await model.prepare(moduleID: invitation.moduleID)
+                pendingModuleID = invitation.moduleID
+                if let replacement = try model.replacementRecoveryInvitation(moduleID: invitation.moduleID) {
+                    recoveryDocument = try AuthorizationInvitationDocument(invitation: replacement)
+                    message = "请先导出新的恢复资料；保存成功后才会启用此 iPhone。"
+                    isExportingRecovery = true
+                } else {
+                    message = "模块已准备绑定。确认 Mac 生成的 recovery.json 已安全保存后完成绑定。"
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isBusy = false
+        }
+    }
+
+    private func finishEnrollment(moduleID: String) {
+        isBusy = true
+        errorMessage = nil
+        Task {
+            do {
+                try model.confirmRecoveryBackup(moduleID: moduleID)
+                let status = try await model.commit(moduleID: moduleID)
+                authorizedDeviceCount = status.devices.count
+                pendingModuleID = nil
+                message = "此 iPhone 已获得无固定到期时间的模块管理授权。"
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isBusy = false
         }
     }
 }
