@@ -344,3 +344,24 @@ final class ContactsModel: ObservableObject {
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
+
+/// App 全部文案写死中文，但工程的 developmentRegion 是 en、也没声明 zh-Hans，
+/// 系统会把 `Locale.current` 解析成英文，`.formatted()` 会输出 "Mar 8" 这类英文格式。
+/// 这里显式钉住中文，与界面文案保持一致。
+let appDisplayLocale = Locale(identifier: "zh_CN")
+
+/// 通话时间的紧凑显示：今天只给时分，昨天带“昨天 + 时分”，
+/// 同年给月日 + 时分，跨年才补上年份。
+func callTimestampText(_ date: Date, relativeTo now: Date = Date()) -> String {
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) {
+        return date.formatted(.dateTime.hour().minute().locale(appDisplayLocale))
+    }
+    if calendar.isDateInYesterday(date) {
+        return "昨天 \(date.formatted(.dateTime.hour().minute().locale(appDisplayLocale)))"
+    }
+    if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+        return date.formatted(.dateTime.month().day().hour().minute().locale(appDisplayLocale))
+    }
+    return date.formatted(.dateTime.year().month().day().hour().minute().locale(appDisplayLocale))
+}

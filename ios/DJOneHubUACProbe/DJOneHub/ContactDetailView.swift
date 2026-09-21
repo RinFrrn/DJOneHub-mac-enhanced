@@ -246,7 +246,7 @@ private struct InlineRecordingPlayer: View {
                 Spacer(minLength: 8)
                 Text(fileSizeText)
                 Text("·")
-                Text(recording.createdAt.formatted(date: .abbreviated, time: .shortened))
+                Text(callTimestampText(recording.createdAt))
             }
             .font(.footnote.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -339,7 +339,7 @@ private struct CallHistoryDetailRow: View {
                                 .layoutPriority(1)
                         }
                         Spacer(minLength: 4)
-                        Text(dateText)
+                        Text(callTimestampText(entry.startedAt))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: true, vertical: false)
@@ -367,15 +367,6 @@ private struct CallHistoryDetailRow: View {
             }
         }
         .padding(.vertical, 11)
-    }
-
-    private var dateText: String {
-        let calendar = Calendar.current
-        let sameYear = calendar.component(.year, from: entry.startedAt) == calendar.component(.year, from: Date())
-        let style = Date.FormatStyle.dateTime
-        return entry.startedAt.formatted(
-            sameYear ? style.month().day().hour().minute() : style.year().month().day().hour().minute()
-        )
     }
 
     private var directionIcon: String {

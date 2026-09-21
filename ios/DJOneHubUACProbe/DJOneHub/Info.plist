@@ -5,6 +5,11 @@
  <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>io.github.rogerbush007.djonehub</string><key>CFBundleURLSchemes</key><array><string>djonehub</string></array></dict></array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>DJOneHub</string>
 	<key>CFBundleExecutable</key>

@@ -655,7 +655,7 @@ private struct ConnectionLogView: View {
             ForEach(log.entries.reversed()) { entry in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(entry.message)
-                    Text("\(entry.date.formatted(date: .omitted, time: .standard)) · +\(String(format: "%.3f", entry.elapsed)) 秒")
+                    Text("\(entry.date.formatted(.dateTime.hour().minute().second().locale(appDisplayLocale))) · +\(String(format: "%.3f", entry.elapsed)) 秒")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 .textSelection(.enabled)
@@ -697,7 +697,7 @@ struct RecordingRow: View {
             .accessibilityLabel(isPlaying ? "暂停录音" : "播放录音")
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(recording.createdAt.formatted(date: .abbreviated, time: .shortened))
+                Text(callTimestampText(recording.createdAt))
                     .font(.body.weight(.medium))
                 Text("\(phoneDurationText(recording.duration)) · \(fileSizeText)")
                     .font(.caption.monospacedDigit())

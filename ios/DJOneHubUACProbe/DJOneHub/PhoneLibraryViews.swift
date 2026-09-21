@@ -114,7 +114,7 @@ private struct CallHistoryRow: View {
                             .accessibilityLabel("有通话录音")
                     }
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(callRelativeTime(entry.startedAt, relativeTo: context.date))
+                        Text(callTimestampText(entry.startedAt, relativeTo: context.date))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         if entry.duration >= 1 {
@@ -147,20 +147,6 @@ private struct CallHistoryRow: View {
         case nil: return "进行中"
         }
     }
-}
-
-private func callRelativeTime(_ date: Date, relativeTo now: Date) -> String {
-    let elapsed = max(0, now.timeIntervalSince(date))
-    if elapsed < 60 { return "刚刚" }
-    if Calendar.current.isDateInToday(date) {
-        if elapsed < 3_600 { return "\(max(1, Int(elapsed / 60)))分钟前" }
-        return "\(max(1, Int(elapsed / 3_600)))小时前"
-    }
-    if Calendar.current.isDateInYesterday(date) { return "昨天" }
-    if Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: now) {
-        return date.formatted(.dateTime.month().day())
-    }
-    return date.formatted(.dateTime.year().month().day())
 }
 
 struct ContactsView: View {
