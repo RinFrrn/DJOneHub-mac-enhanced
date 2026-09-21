@@ -44,10 +44,12 @@ private struct AdaptiveModuleAccessory: View {
     }
 }
 
-private struct ModuleAccessoryButton: View {
+struct ModuleAccessoryButton: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
     @ObservedObject private var network = ConnectionLog.shared
+    @AppStorage(PhoneProductPreferences.automaticCallRecording)
+    private var automaticCallRecordingEnabled = false
     let onOpen: () -> Void
     var compact = false
 
@@ -99,30 +101,34 @@ private struct ModuleAccessoryButton: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(connected ? (radio?.networkType ?? "模块") : title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                HStack(spacing: 5) {
-                    if let radio {
-                        if !connected { Text(radio.networkType) }
+                if connected, let radio {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(radio.networkType)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
                         Text("\(radio.dbm) dBm")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .monospacedDigit()
-                    } else if !noDevice {
-                        Text("信号未知")
                     }
-                    if noDevice {
-                        Text("轻点查看模块详情")
-                    }
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(noDevice ? "轻点查看模块详情" : "信号未知")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if !noDevice {
                 HStack(spacing: compact ? 8 : 12) {
+                    automaticRecordingStatusIcon
                     internetStatusIcon(at: date)
                     ModuleNotificationStatusIcon(
                         pairingKey: voiceControl.pairingKeyForUplinkProbe(),
@@ -134,6 +140,13 @@ private struct ModuleAccessoryButton: View {
                 .padding(.trailing, compact ? 4 : 8)
             }
         }
+    }
+
+    private var automaticRecordingStatusIcon: some View {
+        Image(systemName: automaticCallRecordingEnabled ? "record.circle.fill" : "record.circle")
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(automaticCallRecordingEnabled ? Color.accentColor : Color.secondary)
+            .accessibilityLabel(automaticCallRecordingEnabled ? "自动录音已开启" : "自动录音已关闭")
     }
 
     private func internetStatusIcon(at date: Date) -> some View {
@@ -221,8 +234,6 @@ struct KeypadView: View {
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
     @StateObject private var tones = DialpadTonePlayer()
-    @AppStorage(PhoneProductPreferences.automaticCallRecording)
-    private var automaticCallRecordingEnabled = false
 
     let onCall: () -> Void
     let onSettings: () -> Void
@@ -296,28 +307,6 @@ struct KeypadView: View {
                     }
                 }
 
-                Toggle(isOn: $automaticCallRecordingEnabled) {
-                    Label(
-                        "自动录音",
-                        systemImage: automaticCallRecordingEnabled
-                            ? "record.circle.fill"
-                            : "record.circle"
-                    )
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .symbolRenderingMode(.hierarchical)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
-                .padding(.leading, 12)
-                .padding(.trailing, 8)
-                .frame(height: 38)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay {
-                    Capsule().stroke(.primary.opacity(0.06), lineWidth: 0.5)
-                }
-                .accessibilityHint("开启后，每次电话接通时自动开始本地录音")
                 Spacer(minLength: 4)
             }
             .navigationBarTitleDisplayMode(.inline)

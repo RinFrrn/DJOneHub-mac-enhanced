@@ -383,6 +383,8 @@ struct ModulePanelView: View {
     @EnvironmentObject private var systemCalls: SystemCallCoordinator
     @Binding var isConfirmingUnpair: Bool
     let dismiss: () -> Void
+    @AppStorage(PhoneProductPreferences.automaticCallRecording)
+    private var automaticCallRecordingEnabled = false
 
     @StateObject private var recordingPlayer = CallRecordingPlayer()
     @State private var recordings: [CallRecordingInfo] = []
@@ -425,6 +427,22 @@ struct ModulePanelView: View {
                         Label("刷新模块状态", systemImage: "arrow.clockwise")
                     }
                     .disabled(noDevice || !voiceControl.isConfigured || voiceControl.isBusy || !voiceControl.calls.isEmpty)
+                }
+                Section {
+                    Toggle(isOn: $automaticCallRecordingEnabled) {
+                        Label(
+                            "自动录音",
+                            systemImage: automaticCallRecordingEnabled
+                                ? "record.circle.fill"
+                                : "record.circle"
+                        )
+                        .symbolRenderingMode(.hierarchical)
+                    }
+                    .accessibilityHint("开启后，每次电话接通时自动开始本地录音")
+                } header: {
+                    Text("通话")
+                } footer: {
+                    Text("电话接通并建立媒体链路后自动开始录音；录音仅保存在本机。")
                 }
                 Section {
                     if let enabled = voiceControl.moduleInternetEnabled {
@@ -484,7 +502,10 @@ struct ModulePanelView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成", action: dismiss)
+                    Button(action: dismiss) {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("关闭")
                 }
             }
             .onAppear { reloadRecordings() }
@@ -494,6 +515,16 @@ struct ModulePanelView: View {
         }
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            ModuleAccessoryButton(
+                onOpen: { if !path.isEmpty { path.removeAll() } },
+                compact: true
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+        }
         .onAppear {
             if !voiceControl.isConfigured, network.noWiredInterface == false { path = [.settings] }
             if !path.isEmpty || dynamicTypeSize.isAccessibilitySize { detent = .large }
