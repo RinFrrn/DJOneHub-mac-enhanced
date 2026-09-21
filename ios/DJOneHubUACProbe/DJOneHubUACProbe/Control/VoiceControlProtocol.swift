@@ -62,6 +62,13 @@ struct VoiceCallSnapshot: Equatable, Sendable {
 struct ModuleRadioStatus: Equatable, Sendable {
     let dbm: Int
     let technology: UInt8
+    let operatorName: String?
+
+    init(dbm: Int, technology: UInt8, operatorName: String? = nil) {
+        self.dbm = dbm
+        self.technology = technology
+        self.operatorName = operatorName
+    }
 
     var networkType: String {
         switch technology {
@@ -424,7 +431,7 @@ enum VoiceControlProtocol {
                 internetEnabled = payload[extensionOffset] == 2
                 extensionOffset = extensionEnd
             } else if extensionType == 2 {
-                guard extensionLength == 3, radio == nil,
+                guard extensionLength == 3 || extensionLength >= 4, radio == nil,
                       payload[extensionOffset] == 1 else {
                     throw VoiceControlProtocolError.invalidSnapshot
                 }
@@ -433,7 +440,23 @@ enum VoiceControlProtocol {
                 guard (-125 ... -1).contains(dbm), technology != 0 else {
                     throw VoiceControlProtocolError.invalidSnapshot
                 }
-                radio = ModuleRadioStatus(dbm: dbm, technology: technology)
+                var operatorName: String?
+                if extensionLength >= 4 {
+                    let nameLength = Int(payload[extensionOffset + 3])
+                    guard nameLength <= 32, nameLength == extensionLength - 4,
+                          let decoded = String(
+                            data: payload.subdata(in: (extensionOffset + 4)..<extensionEnd),
+                            encoding: .utf8
+                          ) else {
+                        throw VoiceControlProtocolError.invalidSnapshot
+                    }
+                    operatorName = decoded.isEmpty ? nil : decoded
+                }
+                radio = ModuleRadioStatus(
+                    dbm: dbm,
+                    technology: technology,
+                    operatorName: operatorName
+                )
                 extensionOffset = extensionEnd
             } else {
                 extensionOffset = extensionEnd

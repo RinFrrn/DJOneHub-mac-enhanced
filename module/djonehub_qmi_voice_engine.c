@@ -471,6 +471,31 @@ static int radio_parse(const uint8_t *bytes, size_t length,
     return 0;
 }
 
+static void operator_parse(const uint8_t *bytes, size_t length,
+                           struct djonehub_radio_status *value)
+{
+    size_t offset = 0U;
+    while (offset + 3U <= length) {
+        uint8_t type = bytes[offset];
+        size_t size = (size_t)bytes[offset + 1U] |
+            ((size_t)bytes[offset + 2U] << 8U);
+        offset += 3U;
+        if (size > length - offset) return;
+        /* NAS Get Serving System: Current PLMN (MCC, MNC, description). */
+        if (type == 0x12U && size >= 5U) {
+            size_t name_length = bytes[offset + 4U];
+            if (name_length <= DJONEHUB_OPERATOR_NAME_BYTES &&
+                name_length <= size - 5U) {
+                memcpy(value->operator_name, bytes + offset + 5U, name_length);
+                value->operator_name[name_length] = '\0';
+                value->operator_name_length = (uint8_t)name_length;
+            }
+            return;
+        }
+        offset += size;
+    }
+}
+
 static void *radio_worker(void *unused)
 {
     struct qmi_api api;
@@ -509,6 +534,12 @@ static void *radio_worker(void *unused)
                                   sizeof(response), &length, 1000) == 0 &&
                 length <= sizeof(response) && radio_parse(response, length, &current) == 0) {
                 struct timespec now;
+                length = 0U;
+                if (api.send_raw_sync(client, 0x24, &empty, 0, response,
+                                      sizeof(response), &length, 1000) == 0 &&
+                    length <= sizeof(response)) {
+                    operator_parse(response, length, &current);
+                }
                 clock_gettime(CLOCK_MONOTONIC, &now);
                 pthread_mutex_lock(&radio_mutex);
                 radio_status = current;

@@ -22,7 +22,7 @@ struct LegacyModuleBottomBar: ViewModifier {
 }
 
 struct ModuleBottomAccessory: ViewModifier {
-    let onOpen: () -> Void
+    let onOpen: (() -> Void)?
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content.tabViewBottomAccessory {
@@ -37,7 +37,7 @@ struct ModuleBottomAccessory: ViewModifier {
 @available(iOS 26.0, *)
 private struct AdaptiveModuleAccessory: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
-    let onOpen: () -> Void
+    let onOpen: (() -> Void)?
 
     var body: some View {
         ModuleAccessoryButton(onOpen: onOpen)
@@ -50,25 +50,27 @@ struct ModuleAccessoryButton: View {
     @ObservedObject private var network = ConnectionLog.shared
     @AppStorage(PhoneProductPreferences.automaticCallRecording)
     private var automaticCallRecordingEnabled = false
-    let onOpen: () -> Void
+    let onOpen: (() -> Void)?
     var compact = false
+    var showsStatusLabels = false
 
     private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
     private var title: String { noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle }
 
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: onOpen) {
-                TimelineView(.periodic(from: .now, by: 5)) { context in
-                    statusContent(at: context.date)
+            if let onOpen {
+                Button(action: onOpen) {
+                    statusTimeline
                 }
-                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("打开模块状态、提醒和设置")
+            } else {
+                statusTimeline
+                    .accessibilityElement(children: .combine)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("打开模块状态、提醒和设置")
 
-            if !compact {
+            if !compact, let onOpen {
                 Button(action: onOpen) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 18, weight: .medium))
@@ -84,62 +86,109 @@ struct ModuleAccessoryButton: View {
         .padding(.vertical, compact ? 0 : 4)
     }
 
+    private var statusTimeline: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            statusContent(at: context.date)
+        }
+        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
     @ViewBuilder
     private func statusContent(at date: Date) -> some View {
         let radio = freshRadio(at: date)
         let connected = !noDevice && lifecycle.phase == .ready
-        HStack(spacing: 10) {
-            if connected, let radio {
-                Image(systemName: "cellularbars", variableValue: Double(radio.bars) / 4)
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(width: 28, height: 28)
-                    .foregroundStyle(.primary)
-                    .accessibilityLabel("信号 \(radio.bars) 格")
-            } else {
-                ModuleStatusIcon()
-                    .accessibilityHidden(true)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: showsStatusLabels ? 12 : 0) {
+            HStack(spacing: 10) {
                 if connected, let radio {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(radio.networkType)
+                    Image(systemName: "cellularbars", variableValue: Double(radio.bars) / 4)
+                        .font(.system(size: compact || showsStatusLabels ? 14 : 18, weight: .medium))
+                        .frame(width: compact || showsStatusLabels ? 20 : 28,
+                               height: compact || showsStatusLabels ? 20 : 28)
+                        .foregroundStyle(.primary)
+                        .accessibilityLabel("信号 \(radio.bars) 格")
+                } else {
+                    ModuleStatusIcon()
+                        .accessibilityHidden(true)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if connected, let radio {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if let operatorName = radio.operatorName {
+                                Text(displayOperatorName(operatorName))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                            }
+                            Text(radio.networkType)
+                                .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("\(radio.dbm) dBm")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    } else {
+                        Text(title)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
-                        Text("\(radio.dbm) dBm")
+                        Text(noDevice ? "轻点查看模块详情" : "信号未知")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .monospacedDigit()
                     }
-                    Text(title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(noDevice ? "轻点查看模块详情" : "信号未知")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !noDevice && !showsStatusLabels {
+                    statusIcons(at: date)
                 }
             }
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !noDevice {
-                HStack(spacing: compact ? 8 : 12) {
-                    automaticRecordingStatusIcon
-                    internetStatusIcon(at: date)
+            if !noDevice && showsStatusLabels {
+                HStack(spacing: 12) {
+                    labeledStatus(
+                        "自动录音",
+                        icon: automaticCallRecordingEnabled ? "record.circle.fill" : "record.circle",
+                        active: automaticCallRecordingEnabled
+                    )
+                    labeledStatus(
+                        "模块上网",
+                        icon: voiceControl.moduleInternetEnabled == false ? "network.slash" : "network",
+                        active: voiceControl.moduleInternetEnabled == true
+                    )
                     ModuleNotificationStatusIcon(
                         pairingKey: voiceControl.pairingKeyForUplinkProbe(),
-                        connected: voiceControl.shouldPollStatus
+                        connected: voiceControl.shouldPollStatus,
+                        label: "提醒"
                     )
                 }
-                .font(.system(size: 15, weight: .medium))
-                .fixedSize()
-                .padding(.trailing, compact ? 4 : 8)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
             }
         }
+    }
+
+    private func labeledStatus(_ title: String, icon: String, active: Bool) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(title)
+        }
+        .foregroundStyle(active ? Color.accentColor : Color.secondary)
+    }
+
+    private func statusIcons(at date: Date) -> some View {
+        HStack(spacing: compact ? 8 : 12) {
+            automaticRecordingStatusIcon
+            internetStatusIcon(at: date)
+            ModuleNotificationStatusIcon(
+                pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                connected: voiceControl.shouldPollStatus
+            )
+        }
+        .font(.system(size: 15, weight: .medium))
+        .fixedSize()
+        .padding(.trailing, compact ? 4 : 8)
     }
 
     private var automaticRecordingStatusIcon: some View {
@@ -163,6 +212,16 @@ struct ModuleAccessoryButton: View {
         guard !noDevice, let updated = voiceControl.radioUpdatedAt,
               date.timeIntervalSince(updated) < 30 else { return nil }
         return voiceControl.radio
+    }
+
+    private func displayOperatorName(_ name: String) -> String {
+        switch name.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "CHINA MOBILE", "CMCC", "CHN-CMCC": return "中国移动"
+        case "CHINA UNICOM", "CHN-UNICOM", "UNICOM": return "中国联通"
+        case "CHINA TELECOM", "CHN-CT", "CTCC": return "中国电信"
+        case "CHINA BROADNET", "CBN": return "中国广电"
+        default: return name
+        }
     }
 
 }

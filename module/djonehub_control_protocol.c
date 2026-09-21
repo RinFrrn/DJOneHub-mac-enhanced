@@ -316,7 +316,11 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
     if (number_count != 0U) {
         required += 3U + extension_length;
     }
-    if (result->snapshot.radio.valid) required += 6U;
+    if (result->snapshot.radio.valid) {
+        if (result->snapshot.radio.operator_name_length > DJONEHUB_OPERATOR_NAME_BYTES)
+            return 0U;
+        required += 7U + result->snapshot.radio.operator_name_length;
+    }
     if (result->snapshot.internet_state != 0U) required += 4U;
     if (capacity < required || operation_to_wire(result->operation) == 0U) {
         return 0U;
@@ -362,12 +366,19 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         }
     }
     if (result->snapshot.radio.valid) {
-        size_t offset = required - 6U - (result->snapshot.internet_state != 0U ? 4U : 0U);
+        size_t radio_length = 4U + result->snapshot.radio.operator_name_length;
+        size_t offset = required - (3U + radio_length) -
+            (result->snapshot.internet_state != 0U ? 4U : 0U);
         output[offset] = 2U;
-        store_be16(output + offset + 1U, 3U);
+        store_be16(output + offset + 1U, (uint16_t)radio_length);
         output[offset + 3U] = 1U;
         output[offset + 4U] = (uint8_t)result->snapshot.radio.dbm;
         output[offset + 5U] = result->snapshot.radio.technology;
+        output[offset + 6U] = result->snapshot.radio.operator_name_length;
+        if (result->snapshot.radio.operator_name_length != 0U) {
+            memcpy(output + offset + 7U, result->snapshot.radio.operator_name,
+                   result->snapshot.radio.operator_name_length);
+        }
     }
     if (result->snapshot.internet_state != 0U) {
         size_t offset = required - 4U;
@@ -531,13 +542,22 @@ static int decode_result_payload(const uint8_t *payload, size_t length,
                 result->snapshot.internet_state = payload[offset];
                 offset = extension_end;
             } else if (extension_type == 2U) {
-                if (extension_length != 3U || result->snapshot.radio.valid ||
+                if ((extension_length != 3U && extension_length < 4U) || result->snapshot.radio.valid ||
                     payload[offset] != 1U || (int8_t)payload[offset+1U] >= 0 ||
                     (int8_t)payload[offset+1U] < -125 || payload[offset+2U] == 0U)
                     return -1;
                 result->snapshot.radio.valid = 1;
                 result->snapshot.radio.dbm = (int8_t)payload[offset+1U];
                 result->snapshot.radio.technology = payload[offset+2U];
+                if (extension_length >= 4U) {
+                    size_t name_length = payload[offset + 3U];
+                    if (name_length > DJONEHUB_OPERATOR_NAME_BYTES ||
+                        name_length != extension_length - 4U) return -1;
+                    result->snapshot.radio.operator_name_length = (uint8_t)name_length;
+                    if (name_length != 0U)
+                        memcpy(result->snapshot.radio.operator_name, payload + offset + 4U, name_length);
+                    result->snapshot.radio.operator_name[name_length] = '\0';
+                }
                 offset = extension_end;
             } else {
                 offset = extension_end;

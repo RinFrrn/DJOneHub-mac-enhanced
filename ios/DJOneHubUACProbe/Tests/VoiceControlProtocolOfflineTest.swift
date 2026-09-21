@@ -165,6 +165,9 @@ struct VoiceControlProtocolOfflineTest {
         }
         let radio = try radioReply([2, 0, 3, 1, 200, 8]).result?.radio
         precondition(radio?.dbm == -56 && radio?.networkType == "4G" && radio?.bars == 4)
+        let carrierBytes = Array("CMCC".utf8)
+        let carrierRadio = try radioReply([2, 0, 8, 1, 200, 8, 4] + carrierBytes).result?.radio
+        precondition(carrierRadio?.operatorName == "CMCC")
         let legacy = try radioReply([])
         precondition(legacy.result?.radio == nil)
         for invalid: [UInt8] in [[2,0,2,1,200], [2,0,3,1,0,8], [2,0,3,1,200,0],

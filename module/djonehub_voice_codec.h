@@ -7,6 +7,7 @@
 #define DJONEHUB_VOICE_MAX_CALLS 8U
 #define DJONEHUB_VOICE_MAX_NUMBER_BYTES 81U
 #define DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES 81U
+#define DJONEHUB_OPERATOR_NAME_BYTES 32U
 
 struct djonehub_voice_call {
     uint8_t id;
@@ -26,6 +27,8 @@ struct djonehub_radio_status {
     uint8_t valid;
     int8_t dbm;
     uint8_t technology; /* QMI NAS radio interface */
+    uint8_t operator_name_length;
+    char operator_name[DJONEHUB_OPERATOR_NAME_BYTES + 1U];
 };
 
 struct djonehub_voice_snapshot {

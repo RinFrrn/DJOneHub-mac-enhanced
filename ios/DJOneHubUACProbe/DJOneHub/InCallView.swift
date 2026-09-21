@@ -401,11 +401,16 @@ struct ModulePanelView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label(noDevice ? "未检测到模块" : lifecycle.phase.moduleStatusTitle,
-                              systemImage: noDevice ? "cable.connector" : lifecycle.phase.systemImage)
-                            .font(.title3.weight(.semibold))
-                        Text(connectionDescription)
-                            .font(.subheadline).foregroundStyle(.secondary)
+                        ModuleAccessoryButton(
+                            onOpen: nil,
+                            compact: true,
+                            showsStatusLabels: true
+                        )
+                        if lifecycle.phase != .ready {
+                            Text(connectionDescription)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         if case .recovering = lifecycle.phase {
                             HStack {
                                 Button("重新检查") {
@@ -420,37 +425,40 @@ struct ModulePanelView: View {
                     }
                     .padding(.vertical, 4)
                     .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
-                    
-                    Button {
-                        voiceControl.refreshStatus()
-                    } label: {
-                        Label("刷新模块状态", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(noDevice || !voiceControl.isConfigured || voiceControl.isBusy || !voiceControl.calls.isEmpty)
+                } header: {
+                    Text("模块状态")
                 }
                 Section {
                     Toggle(isOn: $automaticCallRecordingEnabled) {
-                        Label(
-                            "自动录音",
-                            systemImage: automaticCallRecordingEnabled
-                                ? "record.circle.fill"
-                                : "record.circle"
-                        )
-                        .symbolRenderingMode(.hierarchical)
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("自动录音")
+                                Text("通话接通后自动录制，仅保存在本机")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: automaticCallRecordingEnabled
+                                  ? "record.circle.fill" : "record.circle")
+                                .symbolRenderingMode(.hierarchical)
+                        }
                     }
                     .accessibilityHint("开启后，每次电话接通时自动开始本地录音")
-                } header: {
-                    Text("通话")
-                } footer: {
-                    Text("电话接通并建立媒体链路后自动开始录音；录音仅保存在本机。")
-                }
-                Section {
                     if let enabled = voiceControl.moduleInternetEnabled {
                         Toggle(isOn: Binding(
                             get: { voiceControl.moduleInternetEnabled ?? enabled },
                             set: { voiceControl.setModuleInternetEnabled($0) }
                         )) {
-                            Label("使用模块流量上网", systemImage: "network")
+                            Label {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("使用模块流量上网")
+                                    Text("关闭不影响电话、短信及模块提醒")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "network")
+                            }
                         }
                         .disabled(noDevice || !voiceControl.canControlCalls || voiceControl.isBusy || !voiceControl.calls.isEmpty)
                     } else {
@@ -460,14 +468,21 @@ struct ModulePanelView: View {
                     if let error = voiceControl.internetChangeError {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
-                } footer: {
-                    Text("关闭上网仍可使用模块电话和短信。")
+                } header: {
+                    Text("功能")
                 }
                 Section {
                     NavigationLink(value: Page.notifications) {
                         ModuleNotificationSummaryRow(pairingKey: voiceControl.pairingKeyForUplinkProbe(),
                                                      connected: voiceControl.shouldPollStatus && !noDevice)
                     }
+                    NavigationLink {
+                        AppRingtoneSettingsView()
+                    } label: {
+                        Label("来电铃声", systemImage: "speaker.wave.2")
+                    }
+                } header: {
+                    Text("提醒与声音")
                 } footer: {
                     Text("App 未运行时，由模块独立发送提醒")
                 }
@@ -477,12 +492,25 @@ struct ModulePanelView: View {
                             Label("通话录音", systemImage: "waveform")
                         }
                     }
+                }
+                Section {
                     NavigationLink(value: Page.settings) {
-                        Label("模块设置", systemImage: "gearshape")
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("连接与配对")
+                                Text("查看模块身份，管理本机配对")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "link")
+                        }
                     }
                     NavigationLink(value: Page.diagnostics) {
                         Label("连接诊断", systemImage: "list.bullet.rectangle")
                     }
+                } header: {
+                    Text("模块管理")
                 }
             }
             .navigationTitle("模块")
@@ -512,19 +540,14 @@ struct ModulePanelView: View {
             .onChange(of: callAudio.lastRecordingURL) { _, _ in reloadRecordings() }
             .onDisappear { recordingPlayer.stop() }
             .fullScreenCover(isPresented: $isShowingCallPreview) { CallScreenPreview() }
+            .refreshable {
+                guard !noDevice, voiceControl.isConfigured, !voiceControl.isBusy,
+                      voiceControl.calls.isEmpty else { return }
+                voiceControl.refreshStatus()
+            }
         }
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            ModuleAccessoryButton(
-                onOpen: { if !path.isEmpty { path.removeAll() } },
-                compact: true
-            )
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.bar)
-        }
         .onAppear {
             if !voiceControl.isConfigured, network.noWiredInterface == false { path = [.settings] }
             if !path.isEmpty || dynamicTypeSize.isAccessibilitySize { detent = .large }
@@ -547,10 +570,7 @@ struct ModulePanelView: View {
 
     private var moduleSettingsPage: some View {
         List {
-            Section {
-                NavigationLink("App 来电铃声") { AppRingtoneSettingsView() }
-            }
-            Section("模块") {
+            Section("当前模块") {
                 Label(lifecycle.phase.title, systemImage: lifecycle.phase.systemImage)
                 if let identifier = voiceControl.moduleIdentifier {
                     LabeledContent("模块", value: String(identifier.prefix(8)))
@@ -571,7 +591,7 @@ struct ModulePanelView: View {
             }
 
         }
-        .navigationTitle("模块设置")
+        .navigationTitle("连接与配对")
         .navigationBarTitleDisplayMode(.inline)
     }
 

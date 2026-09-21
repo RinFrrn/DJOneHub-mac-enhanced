@@ -519,6 +519,7 @@ struct ModuleNotificationStatusIcon: View {
     @Environment(\.scenePhase) private var scenePhase
     let pairingKey: Data?
     let connected: Bool
+    var label: String? = nil
     @State private var enabled: Bool?
     @State private var detail = "模块提醒状态未知"
     @State private var revision = 0
@@ -529,7 +530,12 @@ struct ModuleNotificationStatusIcon: View {
     }
 
     var body: some View {
-        Image(systemName: enabled == true ? "bell.badge" : enabled == false ? "bell.slash" : "bell")
+        HStack(spacing: 4) {
+            Image(systemName: enabled == true ? "bell.badge" : enabled == false ? "bell.slash" : "bell")
+            if let label {
+                Text(label)
+            }
+        }
             .foregroundStyle(enabled == true ? Color.accentColor : Color.secondary)
             .opacity(enabled == nil ? 0.4 : 1)
             .accessibilityLabel(detail)
