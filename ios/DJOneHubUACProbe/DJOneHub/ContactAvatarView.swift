@@ -13,11 +13,15 @@ struct ContactAvatarView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                Text(initials)
-                    .font(font ?? .system(size: size * 0.4, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: size, height: size)
-                    .background(avatarGradient, in: Circle())
+                Image(systemName: "circle.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(avatarColor)
+                    .overlay {
+                        Text(initials)
+                            .font(font ?? .system(size: size * 0.4, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
             }
         }
         .frame(width: size, height: size)
@@ -37,17 +41,11 @@ struct ContactAvatarView: View {
         return String(trimmed.prefix(1)).uppercased()
     }
 
-    private var avatarGradient: LinearGradient {
+    private var avatarColor: Color {
         let colors: [Color] = [
             .blue, .purple, .pink, .orange, .green, .teal, .indigo, .red
         ]
-        let index = abs(name.hashValue) % colors.count
-        let base = colors[index]
-        return LinearGradient(
-            colors: [base, base.opacity(0.7)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        return colors[abs(name.hashValue) % colors.count]
     }
 }
 
