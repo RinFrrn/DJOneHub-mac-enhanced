@@ -50,7 +50,7 @@ struct ContactAvatarView: View {
 
     private var avatarGradient: LinearGradient {
         LinearGradient(
-            colors: [Color(white: 0.9), Color(white: 0.75)],
+            colors: [Color(white: 0.8), Color(white: 0.75)],
             startPoint: .top,
             endPoint: .bottom
         )

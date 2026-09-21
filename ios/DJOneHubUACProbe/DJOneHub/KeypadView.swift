@@ -40,7 +40,7 @@ private struct AdaptiveModuleAccessory: View {
     let onOpen: () -> Void
 
     var body: some View {
-        ModuleAccessoryButton(onOpen: onOpen, compact: placement == .inline)
+        ModuleAccessoryButton(onOpen: onOpen)
     }
 }
 

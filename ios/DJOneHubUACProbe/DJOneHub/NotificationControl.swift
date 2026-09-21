@@ -529,7 +529,7 @@ struct ModuleNotificationStatusIcon: View {
     }
 
     var body: some View {
-        Image(systemName: enabled == true ? "bell.badge.fill" : enabled == false ? "bell.slash" : "bell")
+        Image(systemName: enabled == true ? "bell.badge" : enabled == false ? "bell.slash" : "bell")
             .foregroundStyle(enabled == true ? Color.accentColor : Color.secondary)
             .opacity(enabled == nil ? 0.4 : 1)
             .accessibilityLabel(detail)
