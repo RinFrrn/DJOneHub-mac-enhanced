@@ -748,6 +748,7 @@ private struct AuthorizationInvitationDocument: FileDocument {
 }
 
 private struct ModuleAuthorizationSettingsView: View {
+    @EnvironmentObject private var voiceControl: VoiceControlModel
     @State private var model = ModuleAuthorizationModel()
     @State private var isImporting = false
     @State private var isExportingRecovery = false
@@ -872,7 +873,17 @@ private struct ModuleAuthorizationSettingsView: View {
                 let status = try await model.commit(moduleID: moduleID)
                 authorizedDeviceCount = status.devices.count
                 pendingModuleID = nil
-                message = "此 iPhone 已获得无固定到期时间的模块管理授权。"
+                do {
+                    let session = try await model.voiceSession(moduleID: moduleID)
+                    guard let sessionKey = AuthorizationSecret.decode(session.credential) else {
+                        throw ModuleAuthorizationError.invalidData
+                    }
+                    voiceControl.configure(pairingKey: sessionKey)
+                    message = "长期授权已启用，电话控制已切换到 15 分钟短期会话；旧配对密钥暂时保留为回退。"
+                } catch {
+                    message = "长期授权已启用；短期电话会话暂时不可用，当前继续使用旧配对密钥。"
+                    errorMessage = error.localizedDescription
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }

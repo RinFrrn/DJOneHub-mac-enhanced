@@ -77,7 +77,10 @@ func (s *Store) TLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
-type Server struct{ Store *Store }
+type Server struct {
+	Store    *Store
+	Sessions *SessionRegistry
+}
 
 // Serve accepts a prebound USB listener so deployment cannot accidentally use
 // a wildcard address. Tests use the handler separately with an ephemeral port.
@@ -201,12 +204,22 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				result, err = s.Store.Status(authority)
 			}
 		}
+	case "/v1/session":
+		var empty struct{}
+		if err = decode(&empty); err == nil {
+			if _, err = s.Store.Status(authority); err == nil {
+				result, err = s.Sessions.Issue(time.Now())
+			}
+		}
 	case "/v1/revoke":
 		var request struct {
 			DeviceID string `json:"device_id"`
 		}
 		if err = decode(&request); err == nil {
 			result, err = s.Store.Revoke(authority, request.DeviceID)
+			if err == nil {
+				err = s.Sessions.Clear()
+			}
 		}
 	case "/v1/cancel":
 		var empty struct{}

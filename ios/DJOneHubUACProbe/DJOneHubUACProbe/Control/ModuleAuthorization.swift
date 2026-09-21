@@ -107,16 +107,29 @@ enum AuthorizationSecret {
     }
 
     static func isValid(_ value: String) -> Bool {
+        guard let bytes = decode(value) else { return false }
+        return encode(bytes) == value
+    }
+
+    static func decode(_ value: String) -> Data? {
         guard value.utf8.count == 43,
               let bytes = Data(base64Encoded: value.replacingOccurrences(of: "-", with: "+")
-                .replacingOccurrences(of: "_", with: "/") + "="), bytes.count == 32 else { return false }
-        return encode(bytes) == value
+                .replacingOccurrences(of: "_", with: "/") + "="), bytes.count == 32 else { return nil }
+        return bytes
     }
 
     private static func encode(_ data: Data) -> String {
         data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
+}
+
+struct ModuleVoiceSession: Codable, Sendable {
+    let version: Int
+    let scope: String
+    let credential: String
+    let expiresAt: Int64
+    enum CodingKeys: String, CodingKey { case version, scope, credential; case expiresAt = "expires_at" }
 }
 
 struct AuthorizedModuleDevice: Codable, Sendable {

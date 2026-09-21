@@ -360,6 +360,7 @@ voice="$base/qdc507_voice.ko"
 incall_card="$base/qdc507_incall_card.ko"
 prepare_card="$base/prepare-incall-card.sh"
 key="$base/pairing.key"
+session_file=/run/djonehub/voice-sessions.v1
 once_marker="$base/run-status-once"
 session_marker="$base/run-control-session"
 state="$base/last-start.state"
@@ -501,7 +502,7 @@ remove_ephemeral_key() {
                 sms_pid=$!
                 printf '%s\n' "$sms_pid" >"$sms_pidfile"
             fi
-            LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" >>"$log" 2>&1 &
+            LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" --session-file "$session_file" >>"$log" 2>&1 &
             daemon_pid=$!
             printf '%s\n' "$daemon_pid" >"$pidfile"
             ready=0

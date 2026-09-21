@@ -194,6 +194,20 @@ final class ModuleAuthorizationModel {
         return status
     }
 
+    func voiceSession(moduleID: String) async throws -> ModuleVoiceSession {
+        guard let record = try store.load(moduleID: moduleID), let active = record.active else {
+            throw ModuleAuthorizationError.unauthorized
+        }
+        let session = try await ModuleAuthorizationTransport(identity: record.identity).request(
+            "session", credential: active.credential, body: EmptyAuthorizationRequest(), response: ModuleVoiceSession.self
+        )
+        guard session.version == 1, session.scope == "voice-control",
+              session.expiresAt > Int64(Date().timeIntervalSince1970),
+              session.expiresAt <= Int64(Date().addingTimeInterval(16 * 60).timeIntervalSince1970),
+              AuthorizationSecret.isValid(session.credential) else { throw ModuleAuthorizationError.invalidData }
+        return session
+    }
+
     func cancelPending(moduleID: String) async throws {
         guard !isBusy else { throw ModuleAuthorizationError.pendingChange }
         isBusy = true

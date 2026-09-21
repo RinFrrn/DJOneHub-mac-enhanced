@@ -56,7 +56,8 @@ func run() (runErr error) {
 	monitor := flag.String("monitor", "/usrdata/djonehub/notify/djonehub-notify-monitor.armv7", "read-only QMI monitor executable")
 	controlAddress := flag.String("control-address", "192.168.225.1:45753", "authenticated iOS configuration listener")
 	pairingKey := flag.String("pairing-key", "/usrdata/djonehub/voice-test/pairing.key", "existing module control pairing key")
-	pairingRegistry := flag.String("experimental-pairing-registry", "", "opt-in TLS authorization registry; does not migrate legacy call/media authorization")
+	pairingRegistry := flag.String("experimental-pairing-registry", "", "opt-in TLS authorization registry with short-lived voice sessions")
+	voiceSessions := flag.String("voice-sessions", "/run/djonehub/voice-sessions.v1", "volatile voice-control session registry")
 	flag.Parse()
 	if *logFile != "" {
 		if err := os.MkdirAll(filepath.Dir(*logFile), 0700); err != nil {
@@ -187,7 +188,11 @@ func run() (runErr error) {
 		managedContext, cancel := context.WithCancel(ctx)
 		defer cancel()
 		results := make(chan error, 2)
-		go func() { results <- (modulepairing.Server{Store: store}).Serve(managedContext, listener) }()
+		sessions := &modulepairing.SessionRegistry{Path: *voiceSessions}
+		_ = sessions.Clear()
+		go func() {
+			results <- (modulepairing.Server{Store: store, Sessions: sessions}).Serve(managedContext, listener)
+		}()
 		go func() {
 			results <- serveManaged(managedContext, sender, *monitor, *statePath, *controlAddress, *pairingKey, *configPath)
 		}()

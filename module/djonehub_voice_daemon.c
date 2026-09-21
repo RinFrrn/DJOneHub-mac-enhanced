@@ -29,6 +29,7 @@ __asm__(".symver fcntl,fcntl@GLIBC_2.4");
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "djonehub_control_protocol.h"
@@ -43,6 +44,7 @@ __asm__(".symver fcntl,fcntl@GLIBC_2.4");
 #define CONTROL_TIMEOUT_SECONDS 5
 #define RANDOM_DEVICE "/dev/urandom"
 #define DEFAULT_KEY_FILE "/usrdata/djonehub/pairing.key"
+#define DEFAULT_SESSION_FILE "/run/djonehub/voice-sessions.v1"
 #define VOICE_AUDIO_ENABLE_PATH "/sys/class/android_usb/f_audio/audio_enable"
 
 static volatile sig_atomic_t stop_requested;
@@ -183,6 +185,39 @@ static int valid_key_owner(const char *path)
         return 0;
     }
     return 1;
+}
+
+static int load_voice_session(const char *path,
+                              uint8_t key[DJONEHUB_PAIRING_KEY_BYTES])
+{
+    uint8_t data[48];
+    struct stat attributes;
+    uint64_t expires = 0U;
+    size_t offset = 0U;
+    int descriptor;
+    unsigned int index;
+
+    descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0 || fstat(descriptor, &attributes) != 0 ||
+        !S_ISREG(attributes.st_mode) || attributes.st_uid != 0U ||
+        (attributes.st_mode & 0077) != 0 || attributes.st_size != (off_t)sizeof(data)) {
+        if (descriptor >= 0) (void)close(descriptor);
+        return -1;
+    }
+    while (offset < sizeof(data)) {
+        ssize_t count = read(descriptor, data + offset, sizeof(data) - offset);
+        if (count > 0) offset += (size_t)count;
+        else if (count < 0 && errno == EINTR) continue;
+        else { (void)close(descriptor); return -1; }
+    }
+    (void)close(descriptor);
+    if (memcmp(data, "DJVS", 4U) != 0 || data[4] != 1U || data[5] != 1U ||
+        data[6] != 0U || data[7] != 0U) return -1;
+    for (index = 0U; index < 8U; ++index) expires = (expires << 8U) | data[8U + index];
+    if (expires <= (uint64_t)time(NULL)) return -1;
+    memcpy(key, data + 16U, DJONEHUB_PAIRING_KEY_BYTES);
+    memset(data, 0, sizeof(data));
+    return 0;
 }
 
 static int peer_is_usb_host(const struct sockaddr_in *peer)
@@ -413,6 +448,7 @@ static enum djonehub_control_status execute_usb_audio_request(
 
 static int handle_client(int descriptor,
                          const uint8_t key[DJONEHUB_PAIRING_KEY_BYTES],
+                         const char *session_file,
                          int status_only)
 {
     uint8_t nonce[DJONEHUB_CONTROL_NONCE_BYTES];
@@ -424,6 +460,8 @@ static int handle_client(int descriptor,
     enum djonehub_control_status status;
     size_t frame_length;
     uint16_t payload_length;
+    uint8_t session_key[DJONEHUB_PAIRING_KEY_BYTES];
+    const uint8_t *response_key = key;
 
     if (random_nonce(nonce) != 0) {
         return -1;
@@ -442,17 +480,24 @@ static int handle_client(int descriptor,
     frame_length = DJONEHUB_CONTROL_HEADER_BYTES + (size_t)payload_length +
                    DJONEHUB_CONTROL_TAG_BYTES;
     if (read_exact(descriptor, frame + DJONEHUB_CONTROL_HEADER_BYTES,
-                   frame_length - DJONEHUB_CONTROL_HEADER_BYTES) != 0 ||
-        djonehub_control_decode_request(key, nonce, frame, frame_length,
-                                        &request) != 0) {
+                   frame_length - DJONEHUB_CONTROL_HEADER_BYTES) != 0) {
         memset(nonce, 0, sizeof(nonce));
         return -1;
+    }
+    if (djonehub_control_decode_request(key, nonce, frame, frame_length, &request) != 0) {
+        if (load_voice_session(session_file, session_key) != 0 ||
+            djonehub_control_decode_request(session_key, nonce, frame, frame_length, &request) != 0) {
+            memset(session_key, 0, sizeof(session_key));
+            memset(nonce, 0, sizeof(nonce));
+            return -1;
+        }
+        response_key = session_key;
     }
     memset(&control_result, 0, sizeof(control_result));
     if (!djonehub_voice_daemon_operation_allowed(
             status_only, request.operation == DJONEHUB_VOICE_STATUS)) {
         frame_length = djonehub_control_encode_response(
-            key, nonce, DJONEHUB_CONTROL_FORBIDDEN, request.request_id, NULL,
+            response_key, nonce, DJONEHUB_CONTROL_FORBIDDEN, request.request_id, NULL,
             frame, sizeof(frame));
         memset(nonce, 0, sizeof(nonce));
         if (frame_length == 0U ||
@@ -484,11 +529,11 @@ static int handle_client(int descriptor,
         }
         if (status == DJONEHUB_CONTROL_OK) {
             frame_length = djonehub_control_encode_response(
-                key, nonce, status, request.request_id, &control_result, frame,
+                response_key, nonce, status, request.request_id, &control_result, frame,
                 sizeof(frame));
         } else {
             frame_length = djonehub_control_encode_response(
-                key, nonce, status, request.request_id, NULL, frame,
+                response_key, nonce, status, request.request_id, NULL, frame,
                 sizeof(frame));
         }
         memset(nonce, 0, sizeof(nonce));
@@ -508,7 +553,7 @@ static int handle_client(int descriptor,
         control_result.snapshot.radio = djonehub_radio_current();
         control_result.snapshot.internet_state = djonehub_internet_state();
         frame_length = djonehub_control_encode_response(
-            key, nonce, status, request.request_id, &control_result, frame,
+            response_key, nonce, status, request.request_id, &control_result, frame,
             sizeof(frame));
     } else {
         status = map_engine_error(qmi_error);
@@ -517,7 +562,7 @@ static int handle_client(int descriptor,
                     djonehub_qmi_voice_error_name(qmi_error),
                     qmi_result.transport_error, qmi_result.service_error);
         frame_length = djonehub_control_encode_response(
-            key, nonce, status, request.request_id, NULL, frame,
+            response_key, nonce, status, request.request_id, NULL, frame,
             sizeof(frame));
     }
     memset(nonce, 0, sizeof(nonce));
@@ -528,11 +573,13 @@ static int handle_client(int descriptor,
 }
 
 static int parse_arguments(int argc, char **argv, const char **key_file,
+                           const char **session_file,
                            int *once, int *status_only)
 {
     int index;
 
     *key_file = DEFAULT_KEY_FILE;
+    *session_file = DEFAULT_SESSION_FILE;
     *once = 0;
     *status_only = 0;
     for (index = 1; index < argc; ++index) {
@@ -543,6 +590,8 @@ static int parse_arguments(int argc, char **argv, const char **key_file,
         } else if (strcmp(argv[index], "--key-file") == 0 &&
                    index + 1 < argc) {
             *key_file = argv[++index];
+        } else if (strcmp(argv[index], "--session-file") == 0 && index + 1 < argc) {
+            *session_file = argv[++index];
         } else {
             return -1;
         }
@@ -554,14 +603,15 @@ int main(int argc, char **argv)
 {
     uint8_t key[DJONEHUB_PAIRING_KEY_BYTES];
     const char *key_file;
+    const char *session_file;
     int once;
     int status_only;
     int listener;
     int exit_status = EXIT_SUCCESS;
 
-    if (parse_arguments(argc, argv, &key_file, &once, &status_only) != 0) {
+    if (parse_arguments(argc, argv, &key_file, &session_file, &once, &status_only) != 0) {
         daemon_logf("usage: djonehub-voice-daemon [--once] [--status-only] "
-                    "[--key-file PATH]");
+                    "[--key-file PATH] [--session-file PATH]");
         return EXIT_FAILURE;
     }
     if (!valid_key_owner(key_file) ||
@@ -602,7 +652,7 @@ int main(int argc, char **argv)
         if (peer_length == (socklen_t)sizeof(peer) &&
             peer.sin_family == AF_INET && peer_is_usb_host(&peer) &&
             configure_client(client) == 0) {
-            if (handle_client(client, key, status_only) == 0) {
+            if (handle_client(client, key, session_file, status_only) == 0) {
                 outcome = DJONEHUB_DAEMON_AUTHENTICATED_RESPONSE_SENT;
             }
         }

@@ -398,3 +398,28 @@ func TestHTTPRejectsCleartextMalformedAndLeakedTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPSIssuesSessionOnlyToAuthorizedPhone(t *testing.T) {
+	store, invite, _, now := fixture(t)
+	owner, _ := enroll(t, store, invite, now)
+	path := filepath.Join(t.TempDir(), "voice-sessions.v1")
+	server := Server{Store: store, Sessions: &SessionRegistry{Path: path}}
+	for _, test := range []struct {
+		credential string
+		code       int
+	}{
+		{secret(t), http.StatusUnauthorized}, {owner, http.StatusOK},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/v1/session", strings.NewReader("{}"))
+		request.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
+		request.Header.Set("Authorization", "Bearer "+test.credential)
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		if response.Code != test.code {
+			t.Fatalf("got %d want %d", response.Code, test.code)
+		}
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("session was not securely persisted")
+	}
+}
