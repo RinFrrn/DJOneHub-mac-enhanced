@@ -497,6 +497,9 @@ struct ModulePanelView: View {
 
     private var moduleSettingsPage: some View {
         List {
+            Section {
+                NavigationLink("App 来电铃声") { AppRingtoneSettingsView() }
+            }
             Section("模块") {
                 Label(lifecycle.phase.title, systemImage: lifecycle.phase.systemImage)
                 if let identifier = voiceControl.moduleIdentifier {

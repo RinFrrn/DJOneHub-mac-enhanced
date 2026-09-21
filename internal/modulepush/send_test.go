@@ -271,3 +271,38 @@ func TestPrivateConfigAndDurableState(t *testing.T) {
 		}
 	}
 }
+
+func TestBarkRoutesAndRingtones(t *testing.T) {
+	for _, tc := range []struct{ kind, route, sound string }{
+		{"call", "calls", "自定义来电"}, {"sms", "messages", "alarm"}, {"test", "module", ""},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var p map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+					t.Fatal(err)
+				}
+				if p["url"] != "djonehub://"+tc.route {
+					t.Errorf("wrong route: %v", p["url"])
+				}
+				if tc.sound == "" {
+					if _, ok := p["sound"]; ok {
+						t.Error("default sound must be omitted")
+					}
+				} else if p["sound"] != tc.sound {
+					t.Errorf("wrong sound: %v", p["sound"])
+				}
+				if tc.kind != "call" && p["call"] != nil {
+					t.Error("only calls should loop")
+				}
+				io.WriteString(w, `{"code":200}`)
+			}))
+			defer server.Close()
+			sender := NewSender(Config{BarkURL: server.URL + "/secret", BarkCallSound: true, BarkCallRingtone: "自定义来电", BarkSMSRingtone: "alarm"})
+			sender.Client.Transport = server.Client().Transport
+			if result := sender.Send(context.Background(), Delivery{Kind: tc.kind, Transport: "bark", Expires: time.Now().Add(time.Minute)}); result.Err != nil {
+				t.Fatal(result.Err)
+			}
+		})
+	}
+}

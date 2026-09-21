@@ -12,15 +12,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
 type Config struct {
-	Version       int    `json:"version"`
-	BarkURL       string `json:"bark_url,omitempty"`
-	BarkCallSound bool   `json:"bark_call_sound"`
-	Privacy       struct {
+	BarkCallRingtone string `json:"bark_call_ringtone,omitempty"`
+	BarkSMSRingtone  string `json:"bark_sms_ringtone,omitempty"`
+	Version          int    `json:"version"`
+	BarkURL          string `json:"bark_url,omitempty"`
+	BarkCallSound    bool   `json:"bark_call_sound"`
+	Privacy          struct {
 		ShowCallNumber bool `json:"show_call_number"`
 		ShowSMSBody    bool `json:"show_sms_body"`
 	} `json:"privacy"`
@@ -54,6 +57,11 @@ func HTTPSURL(raw string) bool {
 }
 
 func (c Config) Validate() error {
+	for _, sound := range []string{c.BarkCallRingtone, c.BarkSMSRingtone} {
+		if len(sound) > 128 || strings.ContainsAny(sound, "/\\") || strings.IndexFunc(sound, unicode.IsControl) >= 0 {
+			return errors.New("invalid Bark sound name")
+		}
+	}
 	if c.Version != 1 {
 		return errors.New("unsupported configuration version")
 	}

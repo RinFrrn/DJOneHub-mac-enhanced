@@ -27,6 +27,8 @@ private struct ModuleNotificationStatus: Decodable, Sendable {
     let barkConfigured: Bool
     let barkHost: String?
     let barkCallSound: Bool
+    var barkCallRingtone: String? = nil
+    var barkSMSRingtone: String? = nil
     let showCallNumber: Bool
     let showSMSBody: Bool
     let webPushConfigured: Bool
@@ -39,6 +41,8 @@ private struct ModuleNotificationStatus: Decodable, Sendable {
         case barkConfigured = "bark_configured"
         case barkHost = "bark_host"
         case barkCallSound = "bark_call_sound"
+        case barkCallRingtone = "bark_call_ringtone"
+        case barkSMSRingtone = "bark_sms_ringtone"
         case showCallNumber = "show_call_number"
         case showSMSBody = "show_sms_body"
         case webPushConfigured = "web_push_configured"
@@ -52,6 +56,8 @@ private struct ModuleNotificationSettings: Encodable, Sendable {
     let barkURL: String?
     let clearBark: Bool
     let barkCallSound: Bool
+    var barkCallRingtone: String? = nil
+    var barkSMSRingtone: String? = nil
     let showCallNumber: Bool
     let showSMSBody: Bool
 
@@ -59,6 +65,8 @@ private struct ModuleNotificationSettings: Encodable, Sendable {
         case barkURL = "bark_url"
         case clearBark = "clear_bark"
         case barkCallSound = "bark_call_sound"
+        case barkCallRingtone = "bark_call_ringtone"
+        case barkSMSRingtone = "bark_sms_ringtone"
         case showCallNumber = "show_call_number"
         case showSMSBody = "show_sms_body"
     }
@@ -294,6 +302,8 @@ private actor NotificationControlClient {
 private final class NotificationControlModel: ObservableObject {
     @Published var barkURL = ""
     @Published var barkCallSound = true
+    @Published var barkCallRingtone = ""
+    @Published var barkSMSRingtone = ""
     @Published var showCallNumber = false
     @Published var showSMSBody = false
     @Published private(set) var status: ModuleNotificationStatus?
@@ -306,6 +316,8 @@ private final class NotificationControlModel: ObservableObject {
         await MainActor.run {
             self.status = status
             self.barkCallSound = status.barkCallSound
+            self.barkCallRingtone = status.barkCallRingtone ?? ""
+            self.barkSMSRingtone = status.barkSMSRingtone ?? ""
             self.showCallNumber = status.showCallNumber
             self.showSMSBody = status.showSMSBody
             self.stateText = "已连接模块提醒服务"
@@ -327,6 +339,8 @@ private final class NotificationControlModel: ObservableObject {
             barkURL: replacement,
             clearBark: false,
             barkCallSound: barkCallSound,
+            barkCallRingtone: status?.barkCallRingtone == nil ? nil : barkCallRingtone,
+            barkSMSRingtone: status?.barkSMSRingtone == nil ? nil : barkSMSRingtone,
             showCallNumber: showCallNumber,
             showSMSBody: showSMSBody
         )
@@ -365,6 +379,8 @@ private final class NotificationControlModel: ObservableObject {
     func disableBark(pairingKey: Data?) {
         let settings = ModuleNotificationSettings(
             barkURL: nil, clearBark: true, barkCallSound: barkCallSound,
+            barkCallRingtone: status?.barkCallRingtone == nil ? nil : barkCallRingtone,
+            barkSMSRingtone: status?.barkSMSRingtone == nil ? nil : barkSMSRingtone,
             showCallNumber: showCallNumber, showSMSBody: showSMSBody
         )
         run(pairingKey: pairingKey, progress: "正在停用 Bark…") { client in
@@ -425,11 +441,13 @@ private final class NotificationControlModel: ObservableObject {
         }
     }
 
-    private func savePreferences(pairingKey: Data?, onFailure: @escaping () -> Void) {
+    func savePreferences(pairingKey: Data?, onFailure: @escaping () -> Void = {}) {
         let settings = ModuleNotificationSettings(
             barkURL: nil,
             clearBark: false,
             barkCallSound: barkCallSound,
+            barkCallRingtone: status?.barkCallRingtone == nil ? nil : barkCallRingtone,
+            barkSMSRingtone: status?.barkSMSRingtone == nil ? nil : barkSMSRingtone,
             showCallNumber: showCallNumber,
             showSMSBody: showSMSBody
         )
@@ -884,6 +902,28 @@ private struct BarkSetupView: View {
                     Button("发送测试提醒") { model.testBark(pairingKey: pairingKey) }
                         .disabled(model.isBusy)
                 }
+
+                Section {
+                    Menu("选择常用来电铃声", systemImage: "bell.badge") {
+                        Button("Bark 默认") { model.barkCallRingtone = "" }
+                        ForEach(["alarm", "bell", "electronic", "minuet"], id: \.self) { sound in
+                            Button(sound) { model.barkCallRingtone = sound }
+                        }
+                    }
+                    TextField("来电铃声（留空使用 Bark 默认）", text: $model.barkCallRingtone)
+                    TextField("短信铃声（留空使用 Bark 默认）", text: $model.barkSMSRingtone)
+                    Button("保存铃声") { model.savePreferences(pairingKey: pairingKey) }
+                } header: {
+                    Text("通知铃声")
+                    if model.status?.barkCallRingtone == nil {
+                        Text("需先更新模块提醒服务以启用铃声设置和通知跳转")
+                    }
+                } footer: {
+                    Text("填写 Bark 铃声名称，例如 alarm。自定义音频请先导入 Bark，再填写其中显示的名称。点按来电或短信通知会打开 DJOneHub 对应页面。")
+                }
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(model.isBusy || model.status?.barkCallRingtone == nil)
 
                 Section {
                     Button("停用 Bark", role: .destructive) { isConfirmingDisable = true }

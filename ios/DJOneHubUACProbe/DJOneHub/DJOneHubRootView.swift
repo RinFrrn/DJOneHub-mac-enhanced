@@ -76,6 +76,19 @@ struct DJOneHubRootView: View {
             guard scenePhase == .active else { return }
             await runAutomaticSMSRefresh()
         }
+        .onOpenURL { url in
+            guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  parts.scheme?.lowercased() == "djonehub", parts.user == nil,
+                  parts.password == nil, parts.port == nil, parts.query == nil,
+                  parts.fragment == nil, parts.path.isEmpty || parts.path == "/" else { return }
+            switch parts.host?.lowercased() {
+            case "calls": isShowingSettings = false; selectedTab = .recents
+            case "messages": isShowingSettings = false; selectedTab = .messages; refreshSMS()
+            case "module": isShowingSettings = true
+            default: return
+            }
+            lifecycle.applicationDidBecomeActive()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .CNContactStoreDidChange)) { _ in
             contacts.loadIfAuthorized()
         }
@@ -89,7 +102,7 @@ struct DJOneHubRootView: View {
             switch newPhase {
             case .active: ConnectionLog.shared.append("App 已回到前台")
             case .inactive: ConnectionLog.shared.append("App 暂时不活跃（系统交互或前后台切换）")
-            case .background: ConnectionLog.shared.append("App 已进入后台（可能锁屏或切换 App）")
+            case .background: systemCalls.restoreBackgroundRingtone(); ConnectionLog.shared.append("App 已进入后台（可能锁屏或切换 App）")
             @unknown default: break
             }
             if newPhase == .active {

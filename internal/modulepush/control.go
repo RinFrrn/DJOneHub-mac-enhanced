@@ -59,14 +59,18 @@ const (
 )
 
 type ControlSettings struct {
-	BarkURL        *string `json:"bark_url,omitempty"`
-	ClearBark      bool    `json:"clear_bark,omitempty"`
-	BarkCallSound  bool    `json:"bark_call_sound"`
-	ShowCallNumber bool    `json:"show_call_number"`
-	ShowSMSBody    bool    `json:"show_sms_body"`
+	BarkCallRingtone *string `json:"bark_call_ringtone,omitempty"`
+	BarkSMSRingtone  *string `json:"bark_sms_ringtone,omitempty"`
+	BarkURL          *string `json:"bark_url,omitempty"`
+	ClearBark        bool    `json:"clear_bark,omitempty"`
+	BarkCallSound    bool    `json:"bark_call_sound"`
+	ShowCallNumber   bool    `json:"show_call_number"`
+	ShowSMSBody      bool    `json:"show_sms_body"`
 }
 
 type ControlStatus struct {
+	BarkCallRingtone  string `json:"bark_call_ringtone"`
+	BarkSMSRingtone   string `json:"bark_sms_ringtone"`
 	Version           int    `json:"version"`
 	BarkConfigured    bool   `json:"bark_configured"`
 	BarkHost          string `json:"bark_host,omitempty"`
@@ -217,6 +221,12 @@ func (s *ControlServer) perform(operation ControlOperation, payload []byte) (Con
 			config.BarkURL = strings.TrimRight(strings.TrimSpace(*settings.BarkURL), "/")
 		}
 		config.BarkCallSound = settings.BarkCallSound
+		if settings.BarkCallRingtone != nil {
+			config.BarkCallRingtone = strings.TrimSpace(*settings.BarkCallRingtone)
+		}
+		if settings.BarkSMSRingtone != nil {
+			config.BarkSMSRingtone = strings.TrimSpace(*settings.BarkSMSRingtone)
+		}
 		config.Privacy.ShowCallNumber = settings.ShowCallNumber
 		config.Privacy.ShowSMSBody = settings.ShowSMSBody
 		if err := config.Validate(); err != nil {
@@ -289,6 +299,7 @@ func (s *ControlServer) perform(operation ControlOperation, payload []byte) (Con
 func (s *ControlServer) status() ControlStatus {
 	config := s.Sender.ConfigSnapshot()
 	status := ControlStatus{
+		BarkCallRingtone: config.BarkCallRingtone, BarkSMSRingtone: config.BarkSMSRingtone,
 		Version: 1, BarkConfigured: config.BarkURL != "", BarkCallSound: config.BarkCallSound,
 		ShowCallNumber: config.Privacy.ShowCallNumber, ShowSMSBody: config.Privacy.ShowSMSBody,
 		WebPushConfigured: config.WebPush.Subscription != nil, WebPushPublicKey: config.WebPush.PublicKey,

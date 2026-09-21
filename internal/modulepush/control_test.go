@@ -116,3 +116,30 @@ func hmacEqual(left, right []byte) bool {
 	}
 	return difference == 0
 }
+
+func TestRingtoneSettingsPersistenceAndCompatibility(t *testing.T) {
+	control := ControlServer{ConfigPath: filepath.Join(t.TempDir(), "config.json"), Sender: NewSender(Config{Version: 1, BarkURL: "https://example.com/secret"})}
+	save := func(payload string, want ControlStatusCode) {
+		t.Helper()
+		if got, _ := control.perform(ControlSettingsOperation, []byte(payload)); got != want {
+			t.Fatalf("status %v, want %v", got, want)
+		}
+	}
+	save(`{"bark_call_ringtone":" alarm ","bark_sms_ringtone":"自定义","bark_call_sound":true}`, ControlOK)
+	save(`{"bark_call_sound":false}`, ControlOK)
+	var persisted Config
+	if err := ReadPrivateJSON(control.ConfigPath, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.BarkCallRingtone != "alarm" || persisted.BarkSMSRingtone != "自定义" || persisted.BarkURL != "https://example.com/secret" {
+		t.Fatal("old client lost preferences or credentials")
+	}
+	save(`{"bark_call_ringtone":"../invalid"}`, ControlInvalidConfiguration)
+	if control.status().BarkCallRingtone != "alarm" {
+		t.Fatal("invalid update changed state")
+	}
+	save(`{"bark_call_ringtone":"","bark_sms_ringtone":""}`, ControlOK)
+	if control.status().BarkCallRingtone != "" || control.status().BarkSMSRingtone != "" {
+		t.Fatal("cannot reset sounds")
+	}
+}

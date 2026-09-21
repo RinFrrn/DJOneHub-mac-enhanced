@@ -2,6 +2,8 @@ import AVFAudio
 import CallKit
 import Foundation
 import PushKit
+import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class SystemCallCoordinator: NSObject, ObservableObject {
@@ -43,6 +45,13 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
         confirmationTimeouts.values.forEach { $0.cancel() }
     }
 
+    func restoreBackgroundRingtone() {
+        AppRingtone.shared.stop()
+        let configuration = provider.configuration
+        configuration.ringtoneSound = nil
+        provider.configuration = configuration
+    }
+
     func start() {
         guard pushRegistry == nil else { return }
         let registry = PKPushRegistry(queue: .main)
@@ -53,6 +62,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     }
 
     func synchronize(with phase: ProductCallPhase) {
+        if case .incoming = phase {} else { AppRingtone.shared.stop() }
         switch phase {
         case .incoming(let callID):
             let call = voiceControl.calls.first { $0.id == callID }
@@ -80,6 +90,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     }
 
     func requestAnswer(callID: UInt8) {
+        AppRingtone.shared.stop()
         guard let uuid = uuidByCallID[callID] else {
             lifecycle.answer(callID: callID)
             return
@@ -92,6 +103,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     }
 
     func requestEnd(callID: UInt8) {
+        AppRingtone.shared.stop()
         guard let uuid = uuidByCallID[callID] else {
             lifecycle.end(callID: callID)
             return
@@ -169,6 +181,13 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
         if let presentation { presentationByCallID[callID] = presentation }
         if confirmed { confirm(callUUID) }
 
+        let configuration = provider.configuration
+        if UIApplication.shared.applicationState == .active, AppRingtone.shared.play(loop: true) {
+            configuration.ringtoneSound = "DialpadSounds/incoming-silence.wav"
+        } else {
+            configuration.ringtoneSound = nil
+        }
+        provider.configuration = configuration
         let update = makeCallUpdate(caller: caller, presentation: presentation)
         provider.reportNewIncomingCall(with: callUUID, update: update) { [weak self] error in
             Task { @MainActor in
@@ -177,6 +196,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
                     return
                 }
                 if let error {
+                    AppRingtone.shared.stop()
                     self.pushStateText = "CallKit 来电上报失败：\(error.localizedDescription)"
                     self.removeMapping(uuid: callUUID)
                 } else {
@@ -227,6 +247,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     }
 
     private func removeMapping(uuid: UUID) {
+        AppRingtone.shared.stop()
         confirmationTimeouts.removeValue(forKey: uuid)?.cancel()
         confirmedUUIDs.remove(uuid)
         answeredUUIDs.remove(uuid)
@@ -279,6 +300,7 @@ extension SystemCallCoordinator: @preconcurrency PKPushRegistryDelegate {
 
 extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
+        AppRingtone.shared.stop()
         if let callID = lifecycle.phase.callID {
             lifecycle.end(callID: callID)
         }
@@ -296,6 +318,7 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        AppRingtone.shared.stop()
         guard let callID = callIDByUUID[action.callUUID] else {
             action.fail()
             return
@@ -314,6 +337,7 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        AppRingtone.shared.stop()
         guard let callID = callIDByUUID[action.callUUID] else {
             action.fail()
             return
@@ -325,6 +349,7 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        AppRingtone.shared.stop(deactivateSession: false)
         isCallKitAudioActive = true
         lifecycle.systemCallAudioDidActivate()
     }
@@ -332,5 +357,129 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
         isCallKitAudioActive = false
         lifecycle.systemCallAudioDidDeactivate()
+    }
+}
+
+
+@MainActor
+final class AppRingtone: ObservableObject {
+    static let shared = AppRingtone()
+    @Published private(set) var name = UserDefaults.standard.string(forKey: "appRingtoneName") ?? "系统默认"
+    @Published var error: String?
+    private var player: AVAudioPlayer?
+    private var releaseTask: Task<Void, Never>?
+    private var ownsSession = false
+    private var isLooping = false
+    private var url: URL {
+        URL.libraryDirectory.appending(path: "Sounds/DJOneHub-imported.caf")
+    }
+    var hasCustom: Bool { FileManager.default.fileExists(atPath: url.path) }
+
+    func importAudio(_ result: Result<[URL], Error>) {
+        do {
+            guard let source = try result.get().first else { return }
+            let access = source.startAccessingSecurityScopedResource()
+            defer { if access { source.stopAccessingSecurityScopedResource() } }
+            let size = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size > 0, size <= 20 * 1024 * 1024 else {
+                throw CocoaError(.fileReadTooLarge)
+            }
+            let data = try Data(contentsOf: source)
+            let candidate = try AVAudioPlayer(data: data)
+            guard candidate.duration > 0, candidate.duration <= 30 else {
+                error = "请选择不超过 30 秒的音频"; return
+            }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // AVAudioPlayer detects the actual format from the file contents.
+            try data.write(to: url, options: .atomic)
+            name = source.deletingPathExtension().lastPathComponent
+            UserDefaults.standard.set(name, forKey: "appRingtoneName")
+            error = nil
+        } catch { self.error = "无法导入音频：\(error.localizedDescription)" }
+    }
+
+    @discardableResult
+    func play(loop: Bool) -> Bool {
+        stop()
+        guard hasCustom else { return false }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+            ownsSession = true
+            let sound = try AVAudioPlayer(contentsOf: url)
+            sound.numberOfLoops = loop ? -1 : 0
+            isLooping = loop
+            player = sound
+            guard sound.play() else { stop(); return false }
+            if !loop {
+                let duration = sound.duration
+                releaseTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(duration))
+                    guard !Task.isCancelled else { return }
+                    self?.stop()
+                }
+            }
+            return true
+        } catch { self.error = "铃声播放失败：\(error.localizedDescription)"; stop(); return false }
+    }
+
+    func stopPreview() {
+        if !isLooping { stop() }
+    }
+
+    func stop(deactivateSession: Bool = true) {
+        isLooping = false
+        releaseTask?.cancel(); releaseTask = nil
+        player?.stop(); player = nil
+        if ownsSession, deactivateSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+        ownsSession = false
+    }
+
+    func reset() {
+        stop()
+        do {
+            if hasCustom { try FileManager.default.removeItem(at: url) }
+            UserDefaults.standard.removeObject(forKey: "appRingtoneName")
+            name = "系统默认"
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct AppRingtoneSettingsView: View {
+    @ObservedObject private var ringtone = AppRingtone.shared
+    @EnvironmentObject private var lifecycle: CallLifecycleCoordinator
+    @State private var importing = false
+    private var canEdit: Bool {
+        switch lifecycle.phase {
+        case .incoming, .answering, .active, .placingCall, .dialing, .ending: false
+        default: true
+        }
+    }
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("当前铃声", value: ringtone.name)
+                Button("导入音频", systemImage: "square.and.arrow.down") { importing = true }
+                if ringtone.hasCustom {
+                    Button("试听", systemImage: "play.fill") { ringtone.play(loop: false) }
+                    Button("停止试听", systemImage: "stop.fill") { ringtone.stop() }
+                    Button("恢复系统默认", role: .destructive) { ringtone.reset() }
+                }
+            } footer: {
+                Text("导入不超过 30 秒、20 MB 的音频，支持 M4A、MP3、WAV 等。自定义铃声用于 App 在前台时的来电提醒，并遵循静音模式；锁屏及后台来电使用系统铃声。")
+            }
+            .disabled(!canEdit)
+            if let error = ringtone.error { Text(error).foregroundStyle(.red) }
+        }
+        .navigationTitle("App 来电铃声")
+        .navigationBarTitleDisplayMode(.inline)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
+            guard canEdit else { return }
+            ringtone.importAudio(result)
+        }
+        .onDisappear { ringtone.stopPreview() }
     }
 }

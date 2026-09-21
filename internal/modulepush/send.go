@@ -133,6 +133,19 @@ func (s *Sender) Send(ctx context.Context, d Delivery) Result {
 			return Result{Err: errors.New("Bark is not configured")}
 		}
 		payload := map[string]any{"title": title, "body": body, "group": "DJOneHub", "level": "active", "isArchive": 0}
+		payload["url"] = "djonehub://module"
+		switch d.Kind {
+		case "call":
+			payload["url"] = "djonehub://calls"
+			if config.BarkCallRingtone != "" {
+				payload["sound"] = config.BarkCallRingtone
+			}
+		case "sms":
+			payload["url"] = "djonehub://messages"
+			if config.BarkSMSRingtone != "" {
+				payload["sound"] = config.BarkSMSRingtone
+			}
+		}
 		if d.Kind == "call" {
 			payload["level"] = "timeSensitive"
 			if config.BarkCallSound {
