@@ -132,7 +132,7 @@ struct ContactDetailView: View {
                                         .textSelection(.enabled)
                                 }
                                 Spacer(minLength: 8)
-                                Image(systemName: "phone")
+                                Image(systemName: "phone.fill")
                                     .font(.body)
                                     .foregroundStyle(.tint)
                             }
@@ -140,7 +140,7 @@ struct ContactDetailView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
                         .accessibilityLabel("呼叫\(phone.displayLabel)，\(phone.number)")
                         .contextMenu {
                             Button("复制号码", systemImage: "doc.on.doc") {
@@ -324,38 +324,36 @@ private struct CallHistoryDetailRow: View {
                         Text(outcomeText)
                             .font(.body.weight(.semibold))
                             .foregroundStyle(statusColor)
-                        Spacer(minLength: 4)
-                        if entry.duration >= 1 {
-                            Text(phoneDurationText(entry.duration))
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if let number = entry.number {
-                            Text([phoneLabel, number].compactMap { $0 }.joined(separator: " · "))
+                            Text([phoneLabel].compactMap { $0 }.joined(separator: " · "))
                                 .font(.subheadline)
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .layoutPriority(1)
                         }
-                        Spacer(minLength: 4)
                         Text(callTimestampText(entry.startedAt))
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-
+                
+                Spacer(minLength: 8)
+                
+                if entry.duration >= 1 {
+                    Text(phoneDurationText(entry.duration))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                
                 if recording != nil {
                     Button {
                         expandedID = isExpanded ? nil : entry.id
                     } label: {
-                        Image(systemName: isExpanded ? "waveform.circle.fill" : "waveform.circle")
-                            .font(.title3)
+                        Image(systemName: "waveform.circle.fill")
+                            .font(.title)
                             .foregroundStyle(isExpanded ? Color.accentColor : Color.secondary)
-                            .frame(width: 34, height: 44)
-                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(isExpanded ? "收起通话录音" : "展开通话录音")
@@ -372,8 +370,8 @@ private struct CallHistoryDetailRow: View {
 
     private var directionIcon: String {
         switch entry.direction {
-        case .outgoing: return "phone.arrow.up.right"
-        case .incoming: return "phone.arrow.down.left"
+        case .outgoing: return "arrow.up.forward"
+        case .incoming: return "arrow.down.backward"
         }
     }
 

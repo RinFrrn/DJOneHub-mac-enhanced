@@ -92,42 +92,52 @@ private struct CallHistoryRow: View {
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
                         .foregroundStyle(isUnsuccessful ? .red : .primary)
-                    if let displayNumber {
-                        Text(displayNumber)
-                            .font(.subheadline)
-                            .foregroundStyle(isUnsuccessful ? .red.opacity(0.8) : .secondary)
-                            .lineLimit(1)
-                    } else {
-                        Text(outcomeText)
-                            .font(.subheadline)
+
+                    HStack(spacing: 5) {
+                        Image(systemName: outcomeIcon)
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(isUnsuccessful ? .red : .secondary)
-                            .lineLimit(1)
+                            .accessibilityLabel(outcomeText)
+//                        if let displayNumber {
+//                            Text(displayNumber)
+//                                .font(.subheadline)
+//                                .foregroundStyle(.secondary)
+//                                .lineLimit(1)
+//                        }
+                        if hasRecording {
+                            Image(systemName: "waveform")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("有通话录音")
+                        }
+                        if entry.duration >= 1 {
+                            Text(phoneDurationText(entry.duration))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(outcomeText)
+                                .font(.subheadline)
+                                .foregroundStyle(isUnsuccessful ? .red : .secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
 
                 Spacer(minLength: 6)
 
-                HStack(spacing: 6) {
-                    if hasRecording {
-                        Image(systemName: "waveform")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.tint)
-                            .accessibilityLabel("有通话录音")
-                    }
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(callTimestampText(entry.startedAt, relativeTo: context.date))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if entry.duration >= 1 {
-                            Text(phoneDurationText(entry.duration))
-                                .font(.footnote.monospacedDigit())
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
+                Text(callTimestampText(entry.startedAt, relativeTo: context.date))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             .contentShape(Rectangle())
             .padding(.vertical, 10)
+        }
+    }
+
+    private var outcomeIcon: String {
+        switch entry.direction {
+        case .outgoing: return "arrow.up.forward"
+        case .incoming: return "arrow.down.backward"
         }
     }
 
