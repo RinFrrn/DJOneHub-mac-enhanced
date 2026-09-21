@@ -71,7 +71,8 @@ struct ContactDetailView: View {
                         imageData: contact?.imageData,
                         name: displayName,
                         size: 64,
-                        font: .system(size: 26, weight: .semibold)
+                        font: .system(size: 26, weight: .semibold),
+                        isKnownContact: contact != nil
                     )
 
                     VStack(spacing: 3) {

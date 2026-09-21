@@ -5,6 +5,8 @@ struct ContactAvatarView: View {
     let name: String
     var size: CGFloat = 42
     var font: Font? = nil
+    /// 号码是否在通讯录里：在通讯录但没头像 → 名称首字符；不在通讯录 → 人像图标。
+    var isKnownContact: Bool = true
 
     var body: some View {
         Group {
@@ -12,16 +14,21 @@ struct ContactAvatarView: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-            } else {
+            } else if isKnownContact {
                 Image(systemName: "circle.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(avatarColor)
+                    .foregroundStyle(avatarGradient)
                     .overlay {
                         Text(initials)
                             .font(font ?? .system(size: size * 0.4, weight: .semibold))
                             .foregroundStyle(.white)
                     }
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(avatarGradient)
             }
         }
         .frame(width: size, height: size)
@@ -41,11 +48,12 @@ struct ContactAvatarView: View {
         return String(trimmed.prefix(1)).uppercased()
     }
 
-    private var avatarColor: Color {
-        let colors: [Color] = [
-            .blue, .purple, .pink, .orange, .green, .teal, .indigo, .red
-        ]
-        return colors[abs(name.hashValue) % colors.count]
+    private var avatarGradient: LinearGradient {
+        LinearGradient(
+            colors: [Color(white: 0.9), Color(white: 0.75)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 
@@ -54,5 +62,6 @@ struct ContactAvatarView: View {
         ContactAvatarView(imageData: nil, name: "张三", size: 64)
         ContactAvatarView(imageData: nil, name: "Li Ming", size: 64)
         ContactAvatarView(imageData: nil, name: "", size: 64)
+        ContactAvatarView(imageData: nil, name: "13800138000", size: 64, isKnownContact: false)
     }
 }

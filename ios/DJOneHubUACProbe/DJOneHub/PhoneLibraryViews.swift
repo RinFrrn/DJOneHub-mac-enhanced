@@ -83,7 +83,8 @@ private struct CallHistoryRow: View {
                 ContactAvatarView(
                     imageData: contact?.imageData,
                     name: displayName,
-                    size: 38
+                    size: 38,
+                    isKnownContact: contact != nil
                 )
 
                 VStack(alignment: .leading, spacing: 2) {
