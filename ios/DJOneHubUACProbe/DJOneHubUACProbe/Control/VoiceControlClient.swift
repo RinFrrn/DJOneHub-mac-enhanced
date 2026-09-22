@@ -18,14 +18,20 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var shouldPollStatus = false
     @Published private(set) var statusSuccessGeneration: UInt64 = 0
     @Published private(set) var moduleUSBAudioEnabled: Bool?
+    @Published private(set) var authorizationStateText = "旧密钥回退"
+    @Published private(set) var authorizationSessionExpiresAt: Date?
     @Published private(set) var didAttemptUSBAudioQuery = false
     @Published var dialNumber = ""
     @Published var isImportingPairing = false
     @Published var isConfirmingUnpair = false
 
     private var client: VoiceControlClient?
+    private var legacyClient: VoiceControlClient?
     private var keyStore: PairingKeyStore?
     private var mediaPairingKey: Data?
+    private var legacyMediaPairingKey: Data?
+    private var legacyAccess: VoiceControlAccess?
+    private var authorizationTask: Task<Void, Never>?
     private var requestTask: Task<Void, Never>?
     private var requestWatchdogTask: Task<Void, Never>?
     private var requestGeneration = 0
@@ -49,6 +55,7 @@ final class VoiceControlModel: ObservableObject {
     deinit {
         requestTask?.cancel()
         requestWatchdogTask?.cancel()
+        authorizationTask?.cancel()
     }
 
     /// Injects a key only for the lifetime of this model; it is never persisted.
@@ -69,6 +76,72 @@ final class VoiceControlModel: ObservableObject {
             stateText = "pairing key 无效"
             detailText = error.localizedDescription
         }
+    }
+
+    func configureAuthorizationSession(pairingKey: Data, expiresAt: Date) async throws {
+        guard expiresAt > Date() else { throw ModuleAuthorizationError.invalidData }
+        let candidate = try VoiceControlClient(pairingKey: pairingKey)
+        // Do not replace a working legacy client until the module proves that
+        // it accepts this newly issued session key.
+        _ = try await candidate.status(connectTimeout: .seconds(5))
+        client = candidate
+        mediaPairingKey = pairingKey
+        access = .controlSession
+        authorizationSessionExpiresAt = expiresAt
+        authorizationStateText = "长期授权 · 短期会话"
+        stateText = "长期授权会话"
+        detailText = "会话将在 \(expiresAt.formatted(date: .omitted, time: .shortened)) 前自动续签"
+    }
+
+    func refreshLongTermAuthorization(force: Bool = false) {
+        if authorizationTask != nil, !force { return }
+        authorizationTask?.cancel()
+        authorizationTask = Task { [weak self] in
+            guard let self else { return }
+            let model = ModuleAuthorizationModel()
+            while !Task.isCancelled {
+                var activated = false
+                do {
+                    for moduleID in try model.savedModuleIDs() {
+                        _ = try await model.status(moduleID: moduleID)
+                        let session = try await model.voiceSession(moduleID: moduleID)
+                        guard let key = AuthorizationSecret.decode(session.credential) else {
+                            throw ModuleAuthorizationError.invalidData
+                        }
+                        let expiry = session.localExpirationDate()
+                        try await self.configureAuthorizationSession(pairingKey: key, expiresAt: expiry)
+                        activated = true
+                        let delay = max(30, expiry.timeIntervalSinceNow - 5 * 60)
+                        try await Task.sleep(for: .seconds(delay))
+                        break
+                    }
+                    if !activated {
+                        self.restoreLegacyAuthorization(reason: "此 iPhone 尚未绑定长期授权")
+                        self.authorizationTask = nil
+                        return
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self.restoreLegacyAuthorization(reason: "短期会话不可用，正在自动重试")
+                    try? await Task.sleep(for: .seconds(15))
+                }
+            }
+        }
+    }
+
+    private func restoreLegacyAuthorization(reason: String) {
+        guard let legacyClient else {
+            authorizationSessionExpiresAt = nil
+            authorizationStateText = "未配置电话授权"
+            return
+        }
+        client = legacyClient
+        mediaPairingKey = legacyMediaPairingKey
+        access = legacyAccess
+        authorizationSessionExpiresAt = nil
+        authorizationStateText = "旧密钥回退"
+        detailText = reason
     }
 
     /// Loads a key only when the caller explicitly opts into the pairing store.
@@ -106,6 +179,7 @@ final class VoiceControlModel: ObservableObject {
                 return
             }
             try selectPairing(moduleIdentifier: pairing.moduleIdentifier, credential: pairing.credential)
+            refreshLongTermAuthorization()
         } catch {
             clearConfiguration(preservingModuleList: true)
             stateText = "读取 pairing key 失败"
@@ -184,7 +258,14 @@ final class VoiceControlModel: ObservableObject {
         requestWatchdogTask = nil
         requestArbitration.reset()
         client = nil
+        legacyClient = nil
         mediaPairingKey = nil
+        legacyMediaPairingKey = nil
+        legacyAccess = nil
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        authorizationSessionExpiresAt = nil
+        authorizationStateText = "未配置电话授权"
         keyStore = nil
         moduleIdentifier = nil
         access = nil
@@ -212,11 +293,17 @@ final class VoiceControlModel: ObservableObject {
         internetChangeError = nil
         radio = nil
         radioUpdatedAt = nil
-        client = try VoiceControlClient(pairingKey: credential.key)
+        let selectedClient = try VoiceControlClient(pairingKey: credential.key)
+        client = selectedClient
+        legacyClient = selectedClient
         mediaPairingKey = credential.key
+        legacyMediaPairingKey = credential.key
         self.keyStore = keyStore
         self.moduleIdentifier = moduleIdentifier
         access = credential.access
+        legacyAccess = credential.access
+        authorizationSessionExpiresAt = nil
+        authorizationStateText = "旧密钥回退"
         moduleUSBAudioEnabled = nil
         didAttemptUSBAudioQuery = false
         stateText = credential.access == .controlSession
@@ -226,8 +313,10 @@ final class VoiceControlModel: ObservableObject {
     }
 
     func pairingKeyForUplinkProbe() -> Data? {
-        guard access == .controlSession else { return nil }
-        return mediaPairingKey
+        // Long-term authorization sessions are scoped to the voice control
+        // port. SMS and PCM retain the legacy media key during migration.
+        guard legacyAccess == .controlSession else { return nil }
+        return legacyMediaPairingKey
     }
 
     private static func shortIdentifier(_ identifier: String) -> String {

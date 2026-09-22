@@ -74,6 +74,7 @@ struct DJOneHubRootView: View {
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            voiceControl.refreshLongTermAuthorization()
             await runAutomaticSMSRefresh()
         }
         .onOpenURL { url in
@@ -106,6 +107,7 @@ struct DJOneHubRootView: View {
             @unknown default: break
             }
             if newPhase == .active {
+                voiceControl.refreshLongTermAuthorization()
                 lifecycle.applicationDidBecomeActive()
                 contacts.loadIfAuthorized()
                 refreshSMS()

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	VoiceSessionLifetime = 15 * time.Minute
+	VoiceSessionLifetime = time.Hour
 	sessionHeaderSize    = 8
 	sessionRecordSize    = 40
 )

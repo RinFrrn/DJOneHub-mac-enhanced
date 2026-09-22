@@ -407,6 +407,22 @@ struct ModulePanelView: View {
                             compact: true,
                             showsStatusLabels: true
                         )
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: voiceControl.authorizationSessionExpiresAt == nil
+                                  ? "key.fill" : "checkmark.shield.fill")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(voiceControl.authorizationStateText)
+                                    .fontWeight(.medium)
+                                if let expiresAt = voiceControl.authorizationSessionExpiresAt {
+                                    Text("将在 \(expiresAt.addingTimeInterval(-5 * 60).formatted(date: .omitted, time: .shortened)) 前自动续签")
+                                        .font(.caption2)
+                                        .monospacedDigit()
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         if lifecycle.phase != .ready {
                             Text(connectionDescription)
                                 .font(.subheadline)
@@ -576,6 +592,10 @@ struct ModulePanelView: View {
                 Label(lifecycle.phase.title, systemImage: lifecycle.phase.systemImage)
                 if let identifier = voiceControl.moduleIdentifier {
                     LabeledContent("模块", value: String(identifier.prefix(8)))
+                }
+                LabeledContent("电话授权", value: voiceControl.authorizationStateText)
+                if let expiresAt = voiceControl.authorizationSessionExpiresAt {
+                    LabeledContent("会话有效期", value: expiresAt.formatted(date: .omitted, time: .shortened))
                 }
                 if !voiceControl.detailText.isEmpty {
                     Text(voiceControl.detailText)
@@ -875,17 +895,8 @@ private struct ModuleAuthorizationSettingsView: View {
                 do {
                     let status = try await model.status(moduleID: moduleID)
                     authorizedDeviceCount = status.devices.count
-                    do {
-                        let session = try await model.voiceSession(moduleID: moduleID)
-                        guard let key = AuthorizationSecret.decode(session.credential) else {
-                            throw ModuleAuthorizationError.invalidData
-                        }
-                        voiceControl.configure(pairingKey: key)
-                        message = "长期授权验证成功，电话控制已使用 15 分钟短期会话。"
-                    } catch {
-                        message = "长期授权验证成功；短期电话会话暂时不可用，继续使用旧配对密钥。"
-                        errorMessage = error.localizedDescription
-                    }
+                    voiceControl.refreshLongTermAuthorization(force: true)
+                    message = "长期授权验证成功，正在由 App 统一签发并验证电话会话。"
                     return
                 } catch {
                     lastError = error
@@ -939,17 +950,8 @@ private struct ModuleAuthorizationSettingsView: View {
                 let status = try await model.commit(moduleID: moduleID)
                 authorizedDeviceCount = status.devices.count
                 pendingModuleID = nil
-                do {
-                    let session = try await model.voiceSession(moduleID: moduleID)
-                    guard let sessionKey = AuthorizationSecret.decode(session.credential) else {
-                        throw ModuleAuthorizationError.invalidData
-                    }
-                    voiceControl.configure(pairingKey: sessionKey)
-                    message = "长期授权已启用，电话控制已切换到 15 分钟短期会话。请保留刚导出的新恢复文件；旧恢复文件已经失效。"
-                } catch {
-                    message = "长期授权已启用；短期电话会话暂时不可用，当前继续使用旧配对密钥。请保留刚导出的新恢复文件；旧恢复文件已经失效。"
-                    errorMessage = error.localizedDescription
-                }
+                voiceControl.refreshLongTermAuthorization(force: true)
+                message = "长期授权已启用，正在签发电话会话。请保留刚导出的新恢复文件；旧恢复文件已经失效。"
             } catch {
                 errorMessage = error.localizedDescription
             }

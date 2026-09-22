@@ -130,6 +130,13 @@ struct ModuleVoiceSession: Codable, Sendable {
     let credential: String
     let expiresAt: Int64
     enum CodingKeys: String, CodingKey { case version, scope, credential; case expiresAt = "expires_at" }
+
+    // The QDC507 has no reliable battery-backed wall clock. The module still
+    // enforces expiresAt against its own clock; iOS schedules renewal from the
+    // authenticated receipt time instead of comparing unrelated Unix epochs.
+    func localExpirationDate(receivedAt: Date = Date()) -> Date {
+        receivedAt.addingTimeInterval(60 * 60)
+    }
 }
 
 struct AuthorizedModuleDevice: Codable, Sendable {

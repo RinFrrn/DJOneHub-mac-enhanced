@@ -9,7 +9,7 @@ struct ModuleAuthorizationTransport: Sendable {
         _ operation: String, credential: String, body: Body, response: Response.Type
     ) async throws -> Response {
         try identity.validate()
-        guard ["prepare", "commit", "status", "revoke", "cancel"].contains(operation),
+        guard ["prepare", "commit", "status", "session", "revoke", "cancel"].contains(operation),
               AuthorizationSecret.isValid(credential) else { throw ModuleAuthorizationError.invalidData }
         let payload = try JSONEncoder().encode(body)
         guard payload.count <= 4096 else { throw ModuleAuthorizationError.invalidData }
@@ -204,8 +204,7 @@ final class ModuleAuthorizationModel {
             "session", credential: active.credential, body: EmptyAuthorizationRequest(), response: ModuleVoiceSession.self
         )
         guard session.version == 1, session.scope == "voice-control",
-              session.expiresAt > Int64(Date().timeIntervalSince1970),
-              session.expiresAt <= Int64(Date().addingTimeInterval(16 * 60).timeIntervalSince1970),
+              session.expiresAt > 0,
               AuthorizationSecret.isValid(session.credential) else { throw ModuleAuthorizationError.invalidData }
         return session
     }
