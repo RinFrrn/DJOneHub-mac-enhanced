@@ -9,16 +9,16 @@ enum ModuleAuthorizationError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidData: "模块授权资料格式无效"
+        case .invalidData: "模块配对资料格式无效"
         case .expiredInvitation: "绑定码已过期，请使用恢复码或重新生成首次绑定资料"
         case .identityMismatch: "连接的模块与保存的身份不一致"
         case .noPendingEnrollment: "没有待完成的手机绑定"
         case .backupRequired: "请先保存恢复码，再确认启用新手机"
-        case .unauthorized: "模块未授权此手机或此恢复码已失效"
+        case .unauthorized: "模块未接受此 iPhone 的配对，或恢复码已失效，请重新配对"
         case .pendingChange: "模块正在处理另一项绑定，请稍后重试"
-        case .deviceLimit: "模块已达到授权手机数量上限"
-        case .storageUnavailable: "无法安全保存授权资料，请保留当前手机和恢复码后重试"
-        case .connectionFailed: "无法连接模块授权服务，请检查模块连接及固件版本"
+        case .deviceLimit: "模块的已配对手机数量已达上限"
+        case .storageUnavailable: "无法安全保存配对资料，请保留当前手机和恢复码后重试"
+        case .connectionFailed: "无法连接模块，请检查 USB 连接与供电后重试"
         case .timeout: "模块响应超时，已保存的绑定进度可继续重试"
         }
     }

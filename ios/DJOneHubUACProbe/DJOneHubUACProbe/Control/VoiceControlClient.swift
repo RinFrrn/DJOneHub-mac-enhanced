@@ -20,6 +20,7 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var moduleUSBAudioEnabled: Bool?
     @Published private(set) var authorizationStateText = "旧密钥回退"
     @Published private(set) var authorizationSessionExpiresAt: Date?
+    @Published private(set) var testPairingExpiresAt: Date?
     @Published private(set) var didAttemptUSBAudioQuery = false
     @Published var dialNumber = ""
     @Published var isImportingPairing = false
@@ -251,6 +252,7 @@ final class VoiceControlModel: ObservableObject {
     }
 
     private func clearConfiguration(preservingModuleList: Bool) {
+        testPairingExpiresAt = nil
         requestTask?.cancel()
         requestWatchdogTask?.cancel()
         requestGeneration &+= 1
@@ -302,6 +304,7 @@ final class VoiceControlModel: ObservableObject {
         self.moduleIdentifier = moduleIdentifier
         access = credential.access
         legacyAccess = credential.access
+        testPairingExpiresAt = credential.expiresAt
         authorizationSessionExpiresAt = nil
         authorizationStateText = "旧密钥回退"
         moduleUSBAudioEnabled = nil

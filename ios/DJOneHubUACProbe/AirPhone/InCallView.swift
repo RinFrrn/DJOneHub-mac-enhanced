@@ -407,22 +407,6 @@ struct ModulePanelView: View {
                             compact: true,
                             showsStatusLabels: true
                         )
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Image(systemName: voiceControl.authorizationSessionExpiresAt == nil
-                                  ? "key.fill" : "checkmark.shield.fill")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(voiceControl.authorizationStateText)
-                                    .fontWeight(.medium)
-                                if let expiresAt = voiceControl.authorizationSessionExpiresAt {
-                                    Text("将在 \(expiresAt.addingTimeInterval(-5 * 60).formatted(date: .omitted, time: .shortened)) 前自动续签")
-                                        .font(.caption2)
-                                        .monospacedDigit()
-                                }
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                         if lifecycle.phase != .ready {
                             Text(connectionDescription)
                                 .font(.subheadline)
@@ -442,8 +426,6 @@ struct ModulePanelView: View {
                     }
                     .padding(.vertical, 4)
                     .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
-                } header: {
-                    Text("模块状态")
                 }
                 Section {
                     Toggle(isOn: $automaticCallRecordingEnabled) {
@@ -511,16 +493,16 @@ struct ModulePanelView: View {
                     }
                 }
                 Section {
-                    NavigationLink(value: Page.settings) {
+                    NavigationLink(value: Page.authorization) {
                         Label {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("连接与配对")
-                                Text("查看模块身份，管理本机配对")
+                                Text("配对模块、恢复换机与连接设置")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         } icon: {
-                            Image(systemName: "link")
+                            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
                         }
                     }
                     NavigationLink(value: Page.diagnostics) {
@@ -541,7 +523,8 @@ struct ModulePanelView: View {
                     )
                 case .recordings: recordingsPage
                 case .settings: moduleSettingsPage
-                case .authorization: ModuleAuthorizationSettingsView()
+                case .authorization:
+                    ModuleAuthorizationSettingsView { moduleSettingsPage }
                 case .diagnostics: diagnosticsPage
                 case .logs: ConnectionLogView()
                 }
@@ -567,7 +550,6 @@ struct ModulePanelView: View {
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .onAppear {
-            if !voiceControl.isConfigured, network.noWiredInterface == false { path = [.settings] }
             if !path.isEmpty || dynamicTypeSize.isAccessibilitySize { detent = .large }
         }
         .onChange(of: path) { _, value in
@@ -589,20 +571,34 @@ struct ModulePanelView: View {
     private var moduleSettingsPage: some View {
         List {
             Section("当前模块") {
-                Label(lifecycle.phase.title, systemImage: lifecycle.phase.systemImage)
+                Label(noDevice ? "模块未连接" : lifecycle.phase.title,
+                      systemImage: noDevice ? "cable.connector" : lifecycle.phase.systemImage)
                 if let identifier = voiceControl.moduleIdentifier {
                     LabeledContent("模块", value: String(identifier.prefix(8)))
                 }
-                LabeledContent("电话授权", value: voiceControl.authorizationStateText)
-                if let expiresAt = voiceControl.authorizationSessionExpiresAt {
-                    LabeledContent("会话有效期", value: expiresAt.formatted(date: .omitted, time: .shortened))
-                }
-                if !voiceControl.detailText.isEmpty {
-                    Text(voiceControl.detailText)
+                Text(connectionDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("与此 iPhone 配对") {
+                LabeledContent("本机配对", value: voiceControl.isConfigured ? "已保存配对" : "尚未配置")
+                if let expiresAt = voiceControl.testPairingExpiresAt {
+                    LabeledContent("测试配对到期", value: expiresAt.formatted(date: .abbreviated, time: .shortened))
+                    Text("当前短信和语音仍需要测试配对。到期后，请在 Mac 上重新准备模块并导入新的测试配对文件。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                Button(voiceControl.isConfigured ? "替换模块配对" : "导入模块配对") {
+                if !voiceControl.isConfigured {
+                    Text("将此模块与你的 iPhone 配对，用于拨打电话和查看短信。当前版本需要导入在 Mac 上准备的配对文件。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if !voiceControl.detailText.isEmpty {
+                        Text(voiceControl.detailText)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Button(voiceControl.isConfigured ? "替换测试配对" : "配对模块") {
                     voiceControl.isImportingPairing = true
                 }
                 if voiceControl.isConfigured {
@@ -612,31 +608,28 @@ struct ModulePanelView: View {
                 }
             }
             Section {
-                NavigationLink(value: Page.authorization) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("iPhone 长期授权")
-                            Text("绑定、恢复及授权设备管理")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "checkmark.shield")
-                    }
+                DisclosureGroup("为什么需要配对？") {
+                    Text("配对用于确认哪些手机可以使用你的模块，防止其他人未经允许拨打电话或读取短信。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("长期授权")
-            } footer: {
-                Text("长期授权目前与旧通话配对并行，不会影响现有电话、短信和提醒。")
             }
-
         }
-        .navigationTitle("连接与配对")
+        .navigationTitle("连接设置")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private var diagnosticsPage: some View {
         List {
+            Section("配对诊断") {
+                LabeledContent("电话授权", value: voiceControl.authorizationStateText)
+                if let expiresAt = voiceControl.authorizationSessionExpiresAt {
+                    LabeledContent("自动续签会话", value: expiresAt.formatted(date: .omitted, time: .shortened))
+                }
+                if !voiceControl.detailText.isEmpty {
+                    Text(voiceControl.detailText).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
             Section("诊断") {
                 Button {
                     isShowingCallPreview = true
@@ -767,7 +760,8 @@ private struct AuthorizationInvitationDocument: FileDocument {
     }
 }
 
-private struct ModuleAuthorizationSettingsView: View {
+private struct ModuleAuthorizationSettingsView<ConnectionSettings: View>: View {
+    @ViewBuilder var connectionSettings: () -> ConnectionSettings
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @State private var model = ModuleAuthorizationModel()
     @State private var isImporting = false
@@ -776,10 +770,12 @@ private struct ModuleAuthorizationSettingsView: View {
     @State private var recoveryDocument: AuthorizationInvitationDocument?
     @State private var pendingModuleID: String?
     @State private var isBusy = false
-    @State private var message = "导入首次绑定资料或恢复资料，将此 iPhone 注册为模块管理员。"
+    @State private var message = "导入配对文件，或使用恢复文件将模块配对到此 iPhone。"
     @State private var errorMessage: String?
     @State private var authorizedDeviceCount: Int?
     @State private var didAttemptVerification = false
+    @State private var hasSavedPairing = false
+    @State private var needsPairingAgain = false
 
     var body: some View {
         List {
@@ -797,7 +793,7 @@ private struct ModuleAuthorizationSettingsView: View {
                         .foregroundStyle(authorizedDeviceCount == nil ? Color.secondary : Color.green)
                 }
                 if let authorizedDeviceCount {
-                    LabeledContent("已授权设备", value: "\(authorizedDeviceCount) 台")
+                    LabeledContent("已配对设备", value: "\(authorizedDeviceCount) 台")
                 }
                 if let errorMessage {
                     Text(errorMessage)
@@ -805,18 +801,18 @@ private struct ModuleAuthorizationSettingsView: View {
                         .foregroundStyle(.red)
                 }
             } header: {
-                Text("授权状态")
+                Text("长期配对")
             }
 
             Section {
                 Button {
                     isImporting = true
                 } label: {
-                    Label("导入绑定或恢复资料", systemImage: "doc.badge.plus")
+                    Label("导入配对或恢复文件", systemImage: "doc.badge.plus")
                 }
                 .disabled(isBusy)
 
-                Button("重新验证长期授权", systemImage: "arrow.clockwise.shield") {
+                Button("重新检查连接", systemImage: "arrow.clockwise.shield") {
                     Task { await verifySavedAuthorization() }
                 }
                 .disabled(isBusy)
@@ -832,12 +828,24 @@ private struct ModuleAuthorizationSettingsView: View {
             }
 
             Section {
-                Text("此阶段仅建立长期设备身份，旧通话配对仍继续工作。后续迁移完成前，撤销长期授权不会撤销旧通话密钥。")
+                Text("当前短信和语音仍使用测试配对。移除长期配对不会使已有测试配对失效；停用旧手机时，还需清理模块上的测试配对。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                NavigationLink {
+                    connectionSettings()
+                } label: {
+                    Label("连接设置与测试配对", systemImage: "link")
+                }
+                DisclosureGroup("为什么需要配对？") {
+                    Text("配对用于确认哪些手机可以使用你的模块，防止其他人未经允许拨打电话或读取短信。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
-        .navigationTitle("iPhone 长期授权")
+        .navigationTitle("连接与配对")
         .navigationBarTitleDisplayMode(.inline)
         .task { await verifySavedAuthorization() }
         .alert("保存新的恢复文件", isPresented: $isConfirmingRecoveryExport) {
@@ -870,8 +878,12 @@ private struct ModuleAuthorizationSettingsView: View {
     }
 
     private var authorizationTitle: String {
-        if authorizedDeviceCount != nil { return "长期授权已启用" }
-        return didAttemptVerification ? "未找到有效长期授权" : "正在验证长期授权"
+        if isBusy { return "正在检查配对" }
+        if authorizedDeviceCount != nil { return "已与此 iPhone 配对" }
+        if needsPairingAgain { return "需要重新配对" }
+        if errorMessage != nil { return "暂时无法确认配对" }
+        if hasSavedPairing { return "已保存配对，等待连接模块" }
+        return didAttemptVerification ? "此 iPhone 尚未配对" : "正在检查配对"
     }
 
     @MainActor
@@ -879,15 +891,17 @@ private struct ModuleAuthorizationSettingsView: View {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+        needsPairingAgain = false
         defer {
             didAttemptVerification = true
             isBusy = false
         }
         do {
             let moduleIDs = try model.savedModuleIDs()
+            hasSavedPairing = !moduleIDs.isEmpty
             guard !moduleIDs.isEmpty else {
                 authorizedDeviceCount = nil
-                message = "此 iPhone 尚未保存长期授权，请导入首次绑定资料或恢复资料。"
+                message = "导入配对文件即可设置长期配对；更换手机时，请导入之前保存的恢复文件。"
                 return
             }
             var lastError: Error?
@@ -896,18 +910,23 @@ private struct ModuleAuthorizationSettingsView: View {
                     let status = try await model.status(moduleID: moduleID)
                     authorizedDeviceCount = status.devices.count
                     voiceControl.refreshLongTermAuthorization(force: true)
-                    message = "长期授权验证成功，正在由 App 统一签发并验证电话会话。"
+                    message = "已确认此 iPhone 的配对，正在准备电话连接。"
                     return
                 } catch {
                     lastError = error
                 }
             }
             authorizedDeviceCount = nil
-            message = "已找到本机授权资料，但当前模块未接受该授权。"
+            message = "本机配对仍已保存。请检查模块连接后重试；暂时无法连接并不表示配对已失效。"
+            if let pairingError = lastError as? ModuleAuthorizationError,
+               case .unauthorized = pairingError {
+                needsPairingAgain = true
+                message = "模块未接受此 iPhone 的配对。请导入有效的配对或恢复文件后重试。"
+            }
             errorMessage = lastError?.localizedDescription
         } catch {
             authorizedDeviceCount = nil
-            message = "读取长期授权资料失败。"
+            message = "暂时无法读取本机配对，请稍后重试。"
             errorMessage = error.localizedDescription
         }
     }
@@ -951,7 +970,7 @@ private struct ModuleAuthorizationSettingsView: View {
                 authorizedDeviceCount = status.devices.count
                 pendingModuleID = nil
                 voiceControl.refreshLongTermAuthorization(force: true)
-                message = "长期授权已启用，正在签发电话会话。请保留刚导出的新恢复文件；旧恢复文件已经失效。"
+                message = "已与此 iPhone 配对，正在准备电话连接。请妥善保存恢复文件；如果本次使用恢复文件换机，请保留新文件，旧文件已失效。"
             } catch {
                 errorMessage = error.localizedDescription
             }
