@@ -33,6 +33,13 @@ func TestVoiceSessionRegistryIsPrivateAndVolatile(t *testing.T) {
 		string(data[16:]) != string(key) {
 		t.Fatal("invalid private session registry")
 	}
+	loaded, err := ReadVoiceSessionKey(path, now)
+	if err != nil || string(loaded) != string(key) {
+		t.Fatal("could not load active voice session")
+	}
+	if _, err := ReadVoiceSessionKey(path, now.Add(VoiceSessionLifetime)); err == nil {
+		t.Fatal("expired voice session was accepted")
+	}
 	if err := registry.Clear(); err != nil {
 		t.Fatal(err)
 	}

@@ -158,7 +158,7 @@ struct ModuleAccessoryButton: View {
                         active: voiceControl.moduleInternetEnabled == true
                     )
                     ModuleNotificationStatusIcon(
-                        pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                        pairingKey: voiceControl.sessionKeyForModuleServices(),
                         connected: voiceControl.shouldPollStatus,
                         label: "提醒"
                     )
@@ -182,7 +182,7 @@ struct ModuleAccessoryButton: View {
             automaticRecordingStatusIcon
             internetStatusIcon(at: date)
             ModuleNotificationStatusIcon(
-                pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                pairingKey: voiceControl.sessionKeyForModuleServices(),
                 connected: voiceControl.shouldPollStatus
             )
         }

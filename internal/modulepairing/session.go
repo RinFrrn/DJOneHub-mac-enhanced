@@ -32,6 +32,26 @@ type SessionRegistry struct {
 	mu   sync.Mutex
 }
 
+func ReadVoiceSessionKey(path string, now time.Time) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, ErrUnauthorized
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) != sessionHeaderSize+sessionRecordSize ||
+		string(data[:4]) != "DJVS" || data[4] != 1 || data[5] != 1 ||
+		data[6] != 0 || data[7] != 0 {
+		return nil, ErrUnauthorized
+	}
+	expires := int64(binary.BigEndian.Uint64(data[8:16]))
+	if expires <= now.Unix() {
+		return nil, ErrUnauthorized
+	}
+	key := make([]byte, 32)
+	copy(key, data[16:48])
+	return key, nil
+}
+
 func (s *SessionRegistry) Issue(now time.Time) (VoiceSession, error) {
 	if s == nil || s.Path == "" {
 		return VoiceSession{}, ErrStorage

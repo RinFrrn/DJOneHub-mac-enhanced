@@ -194,23 +194,23 @@ func run() (runErr error) {
 			results <- (modulepairing.Server{Store: store, Sessions: sessions}).Serve(managedContext, listener)
 		}()
 		go func() {
-			results <- serveManaged(managedContext, sender, *monitor, *statePath, *controlAddress, *pairingKey, *configPath)
+			results <- serveManaged(managedContext, sender, *monitor, *statePath, *controlAddress, *pairingKey, *voiceSessions, *configPath)
 		}()
 		first := <-results
 		cancel()
 		<-results
 		return first
 	}
-	return serveManaged(ctx, sender, *monitor, *statePath, *controlAddress, *pairingKey, *configPath)
+	return serveManaged(ctx, sender, *monitor, *statePath, *controlAddress, *pairingKey, "", *configPath)
 }
 
-func serveManaged(ctx context.Context, sender *modulepush.Sender, monitor, statePath, controlAddress, pairingKey, configPath string) error {
+func serveManaged(ctx context.Context, sender *modulepush.Sender, monitor, statePath, controlAddress, pairingKey, sessionFile, configPath string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan error, 2)
 	go func() { results <- serve(ctx, sender, monitor, statePath) }()
 	control := modulepush.ControlServer{
-		Address: controlAddress, PairingKey: pairingKey, ConfigPath: configPath,
+		Address: controlAddress, PairingKey: pairingKey, SessionFile: sessionFile, ConfigPath: configPath,
 		CustomCAPath: modulepush.CustomCAPath(configPath), Sender: sender,
 	}
 	go func() { results <- control.Serve(ctx) }()

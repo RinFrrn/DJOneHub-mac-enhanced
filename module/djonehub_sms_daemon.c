@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "djonehub_qmi_wms_engine.h"
@@ -29,8 +30,42 @@
 #define CONTROL_TIMEOUT_SECONDS 5
 #define RANDOM_DEVICE "/dev/urandom"
 #define DEFAULT_KEY_FILE "/usrdata/djonehub/pairing.key"
+#define DEFAULT_SESSION_FILE "/run/djonehub/voice-sessions.v1"
 
 static volatile sig_atomic_t stop_requested;
+
+static int load_voice_session(const char *path,
+                              uint8_t key[DJONEHUB_PAIRING_KEY_BYTES])
+{
+    uint8_t data[48];
+    struct stat attributes;
+    uint64_t expires = 0U;
+    size_t offset = 0U;
+    int descriptor;
+    unsigned int index;
+
+    descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0 || fstat(descriptor, &attributes) != 0 ||
+        !S_ISREG(attributes.st_mode) || attributes.st_uid != 0U ||
+        (attributes.st_mode & 0077) != 0 || attributes.st_size != (off_t)sizeof(data)) {
+        if (descriptor >= 0) (void)close(descriptor);
+        return -1;
+    }
+    while (offset < sizeof(data)) {
+        ssize_t count = read(descriptor, data + offset, sizeof(data) - offset);
+        if (count > 0) offset += (size_t)count;
+        else if (count < 0 && errno == EINTR) continue;
+        else { (void)close(descriptor); return -1; }
+    }
+    (void)close(descriptor);
+    if (memcmp(data, "DJVS", 4U) != 0 || data[4] != 1U || data[5] != 1U ||
+        data[6] != 0U || data[7] != 0U) return -1;
+    for (index = 0U; index < 8U; ++index) expires = (expires << 8U) | data[8U + index];
+    if (expires <= (uint64_t)time(NULL)) return -1;
+    memcpy(key, data + 16U, DJONEHUB_PAIRING_KEY_BYTES);
+    memset(data, 0, sizeof(data));
+    return 0;
+}
 
 static void daemon_logf(const char *format, ...)
     __attribute__((format(printf, 1, 2)));
@@ -355,6 +390,7 @@ static enum djonehub_qmi_wms_error execute_request(
 
 static int handle_client(int descriptor,
                          const uint8_t key[DJONEHUB_PAIRING_KEY_BYTES],
+                         const char *session_file,
                          int read_only)
 {
     uint8_t nonce[DJONEHUB_SMS_NONCE_BYTES];
@@ -368,6 +404,8 @@ static int handle_client(int descriptor,
     size_t frame_length;
     size_t response_length = 0U;
     uint16_t payload_length;
+    uint8_t session_key[DJONEHUB_PAIRING_KEY_BYTES];
+    const uint8_t *response_key = key;
 
     if (random_nonce(nonce) != 0) {
         return -1;
@@ -389,11 +427,20 @@ static int handle_client(int descriptor,
     frame_length = DJONEHUB_SMS_HEADER_BYTES + (size_t)payload_length +
                    DJONEHUB_SMS_TAG_BYTES;
     if (read_exact(descriptor, request_frame + DJONEHUB_SMS_HEADER_BYTES,
-                   frame_length - DJONEHUB_SMS_HEADER_BYTES) != 0 ||
-        djonehub_sms_decode_request(key, nonce, request_frame, frame_length,
-                                    &request) != 0) {
+                   frame_length - DJONEHUB_SMS_HEADER_BYTES) != 0) {
         memset(nonce, 0, sizeof(nonce));
         return -1;
+    }
+    if (djonehub_sms_decode_request(key, nonce, request_frame, frame_length,
+                                    &request) != 0) {
+        if (load_voice_session(session_file, session_key) != 0 ||
+            djonehub_sms_decode_request(session_key, nonce, request_frame,
+                                        frame_length, &request) != 0) {
+            memset(session_key, 0, sizeof(session_key));
+            memset(nonce, 0, sizeof(nonce));
+            return -1;
+        }
+        response_key = session_key;
     }
     if (read_only != 0 &&
         (request.operation == DJONEHUB_SMS_SEND_RAW ||
@@ -416,11 +463,12 @@ static int handle_client(int descriptor,
         }
     }
     frame_length = djonehub_sms_encode_response(
-        key, nonce, status, request.request_id, request.operation,
+        response_key, nonce, status, request.request_id, request.operation,
         response_length == 0U ? NULL : response_payload, response_length,
         response_frame, sizeof(response_frame));
     memset(nonce, 0, sizeof(nonce));
     memset(response_payload, 0, sizeof(response_payload));
+    memset(session_key, 0, sizeof(session_key));
     if (frame_length == 0U ||
         write_exact(descriptor, response_frame, frame_length) != 0) {
         return -1;
@@ -429,11 +477,13 @@ static int handle_client(int descriptor,
 }
 
 static int parse_arguments(int argc, char **argv, const char **key_file,
+                           const char **session_file,
                            int *once, int *read_only)
 {
     int index;
 
     *key_file = DEFAULT_KEY_FILE;
+    *session_file = DEFAULT_SESSION_FILE;
     *once = 0;
     *read_only = 0;
     for (index = 1; index < argc; ++index) {
@@ -444,6 +494,9 @@ static int parse_arguments(int argc, char **argv, const char **key_file,
         } else if (strcmp(argv[index], "--key-file") == 0 &&
                    index + 1 < argc) {
             *key_file = argv[++index];
+        } else if (strcmp(argv[index], "--session-file") == 0 &&
+                   index + 1 < argc) {
+            *session_file = argv[++index];
         } else {
             return -1;
         }
@@ -455,14 +508,15 @@ int main(int argc, char **argv)
 {
     uint8_t key[DJONEHUB_PAIRING_KEY_BYTES];
     const char *key_file;
+    const char *session_file;
     int once;
     int read_only;
     int listener;
     int exit_status = EXIT_SUCCESS;
 
-    if (parse_arguments(argc, argv, &key_file, &once, &read_only) != 0) {
+    if (parse_arguments(argc, argv, &key_file, &session_file, &once, &read_only) != 0) {
         daemon_logf("usage: djonehub-sms-daemon [--once] [--read-only] "
-                    "[--key-file PATH]");
+                    "[--key-file PATH] [--session-file PATH]");
         return EXIT_FAILURE;
     }
     if (!valid_key_owner(key_file) ||
@@ -501,7 +555,7 @@ int main(int argc, char **argv)
         if (peer_length == (socklen_t)sizeof(peer) &&
             peer.sin_family == AF_INET && peer_is_usb_host(&peer) &&
             configure_client(client) == 0 &&
-            handle_client(client, key, read_only) == 0) {
+            handle_client(client, key, session_file, read_only) == 0) {
             handled = 1;
         }
         (void)close(client);

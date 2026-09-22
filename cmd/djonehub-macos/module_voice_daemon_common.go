@@ -15,8 +15,8 @@ import (
 
 const (
 	voiceDaemonExpectedSHA256         = "219751cf7d2a322498cef2d349ead87948a55cd20cdd09e43fbc40d52f360ea8"
-	voiceSMSExpectedSHA256            = "61d314497a20a69fb7c762da9e9881d926ab5516f2bd5e3d8679a1ab76628f75"
-	voiceUplinkExpectedSHA256         = "052912efc5f9ef21ac891a5d2f9c457b3a3242f8423b17b3cb2f95418e982e48"
+	voiceSMSExpectedSHA256            = "540fd5685e9282607db4ee901940ca753993e176150f9c30119167c44a29100b"
+	voiceUplinkExpectedSHA256         = "801f8ba302e1bc60c9b5a680fa84daf4e78c398ed1232aa3a63ae6dd1913ef83"
 	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
 	voiceTestVoiceExpectedSHA256      = "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
 	voiceTestIncallCardExpectedSHA256 = "dfabcecff905b97ed46f755f4667e7c2635799e00524a10a8ed9d546bd1feea7"
@@ -493,12 +493,12 @@ remove_ephemeral_key() {
             if test "$start_uplink" = 1; then
                 (ulimit -s 256 || exit 1; export LD_LIBRARY_PATH=/usr/lib; exec "$uplink" --uplink-listener \
                     --listen-address 192.168.225.1 --audio-port 45751 \
-                    --token-file "$key" --interface bridge0) >>"$log" 2>&1 &
+                    --token-file "$key" --session-file "$session_file" --interface bridge0) >>"$log" 2>&1 &
                 uplink_pid=$!
                 printf '%s\n' "$uplink_pid" >"$uplink_pidfile"
             fi
             if test "$start_sms" = 1; then
-                LD_LIBRARY_PATH=/usr/lib "$sms_binary" --read-only --key-file "$key" >>"$log" 2>&1 &
+                LD_LIBRARY_PATH=/usr/lib "$sms_binary" --read-only --key-file "$key" --session-file "$session_file" >>"$log" 2>&1 &
                 sms_pid=$!
                 printf '%s\n' "$sms_pid" >"$sms_pidfile"
             fi

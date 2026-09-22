@@ -1226,6 +1226,7 @@ struct network_options {
     const char *listen_address;
     const char *peer_address;
     const char *token_file;
+    const char *session_file;
     const char *interface_name;
     unsigned int port;
     unsigned int peer_port;
@@ -1237,6 +1238,7 @@ struct network_session {
     int socket_fd;
     struct sockaddr_in peer;
     unsigned char key[32];
+    const char *session_file;
     uint32_t session_id;
     void *uplink_pcm;
     void *downlink_pcm;
@@ -1347,6 +1349,39 @@ static int load_pairing_key(const char *path, unsigned char key[32])
         log_message("error", "close(%s) failed: %s", path, strerror(errno));
         return -1;
     }
+    return 0;
+}
+
+static int load_voice_session(const char *path, unsigned char key[32])
+{
+    unsigned char data[48];
+    struct stat attributes;
+    uint64_t expires = 0U;
+    size_t offset = 0U;
+    int fd;
+    unsigned int index;
+
+    if (path == NULL) return -1;
+    fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0 || fstat(fd, &attributes) != 0 ||
+        !S_ISREG(attributes.st_mode) || attributes.st_uid != 0U ||
+        (attributes.st_mode & 0077) != 0 || attributes.st_size != (off_t)sizeof(data)) {
+        if (fd >= 0) (void)close(fd);
+        return -1;
+    }
+    while (offset < sizeof(data)) {
+        ssize_t count = read(fd, data + offset, sizeof(data) - offset);
+        if (count > 0) offset += (size_t)count;
+        else if (count < 0 && errno == EINTR) continue;
+        else { (void)close(fd); return -1; }
+    }
+    (void)close(fd);
+    if (memcmp(data, "DJVS", 4U) != 0 || data[4] != 1U || data[5] != 1U ||
+        data[6] != 0U || data[7] != 0U) return -1;
+    for (index = 0U; index < 8U; ++index) expires = (expires << 8U) | data[8U + index];
+    if (expires <= (uint64_t)time(NULL)) return -1;
+    memcpy(key, data + 16U, 32U);
+    memset(data, 0, sizeof(data));
     return 0;
 }
 
@@ -1825,6 +1860,9 @@ static int wait_for_initial_uplink_packet(
             log_message("error", "uplink listener receive failed: %s",
                         strerror(errno));
             return -1;
+        }
+        if (session->session_file != NULL) {
+            (void)load_voice_session(session->session_file, session->key);
         }
         if (source_length == sizeof(*source) &&
             valid_initial_uplink_packet(session->key, packet,
@@ -2502,6 +2540,7 @@ static int run_uplink_listener(struct vendor_audio *api,
     session.api = api;
     session.socket_fd = -1;
     session.verbose = verbose;
+    session.session_file = options->session_file;
     if (load_pairing_key(options->token_file, session.key) != 0 ||
         install_signal_handlers() != 0 ||
         setup_bound_network_socket(&session, options, &local_address) != 0) {
@@ -3005,7 +3044,7 @@ static void print_usage(const char *program)
             "[--uplink-listener --listen-address IPv4 --audio-port PORT "
             "--token-file PATH --interface NAME] "
             "[--network-session --listen-address IPv4 --peer-address IPv4 "
-            "--audio-port PORT --peer-port PORT --token-file PATH --interface NAME "
+            "--audio-port PORT --peer-port PORT --token-file PATH --session-file PATH --interface NAME "
             "--session-id ID]\n",
             program);
 }
@@ -3079,6 +3118,9 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[index], "--token-file") == 0 &&
                    index + 1 < argc) {
             network_options.token_file = argv[++index];
+        } else if (strcmp(argv[index], "--session-file") == 0 &&
+                   index + 1 < argc) {
+            network_options.session_file = argv[++index];
         } else if (strcmp(argv[index], "--interface") == 0 &&
                    index + 1 < argc) {
             network_options.interface_name = argv[++index];

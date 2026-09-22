@@ -146,11 +146,11 @@ struct AirPhoneRootView: View {
             Text("录音会将你的声音和对方声音保存为仅在本机可见的 WAV 文件。请先确认已取得必要同意并遵守当地法律。")
         }
         .confirmationDialog(
-            "删除 iPhone 本机配对？模块侧开发凭据仍会保留，需接回 Mac 后卸载。",
+            "删除这部 iPhone 上的测试配对？长期配对不会受到影响。",
             isPresented: $isConfirmingUnpair,
             titleVisibility: .visible
         ) {
-            Button("仅删除本机配对", role: .destructive) {
+            Button("删除测试配对", role: .destructive) {
                 voiceControl.unpairCurrentModule()
                 lifecycle.pairingDidChange()
             }
@@ -174,7 +174,7 @@ struct AirPhoneRootView: View {
         // Give the authenticated control connection priority during USB setup;
         // defer the secondary SMS connection until STATUS has succeeded.
         guard voiceControl.shouldPollStatus else { return }
-        sms.refresh(pairingKey: voiceControl.pairingKeyForUplinkProbe())
+        sms.refresh(pairingKey: voiceControl.sessionKeyForModuleServices())
     }
 
     private func runAutomaticSMSRefresh() async {

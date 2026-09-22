@@ -223,7 +223,7 @@ final class CallLifecycleCoordinator: ObservableObject {
                 guard !audioStartRequested,
                       mediaRecoveryGate.isOpen,
                       ContinuousClock.now >= nextAudioStartAttempt,
-                      let key = voiceControl.pairingKeyForUplinkProbe() else { return }
+                      let key = voiceControl.sessionKeyForModuleServices() else { return }
                 audioStartRequested = true
                 nextAudioStartAttempt = ContinuousClock.now.advanced(by: .seconds(1))
                 callAudio.start(
@@ -311,7 +311,7 @@ final class CallLifecycleCoordinator: ObservableObject {
               !callAudio.isRunning,
               !callAudio.hasActiveRequest,
               ContinuousClock.now >= nextAudioStartAttempt,
-              let key = voiceControl.pairingKeyForUplinkProbe() else { return }
+              let key = voiceControl.sessionKeyForModuleServices() else { return }
         audioStartRequested = true
         nextAudioStartAttempt = ContinuousClock.now.advanced(by: .seconds(1))
         callAudio.start(

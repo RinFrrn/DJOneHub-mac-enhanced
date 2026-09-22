@@ -472,7 +472,7 @@ struct ModulePanelView: View {
                 }
                 Section {
                     NavigationLink(value: Page.notifications) {
-                        ModuleNotificationSummaryRow(pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                        ModuleNotificationSummaryRow(pairingKey: voiceControl.sessionKeyForModuleServices(),
                                                      connected: voiceControl.shouldPollStatus && !noDevice)
                     }
                     NavigationLink {
@@ -518,7 +518,7 @@ struct ModulePanelView: View {
                 switch page {
                 case .notifications:
                     ModuleNotificationSettingsView(
-                        pairingKey: voiceControl.pairingKeyForUplinkProbe(),
+                        pairingKey: voiceControl.sessionKeyForModuleServices(),
                         openModuleSettings: { path = [.settings] }
                     )
                 case .recordings: recordingsPage
@@ -580,16 +580,20 @@ struct ModulePanelView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Section("与此 iPhone 配对") {
-                LabeledContent("本机配对", value: voiceControl.isConfigured ? "已保存配对" : "尚未配置")
+            Section("测试配对") {
+                LabeledContent("本机测试配对", value: voiceControl.hasTestPairing ? "已保存" : "未保存")
                 if let expiresAt = voiceControl.testPairingExpiresAt {
                     LabeledContent("测试配对到期", value: expiresAt.formatted(date: .abbreviated, time: .shortened))
-                    Text("当前短信和语音仍需要测试配对。到期后，请在 Mac 上重新准备模块并导入新的测试配对文件。")
+                    Text("此测试配对仅作为兼容回退。长期配对正常工作时可以删除；如果模块尚未升级，删除后需重新导入才能继续使用。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                if !voiceControl.isConfigured {
-                    Text("将此模块与你的 iPhone 配对，用于拨打电话和查看短信。当前版本需要导入在 Mac 上准备的配对文件。")
+                if voiceControl.authorizationSessionExpiresAt != nil {
+                    Text("长期配对已接管电话、短信、语音和模块提醒。确认模块已安装支持长期配对的运行组件后，可以删除此测试配对。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if !voiceControl.isConfigured {
+                    Text("尚未建立长期配对时，可以导入在 Mac 上准备的测试配对文件临时使用模块。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     if !voiceControl.detailText.isEmpty {
@@ -598,11 +602,11 @@ struct ModulePanelView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Button(voiceControl.isConfigured ? "替换测试配对" : "配对模块") {
+                Button(voiceControl.hasTestPairing ? "替换测试配对" : "导入测试配对") {
                     voiceControl.isImportingPairing = true
                 }
-                if voiceControl.isConfigured {
-                    Button("删除 iPhone 本机配对", role: .destructive) {
+                if voiceControl.hasTestPairing {
+                    Button("删除测试配对", role: .destructive) {
                         isConfirmingUnpair = true
                     }
                 }
@@ -828,7 +832,7 @@ private struct ModuleAuthorizationSettingsView<ConnectionSettings: View>: View {
             }
 
             Section {
-                Text("当前短信和语音仍使用测试配对。移除长期配对不会使已有测试配对失效；停用旧手机时，还需清理模块上的测试配对。")
+                Text("长期配对会为电话、短信、语音和模块提醒签发短期会话。测试配对只用于尚未升级的模块运行组件。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

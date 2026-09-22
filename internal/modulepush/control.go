@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iniwex5/vohive/internal/modulepairing"
+
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
@@ -92,6 +94,7 @@ type WebPushExport struct {
 type ControlServer struct {
 	Address      string
 	PairingKey   string
+	SessionFile  string
 	ConfigPath   string
 	CustomCAPath string
 	Sender       *Sender
@@ -145,11 +148,16 @@ func sameUSBSubnet(local, remote net.Addr) bool {
 func (s *ControlServer) handle(connection net.Conn) {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(8 * time.Second))
-	key, err := readPairingKey(s.PairingKey)
-	if err != nil {
+	keys := s.controlKeys()
+	if len(keys) == 0 {
 		return
 	}
-	defer clear(key)
+	defer func() {
+		for _, key := range keys {
+			clear(key)
+		}
+	}()
+	var err error
 	nonce := make([]byte, ControlNonceBytes)
 	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
 		return
@@ -170,8 +178,16 @@ func (s *ControlServer) handle(connection net.Conn) {
 		return
 	}
 	unsigned := append(append([]byte{}, header...), tail[:size]...)
-	expected := controlTag(key, nonce, unsigned)
-	if !hmac.Equal(expected, tail[size:]) {
+	key := keys[0]
+	authenticated := false
+	for _, candidate := range keys {
+		if hmac.Equal(controlTag(candidate, nonce, unsigned), tail[size:]) {
+			key = candidate
+			authenticated = true
+			break
+		}
+	}
+	if !authenticated {
 		response := encodeControlResponse(key, nonce, operation, requestID, ControlAuthenticationFailed, nil)
 		_ = writeControlFrame(connection, response)
 		return
@@ -179,6 +195,19 @@ func (s *ControlServer) handle(connection net.Conn) {
 	status, payload := s.perform(operation, tail[:size])
 	response := encodeControlResponse(key, nonce, operation, requestID, status, payload)
 	_ = writeControlFrame(connection, response)
+}
+
+func (s *ControlServer) controlKeys() [][]byte {
+	var keys [][]byte
+	if s.SessionFile != "" {
+		if key, err := modulepairing.ReadVoiceSessionKey(s.SessionFile, time.Now()); err == nil {
+			keys = append(keys, key)
+		}
+	}
+	if key, err := readPairingKey(s.PairingKey); err == nil {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func writeControlFrame(writer io.Writer, data []byte) error {

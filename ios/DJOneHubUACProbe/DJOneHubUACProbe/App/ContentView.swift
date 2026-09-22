@@ -107,7 +107,7 @@ struct ContentView: View {
             ) {
                 if uplinkProbe.isRunning {
                     uplinkProbe.stop()
-                } else if let key = voiceControl.pairingKeyForUplinkProbe() {
+                } else if let key = voiceControl.sessionKeyForModuleServices() {
                     uplinkProbe.start(pairingKey: key)
                 }
             }
@@ -121,7 +121,7 @@ struct ContentView: View {
             .disabled(!uplinkProbe.isRunning || uplinkProbe.isTestTone)
 
             Button("发送 1 kHz 固定测试音") {
-                if let key = voiceControl.pairingKeyForUplinkProbe() {
+                if let key = voiceControl.sessionKeyForModuleServices() {
                     uplinkProbe.startTestTone(pairingKey: key)
                 }
             }

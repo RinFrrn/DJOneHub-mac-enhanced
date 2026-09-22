@@ -39,6 +39,7 @@ final class VoiceControlModel: ObservableObject {
     private var requestArbitration = VoiceControlRequestArbitration()
 
     var isConfigured: Bool { client != nil }
+    var hasTestPairing: Bool { legacyClient != nil }
     var canControlCalls: Bool { client != nil && access == .controlSession }
     var hasActiveCall: Bool { calls.contains { $0.state == 0x03 } }
     var canChangeUSBAudio: Bool {
@@ -177,6 +178,7 @@ final class VoiceControlModel: ObservableObject {
                     stateText = "请选择模块"
                     detailText = "Keychain 中保存了 \(pairings.count) 个模块"
                 }
+                refreshLongTermAuthorization()
                 return
             }
             try selectPairing(moduleIdentifier: pairing.moduleIdentifier, credential: pairing.credential)
@@ -240,7 +242,7 @@ final class VoiceControlModel: ObservableObject {
         do {
             try keyStore.delete()
             restorePairings()
-            detailText = "已删除 iPhone 本机凭据；模块侧开发凭据仍需接回 Mac 后卸载"
+            detailText = "已删除此 iPhone 上的测试配对，长期配对不受影响"
         } catch {
             stateText = "删除本机配对失败"
             detailText = error.localizedDescription
@@ -315,11 +317,9 @@ final class VoiceControlModel: ObservableObject {
         detailText = ""
     }
 
-    func pairingKeyForUplinkProbe() -> Data? {
-        // Long-term authorization sessions are scoped to the voice control
-        // port. SMS and PCM retain the legacy media key during migration.
-        guard legacyAccess == .controlSession else { return nil }
-        return legacyMediaPairingKey
+    func sessionKeyForModuleServices() -> Data? {
+        guard access == .controlSession else { return nil }
+        return mediaPairingKey
     }
 
     private static func shortIdentifier(_ identifier: String) -> String {
