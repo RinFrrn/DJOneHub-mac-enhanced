@@ -1,8 +1,8 @@
-# DJOneHub for iOS
+# AirPhone for iOS
 
 > 把大疆第一代 4G 模块接到 iPhone，在手机上使用模块中的 SIM 接打电话、查看短信。
 
-DJOneHub 是一个围绕 QDC507 模块开发的非官方项目。iOS App 通过 USB 网络直接与模块通信，电话控制和双向语音都在 iPhone 与模块之间完成，通话期间不需要 Mac 中转。
+AirPhone 是一个围绕 QDC507 模块开发的非官方 iOS App。它通过 USB 网络直接与模块通信，电话控制和双向语音都在 iPhone 与模块之间完成，通话期间不需要 Mac 中转。
 
 项目目标是：**首次用 Mac 完成模块配置，之后只用 iPhone。** 当前已完成 iPhone 通话闭环，模块提醒和长期授权正在逐步接入；首次部署及现有开发配对的维护仍需要 Mac。
 
@@ -34,7 +34,7 @@ App 会自动恢复已保存的开发配对并读取模块状态。模块断开�
 
 ### 模块自主发送来电、短信提醒
 
-模块端已实现 Bark 提醒，以及直接发送 Web Push 的实验路径。提醒任务运行在模块上，不要求 Mac 常驻或 DJOneHub App 一直处于前台。
+模块端已实现 Bark 提醒，以及直接发送 Web Push 的实验路径。提醒任务运行在模块上，不要求 Mac 常驻或 AirPhone 一直处于前台。
 
 在 iOS 的模块提醒页面中，可以：
 
@@ -84,7 +84,7 @@ iOS 工程最低部署版本为 **iOS 17.0**；这不代表所有系统版本、
 ### 首次配置与使用
 
 1. **先准备模块。** 使用开发部署流程安装匹配版本的电话、短信、音频和可选提醒服务，并配置适合 iPhone 的 USB 网络模式。当前通话方案关闭模块 USB Audio，使用 USB 网络传输语音。
-2. **构建并安装 iOS App。** 在 Xcode 打开下面的工程，选择 `DJOneHub` scheme，为真机配置签名团队。
+2. **构建并安装 iOS App。** 在 Xcode 打开下面的工程，选择 `AirPhone` scheme，为真机配置签名团队。
 3. **导入开发控制配对。** 将该模块的 CONTROL 配对文件导入 App，再把模块换接到 iPhone。STATUS 只读配对不能用于拨号。
 4. **等待“可以拨号”。** 授予麦克风权限；使用通讯录时按需授予联系人权限，然后测试拨号和接听。
 5. **按需开启提醒。** 在模块提醒页面配置 Bark 或导入 Web Push 订阅，发送测试并确认手机实际收到。
@@ -94,14 +94,14 @@ iOS 工程最低部署版本为 **iOS 17.0**；这不代表所有系统版本、
 ### 构建 iOS App
 
 ```sh
-open ios/DJOneHubUACProbe/DJOneHubUACProbe.xcodeproj
+open ios/DJOneHubUACProbe/AirPhone.xcodeproj
 ```
 
 工程包含两个 target：
 
 | Target | 用途 |
 | --- | --- |
-| `DJOneHub` | 日常通话 App，本文介绍的 iOS 成果 |
+| `AirPhone` | 日常通话 App，本文介绍的 iOS 成果 |
 | `DJOneHubUACProbe` | USB Audio、网络和协议诊断工具 |
 
 当前开发配置下，两个 target 沿用同一 bundle ID，不适合同时安装。真机运行需要在 Xcode 中配置自己的签名。
@@ -110,8 +110,8 @@ open ios/DJOneHubUACProbe/DJOneHubUACProbe.xcodeproj
 
 ```sh
 xcodebuild \
-  -project ios/DJOneHubUACProbe/DJOneHubUACProbe.xcodeproj \
-  -scheme DJOneHub \
+  -project ios/DJOneHubUACProbe/AirPhone.xcodeproj \
+  -scheme AirPhone \
   -configuration Debug \
   -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
@@ -133,7 +133,7 @@ xcodebuild \
 ## 工作原理
 
 ```text
-iPhone · DJOneHub
+iPhone · AirPhone
     │
     │ USB ECM 本地网络
     │ 电话控制 / 双向 PCM / 短信读取 / 提醒配置

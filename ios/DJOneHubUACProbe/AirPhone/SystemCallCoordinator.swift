@@ -214,7 +214,7 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
             update.remoteHandle = CXHandle(type: .phoneNumber, value: caller)
             update.localizedCallerName = caller
         } else {
-            update.remoteHandle = CXHandle(type: .generic, value: "DJOneHub")
+            update.remoteHandle = CXHandle(type: .generic, value: "AirPhone")
             update.localizedCallerName = presentation == 1 ? "私人号码" : "未知号码"
         }
         update.hasVideo = false

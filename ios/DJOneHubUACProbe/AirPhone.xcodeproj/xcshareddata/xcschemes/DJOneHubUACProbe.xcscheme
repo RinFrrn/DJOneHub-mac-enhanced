@@ -17,7 +17,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A50000000000000000000001"
                BuildableName = "DJOneHubUACProbe.app"
-               ReferencedContainer = "container:DJOneHubUACProbe.xcodeproj">
+               ReferencedContainer = "container:AirPhone.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,7 +46,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A50000000000000000000001"
             BuildableName = "DJOneHubUACProbe.app"
-            ReferencedContainer = "container:DJOneHubUACProbe.xcodeproj">
+            ReferencedContainer = "container:AirPhone.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,7 +62,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A50000000000000000000001"
             BuildableName = "DJOneHubUACProbe.app"
-            ReferencedContainer = "container:DJOneHubUACProbe.xcodeproj">
+            ReferencedContainer = "container:AirPhone.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

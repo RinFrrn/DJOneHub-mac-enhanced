@@ -1,8 +1,8 @@
-# DJOneHub iOS App 技术设计与实施计划
+# AirPhone iOS App 技术设计与实施计划
 
 ## 1. 目标
 
-构建独立于 Mac 的 DJOneHub iOS App，通过 USB ECM 直接控制 QDC507 电话并承载双向
+构建独立于 Mac 的 AirPhone iOS App，通过 USB ECM 直接控制 QDC507 电话并承载双向
 PCM。正式通话媒体不经过 USB UAC；iPhone/iPad 模式下模块关闭 UAC gadget，避免系统
 音频被模块枚举成的 USB 声卡抢占。
 
@@ -46,12 +46,12 @@ indication、APNs Relay、Push Notifications entitlement 和真实 VoIP Push 的
 ## 3. 工程策略
 
 保留 `DJOneHubUACProbe` target 作为实验和硬件诊断工具。在同一 Xcode 工程新增正式
-`DJOneHub` target：
+`AirPhone` target：
 
 - 两个 target 共享已经过测试的控制协议、媒体协议、Keychain 和网络客户端源码。
 - 正式 target 不编译 UAC 路由探针、实验按钮和诊断首页。
 - 正式 target 使用独立 App 入口、产品首页和通话生命周期协调器。
-- 开发期 `DJOneHub` 暂时沿用 `io.github.rogerbush007.DJOneHubUACProbe` bundle ID，
+- 开发期 `AirPhone` 暂时沿用 `io.github.rogerbush007.DJOneHubUACProbe` bundle ID，
   以继承真机上现有默认 Keychain access group；这意味着两个 target 不能同时安装。
 - TestFlight 前建立共享 Keychain access group 或一次性凭据迁移，再切换正式 bundle ID。
 
@@ -60,7 +60,7 @@ indication、APNs Relay、Push Notifications entitlement 和真实 VoIP Push 的
 ## 4. 运行时架构
 
 ```text
-DJOneHubApp
+AirPhoneApp
   ├─ SystemCallCoordinator
   │   ├─ PKPushRegistry (VoIP Push 唤醒入口)
   │   ├─ CXProvider (系统来电界面)
@@ -72,7 +72,7 @@ DJOneHubApp
       │   ├─ PCMTransport (UDP 45751)
       │   ├─ DownlinkPCMPlayer
       │   └─ DownlinkJitterBuffer
-      └─ DJOneHubRootView
+      └─ AirPhoneRootView
 ```
 
 第一阶段复用的 `UplinkPCMProbeModel` 已在第二阶段拆除；Probe 与正式 App 目前共享以下正式
@@ -164,7 +164,7 @@ DJOneHubApp
 
 正式 App 使用用户熟悉的电话产品结构，而不是把协议和 PCM 探针直接暴露为首页：
 
-- “最近通话”保存 DJOneHub 自己发起和收到的呼叫、结果与接通时长；它不是系统电话的
+- “最近通话”保存 AirPhone 自己发起和收到的呼叫、结果与接通时长；它不是系统电话的
   全局通话记录。控制快照可携带 QMI Voice `0x2f` 的 Remote Party Number；允许展示的
   主叫号码会进入 CallKit 和最近通话，限制主叫显示“私人号码”，缺失时显示“未知号码”。
 - “通讯录”只在用户点击授权后通过 `Contacts` 公共 API 本地读取；选择号码只填入拨号
@@ -179,7 +179,7 @@ DJOneHubApp
 - 拨号页可持久开启自动录音；电话进入 active 且 PCM 可用后开始，用户在本次通话中手动
   停止后不会被状态刷新再次启动。
 - 通话录音直接取现有 ECM PCM，保存为 8 kHz、16-bit、双声道 WAV（左声道本机、右声道
-  对端），仅在用户确认后开始；每次录音使用独立文件名并关联到当前 DJOneHub 通话记录。
+  对端），仅在用户确认后开始；每次录音使用独立文件名并关联到当前 AirPhone 通话记录。
   文件使用设备文件保护、排除 iCloud 备份，可在通话记录或设置中播放、暂停和分享，也可在
   二次确认后永久删除。iPhone `.voiceChat` 采集在模块/网络 AGC 之前电平明显低于下行，
   因此只在写入 WAV 左声道时应用 24 倍饱和增益；发往模块的上行 PCM 保持原样。
@@ -253,7 +253,7 @@ UAC 路由、原始 endpoint、完整日志和测试音继续只保留在 Probe�
 
 本轮首先交付 M1 的工程骨架和自动生命周期：
 
-1. 新增 `DJOneHub` target。
+1. 新增 `AirPhone` target。
 2. 新增正式 App 入口与主页面。
 3. 新增 `CallLifecycleCoordinator`。
 4. Keychain 恢复后自动 STATUS；conversation 自动启停现有真机验证 PCM 引擎。
@@ -261,7 +261,7 @@ UAC 路由、原始 endpoint、完整日志和测试音继续只保留在 Probe�
 
 ### 2026-09-03 实施状态
 
-- [x] 新增独立 `DJOneHub` target，原 Probe target 保留。
+- [x] 新增独立 `AirPhone` target，原 Probe target 保留。
 - [x] 新增正式 App 入口、前台电话首页和配对管理入口。
 - [x] 新增可离线测试的产品通话状态机。
 - [x] Keychain 恢复后自动 STATUS，轮询期间 UI 不退回连接态。

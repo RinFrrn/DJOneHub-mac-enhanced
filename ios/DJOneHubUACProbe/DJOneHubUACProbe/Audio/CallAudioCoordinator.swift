@@ -237,7 +237,7 @@ final class CallAudioCoordinator: ObservableObject {
                     self.tearDownAudio(deactivateSession: false)
                     self.hasActiveRequest = false
                     self.stateText = "麦克风权限被拒绝"
-                    self.detailText = "请在系统设置中允许 DJOneHub 使用麦克风"
+                    self.detailText = "请在系统设置中允许 AirPhone 使用麦克风"
                     return
                 }
                 guard !self.isInterrupted else {

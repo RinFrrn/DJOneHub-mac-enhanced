@@ -974,7 +974,7 @@ private struct BarkSetupView: View {
                         Text("需先更新模块提醒服务以启用铃声设置和通知跳转")
                     }
                 } footer: {
-                    Text("填写 Bark 铃声名称，例如 alarm。自定义音频请先导入 Bark，再填写其中显示的名称。点按来电或短信通知会打开 DJOneHub 对应页面。")
+                    Text("填写 Bark 铃声名称，例如 alarm。自定义音频请先导入 Bark，再填写其中显示的名称。点按来电或短信通知会打开 AirPhone 对应页面。")
                 }
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()

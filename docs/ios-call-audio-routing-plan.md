@@ -12,9 +12,9 @@
 
 - [CallAudioCoordinator.swift](../ios/DJOneHubUACProbe/DJOneHubUACProbe/Audio/CallAudioCoordinator.swift) 的 `currentRouteMatchesPolicy` 只接受内置麦克风和扬声器。
 - `configureCallAudioSession` 设置 `.defaultToSpeaker`，`activateBuiltInCallRoute` 强制选择内置麦克风和 `.speaker`；路由恢复也会再次执行此策略。
-- [InCallView.swift](../ios/DJOneHubUACProbe/DJOneHub/InCallView.swift) 没有音频设备切换入口。
+- [InCallView.swift](../ios/DJOneHubUACProbe/AirPhone/InCallView.swift) 没有音频设备切换入口。
 - `pauseForRouteRecovery` 会停止录音并拆除媒体资源，因此不能只增加一个切换按钮。
-- [SystemCallCoordinator.swift](../ios/DJOneHubUACProbe/DJOneHub/SystemCallCoordinator.swift) 已通过 CallKit 激活、停用回调协调媒体生命周期，需要保留该所有权边界。
+- [SystemCallCoordinator.swift](../ios/DJOneHubUACProbe/AirPhone/SystemCallCoordinator.swift) 已通过 CallKit 激活、停用回调协调媒体生命周期，需要保留该所有权边界。
 
 ## 用户体验
 
@@ -59,7 +59,7 @@
 ### 5. 验证与交付
 
 - [ ] 自动测试覆盖路由决策、设备断开、连续切换、过期恢复任务、失败回退和静音状态保留。
-- [ ] 运行相关既有音频恢复测试及 DJOneHub 主应用 Debug、Release 构建。
+- [ ] 运行相关既有音频恢复测试及 AirPhone 主应用 Debug、Release 构建。
 - [ ] 真机测试听筒 ↔ 扬声器 ↔ AirPods／普通蓝牙通话耳机，分别验证双方声音。
 - [ ] 真机覆盖来电、拨出、静音、录音、锁屏切换、耳机断连和模块插拔。
 
@@ -73,4 +73,3 @@
 - [选择音频输入与确认实际路由](https://developer.apple.com/documentation/avfaudio/avaudiosession/setpreferredinput(_:))
 - [扬声器覆盖与默认外放的区别](https://developer.apple.com/library/archive/qa/qa1754/_index.html)
 - [响应音频路由变化](https://developer.apple.com/documentation/avfaudio/responding-to-audio-route-changes)
-

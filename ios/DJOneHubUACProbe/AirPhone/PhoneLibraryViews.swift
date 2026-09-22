@@ -14,7 +14,7 @@ struct RecentsView: View {
                     ContentUnavailableView(
                         "暂无通话记录",
                         systemImage: "clock",
-                        description: Text("通过 DJOneHub 拨打或接听的电话会显示在这里。")
+                        description: Text("通过 AirPhone 拨打或接听的电话会显示在这里。")
                     )
                 } else {
                     List {
@@ -175,7 +175,7 @@ struct ContactsView: View {
                     ContentUnavailableView {
                         Label("使用通讯录", systemImage: "person.crop.circle.badge.plus")
                     } description: {
-                        Text("选择号码后会填入 DJOneHub 拨号键盘，通讯录不会上传。")
+                        Text("选择号码后会填入 AirPhone 拨号键盘，通讯录不会上传。")
                     } actions: {
                         Button("允许访问通讯录") { contacts.requestAccess() }
                             .buttonStyle(.borderedProminent)
@@ -186,7 +186,7 @@ struct ContactsView: View {
                     ContentUnavailableView(
                         "无法访问通讯录",
                         systemImage: "person.crop.circle.badge.exclamationmark",
-                        description: Text("请在系统设置中允许 DJOneHub 访问通讯录。")
+                        description: Text("请在系统设置中允许 AirPhone 访问通讯录。")
                     )
                 case .failed(let message):
                     ContentUnavailableView(

@@ -27,8 +27,8 @@
 		A1000000000000000000001A /* SMSControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001A /* SMSControl.swift */; };
 		A10000000000000000000030 /* ModuleAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* ModuleAuthorization.swift */; };
 		A10000000000000000000031 /* ModuleAuthorizationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ModuleAuthorizationClient.swift */; };
-		B10000000000000000000001 /* DJOneHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* DJOneHubApp.swift */; };
-		B10000000000000000000002 /* DJOneHubRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* DJOneHubRootView.swift */; };
+		B10000000000000000000001 /* AirPhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AirPhoneApp.swift */; };
+		B10000000000000000000002 /* AirPhoneRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AirPhoneRootView.swift */; };
 		B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* CallLifecycleCoordinator.swift */; };
 		B10000000000000000000004 /* VoiceControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* VoiceControlProtocol.swift */; };
 		B10000000000000000000005 /* VoiceControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* VoiceControlClient.swift */; };
@@ -81,11 +81,11 @@
 		A2000000000000000000001A /* SMSControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMSControl.swift; sourceTree = "<group>"; };
 		A20000000000000000000030 /* ModuleAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorization.swift; sourceTree = "<group>"; };
 		A20000000000000000000031 /* ModuleAuthorizationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAuthorizationClient.swift; sourceTree = "<group>"; };
-		B20000000000000000000001 /* DJOneHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubApp.swift; sourceTree = "<group>"; };
-		B20000000000000000000002 /* DJOneHubRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubRootView.swift; sourceTree = "<group>"; };
+		B20000000000000000000001 /* AirPhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPhoneApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* AirPhoneRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPhoneRootView.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* CallLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLifecycleCoordinator.swift; sourceTree = "<group>"; };
 		B20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		B20000000000000000000005 /* DJOneHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DJOneHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000005 /* AirPhone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AirPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000006 /* ProductCallPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCallPhase.swift; sourceTree = "<group>"; };
 		B20000000000000000000007 /* PhoneProductModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneProductModels.swift; sourceTree = "<group>"; };
 		B20000000000000000000008 /* KeypadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeypadView.swift; sourceTree = "<group>"; };
@@ -121,7 +121,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* DJOneHubUACProbe */,
-				B40000000000000000000001 /* DJOneHub */,
+				B40000000000000000000001 /* AirPhone */,
 				A20000000000000000000006 /* README.md */,
 				A40000000000000000000005 /* Products */,
 			);
@@ -168,7 +168,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000005 /* DJOneHubUACProbe.app */,
-				B20000000000000000000005 /* DJOneHub.app */,
+				B20000000000000000000005 /* AirPhone.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -187,12 +187,12 @@
 			path = Control;
 			sourceTree = "<group>";
 		};
-		B40000000000000000000001 /* DJOneHub */ = {
+		B40000000000000000000001 /* AirPhone */ = {
 			isa = PBXGroup;
 			children = (
 				B20000000000000000000040 /* DialpadSounds */,
-				B20000000000000000000001 /* DJOneHubApp.swift */,
-				B20000000000000000000002 /* DJOneHubRootView.swift */,
+				B20000000000000000000001 /* AirPhoneApp.swift */,
+				B20000000000000000000002 /* AirPhoneRootView.swift */,
 				B20000000000000000000003 /* CallLifecycleCoordinator.swift */,
 				B20000000000000000000006 /* ProductCallPhase.swift */,
 				B20000000000000000000007 /* PhoneProductModels.swift */,
@@ -206,7 +206,7 @@
 				F03F3B2C5DA7DABEA4A401A0 /* ContactAvatarView.swift */,
 				FA4DDFC07A5921ABC4C57A59 /* ContactDetailView.swift */,
 			);
-			path = DJOneHub;
+			path = AirPhone;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -229,9 +229,9 @@
 			productReference = A20000000000000000000005 /* DJOneHubUACProbe.app */;
 			productType = "com.apple.product-type.application";
 		};
-		B50000000000000000000001 /* DJOneHub */ = {
+		B50000000000000000000001 /* AirPhone */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B60000000000000000000001 /* Build configuration list for PBXNativeTarget "DJOneHub" */;
+			buildConfigurationList = B60000000000000000000001 /* Build configuration list for PBXNativeTarget "AirPhone" */;
 			buildPhases = (
 				B70000000000000000000001 /* Sources */,
 				B30000000000000000000001 /* Frameworks */,
@@ -241,9 +241,9 @@
 			);
 			dependencies = (
 			);
-			name = DJOneHub;
-			productName = DJOneHub;
-			productReference = B20000000000000000000005 /* DJOneHub.app */;
+			name = AirPhone;
+			productName = AirPhone;
+			productReference = B20000000000000000000005 /* AirPhone.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -264,7 +264,7 @@
 					};
 				};
 			};
-			buildConfigurationList = A60000000000000000000001 /* Build configuration list for PBXProject "DJOneHubUACProbe" */;
+			buildConfigurationList = A60000000000000000000001 /* Build configuration list for PBXProject "AirPhone" */;
 			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -278,7 +278,7 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* DJOneHubUACProbe */,
-				B50000000000000000000001 /* DJOneHub */,
+				B50000000000000000000001 /* AirPhone */,
 			);
 		};
 /* End PBXProject section */
@@ -332,8 +332,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B10000000000000000000001 /* DJOneHubApp.swift in Sources */,
-				B10000000000000000000002 /* DJOneHubRootView.swift in Sources */,
+				B10000000000000000000001 /* AirPhoneApp.swift in Sources */,
+				B10000000000000000000002 /* AirPhoneRootView.swift in Sources */,
 				B10000000000000000000003 /* CallLifecycleCoordinator.swift in Sources */,
 				B10000000000000000000009 /* ProductCallPhase.swift in Sources */,
 				B10000000000000000000004 /* VoiceControlProtocol.swift in Sources */,
@@ -453,11 +453,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = M4Z7KWKY5J;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DJOneHub/Info.plist;
+				INFOPLIST_FILE = AirPhone/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
-				PRODUCT_NAME = DJOneHub;
+				PRODUCT_NAME = AirPhone;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -473,11 +473,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = M4Z7KWKY5J;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DJOneHub/Info.plist;
+				INFOPLIST_FILE = AirPhone/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.rogerbush007.DJOneHubUACProbe;
-				PRODUCT_NAME = DJOneHub;
+				PRODUCT_NAME = AirPhone;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -489,7 +489,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A60000000000000000000001 /* Build configuration list for PBXProject "DJOneHubUACProbe" */ = {
+		A60000000000000000000001 /* Build configuration list for PBXProject "AirPhone" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A90000000000000000000001 /* Debug */,
@@ -507,7 +507,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		B60000000000000000000001 /* Build configuration list for PBXNativeTarget "DJOneHub" */ = {
+		B60000000000000000000001 /* Build configuration list for PBXNativeTarget "AirPhone" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B90000000000000000000001 /* Debug */,

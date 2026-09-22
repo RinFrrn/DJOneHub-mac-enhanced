@@ -23,8 +23,8 @@
 
 - [模块启动脚本生成逻辑](../cmd/djonehub-macos/module_voice_daemon_common.go)：`prepare_voice_runtime` 与控制会话启动流程。
 - [VoiceControlClient.swift](../ios/DJOneHubUACProbe/DJOneHubUACProbe/Control/VoiceControlClient.swift)：连接重试、请求认证、超时和调度。
-- [CallLifecycleCoordinator.swift](../ios/DJOneHubUACProbe/DJOneHub/CallLifecycleCoordinator.swift)：定时更新、状态查询和媒体恢复门禁。
-- [DJOneHubRootView.swift](../ios/DJOneHubUACProbe/DJOneHub/DJOneHubRootView.swift)：启动及返回前台后的短信同步。
+- [CallLifecycleCoordinator.swift](../ios/DJOneHubUACProbe/AirPhone/CallLifecycleCoordinator.swift)：定时更新、状态查询和媒体恢复门禁。
+- [AirPhoneRootView.swift](../ios/DJOneHubUACProbe/AirPhone/AirPhoneRootView.swift)：启动及返回前台后的短信同步。
 
 上述等待和预算并不等于实际耗时。20 秒是连接上限，不是每次连接固定等待；声卡与语音校准是否为主要瓶颈，需要真机测量确认。
 
@@ -69,7 +69,7 @@
 - [ ] 根据实际可知状态展示“等待模块网络 → 正在验证模块 → 准备通话 → 可以拨号”，无法确认的阶段不伪装为已完成。
 - [ ] 超时提供阶段对应的原因和重试入口，区分未接入、服务未就绪和配对失败。
 - [ ] 自动测试覆盖连接调度、取消、退避、超时、过期响应及写操作不重复执行。
-- [ ] 运行相关既有协议／生命周期测试和 DJOneHub 主应用 Debug、Release 构建。
+- [ ] 运行相关既有协议／生命周期测试和 AirPhone 主应用 Debug、Release 构建。
 - [ ] 真机覆盖连续拔插、慢启动、配对失效、通话中断线恢复、前后台切换及不同网络并存。
 
 ## 性能目标与交付顺序
@@ -89,4 +89,3 @@
 
 - [NWPathMonitor：监听网络变化](https://developer.apple.com/documentation/network/nwpathmonitor)
 - [按接口类型建立网络监听](https://developer.apple.com/documentation/network/nwpathmonitor/init(requiredinterfacetype:))
-

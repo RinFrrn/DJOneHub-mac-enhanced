@@ -6,7 +6,7 @@ enum PhoneTab: Hashable {
     case recents, contacts, keypad, messages
 }
 
-struct DJOneHubRootView: View {
+struct AirPhoneRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var callAudio: CallAudioCoordinator

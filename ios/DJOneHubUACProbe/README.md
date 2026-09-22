@@ -1,8 +1,8 @@
-# DJOneHub iOS 工程
+# AirPhone iOS 工程
 
 本工程现在包含两个 target：
 
-- `DJOneHub`：正在实施的正式通话 App，自动轮询电话状态，在拨号/接听时预热 ECM PCM；
+- `AirPhone`：正式通话 App，自动轮询电话状态，在拨号/接听时预热 ECM PCM；
   拨号阶段开放下行并在需要时本地合成回铃，进入 conversation 后才放行麦克风上行。
 - `DJOneHubUACProbe`：保留用于 USB Audio、ECM、控制协议和媒体链路诊断的实验工具。
 
@@ -164,7 +164,7 @@ xcrun swiftc \
 
 ```sh
 xcodebuild \
-  -project ios/DJOneHubUACProbe/DJOneHubUACProbe.xcodeproj \
+  -project ios/DJOneHubUACProbe/AirPhone.xcodeproj \
   -scheme DJOneHubUACProbe \
   -sdk iphoneos \
   -configuration Debug \

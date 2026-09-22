@@ -11,7 +11,7 @@
 		<string>en</string>
 	</array>
 	<key>CFBundleDisplayName</key>
-	<string>DJOneHub</string>
+	<string>AirPhone</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -29,9 +29,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSContactsUsageDescription</key>
-	<string>用于从通讯录选择号码并通过 DJOneHub 蜂窝模块拨打电话。通讯录不会上传。</string>
+	<string>用于从通讯录选择号码并通过 AirPhone 蜂窝模块拨打电话。通讯录不会上传。</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>用于通过 USB 有线网络连接 DJOneHub 蜂窝模块，控制电话并配置模块提醒。</string>
+	<string>用于通过 USB 有线网络连接 AirPhone 蜂窝模块，控制电话并配置模块提醒。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于在蜂窝通话中发送你的语音。</string>
 	<key>UIApplicationSceneManifest</key>

@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 @MainActor
-struct DJOneHubApp: App {
+struct AirPhoneApp: App {
     @StateObject private var voiceControl: VoiceControlModel
     @StateObject private var callAudio: CallAudioCoordinator
     @StateObject private var history: CallHistoryStore
@@ -35,7 +35,7 @@ struct DJOneHubApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DJOneHubRootView()
+            AirPhoneRootView()
                 .environmentObject(voiceControl)
                 .environmentObject(callAudio)
                 .environmentObject(history)

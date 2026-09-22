@@ -5,7 +5,7 @@ from pathlib import Path
 import struct
 import wave
 
-output = Path(__file__).resolve().parents[1] / "ios/DJOneHubUACProbe/DJOneHub/DialpadSounds"
+output = Path(__file__).resolve().parents[1] / "ios/DJOneHubUACProbe/AirPhone/DialpadSounds"
 output.mkdir(exist_ok=True)
 rate = 22050
 count = round(rate * 0.09)
