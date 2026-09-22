@@ -306,7 +306,7 @@ func main() {
 	flag.StringVar(&listen, "listen", "127.0.0.1:7575", "HTTP listen address")
 	flag.BoolVar(&demo, "demo", false, "run the web UI with simulated modem data")
 	flag.BoolVar(&webConsole, "web-console", false, "serve the embedded compatibility console")
-	flag.StringVar(&notify.Action, "module-notify", "", "module notifications: install, install-authorization, start, stop, status, test-bark, test-webpush, probe-network, probe-runtime, enable-boot, disable-boot")
+	flag.StringVar(&notify.Action, "module-notify", "", "module notifications: install, install-authorization, update-authorization-runtime, start, stop, status, test-bark, test-webpush, probe-network, probe-runtime, enable-boot, disable-boot")
 	flag.StringVar(&notify.ArtifactDir, "notify-artifacts", "outputs/module", "notification ARM artifact directory")
 	flag.StringVar(&notify.ConfigPath, "notify-config", "", "private notification config to install")
 	flag.StringVar(&notify.CAPath, "notify-ca", "/etc/ssl/cert.pem", "public CA bundle to install")

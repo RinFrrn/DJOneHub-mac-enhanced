@@ -108,6 +108,8 @@ final class ModuleAuthorizationModel {
     private let store = ModuleAuthorizationStore()
     private var isBusy = false
 
+    func savedModuleIDs() throws -> [String] { try store.moduleIDs() }
+
     func begin(invitation: ModuleInvitation, name: String) throws {
         guard !isBusy else { throw ModuleAuthorizationError.pendingChange }
         try invitation.validate()

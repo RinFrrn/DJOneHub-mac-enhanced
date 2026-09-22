@@ -53,6 +53,8 @@ func moduleNotifyCommand(action string) (string, error) {
 	config := " -config " + moduleNotifyDir + "/config.json"
 	owned := `owned() { test -s '` + moduleNotifyDir + `/notify.pid' || return 1; read pid < '` + moduleNotifyDir + `/notify.pid'; case "$pid" in ''|*[!0-9]*) return 1;; esac; test "$(readlink "/proc/$pid/exe" 2>/dev/null)" = '` + binary + `'; }; `
 	switch action {
+	case "storage":
+		return "df -k /usrdata; du -k /usrdata/djonehub/* 2>/dev/null; ls -la /usrdata/djonehub/notify /usrdata/djonehub/voice-test", nil
 	case "status":
 		return owned + `if owned; then echo 'running'; else echo 'stopped'; fi`, nil
 	case "stop":

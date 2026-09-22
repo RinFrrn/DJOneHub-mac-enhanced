@@ -240,6 +240,24 @@ struct ModuleAuthorizationStore: Sendable {
         return record
     }
 
+    func moduleIDs() throws -> [String] {
+        let lookup: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrSynchronizable as String: false,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw ModuleAuthorizationError.storageUnavailable }
+        let items = result as? [[String: Any]] ?? (result as? [String: Any]).map { [$0] } ?? []
+        let identifiers = items.compactMap { $0[kSecAttrAccount as String] as? String }
+        guard identifiers.count == Set(identifiers).count else { throw ModuleAuthorizationError.storageUnavailable }
+        return identifiers.sorted()
+    }
+
     func save(_ record: ModuleAuthorizationRecord) throws {
         try record.validate()
         let data = try JSONEncoder().encode(record)

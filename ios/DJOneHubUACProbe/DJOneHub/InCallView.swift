@@ -752,19 +752,21 @@ private struct ModuleAuthorizationSettingsView: View {
     @State private var model = ModuleAuthorizationModel()
     @State private var isImporting = false
     @State private var isExportingRecovery = false
+    @State private var isConfirmingRecoveryExport = false
     @State private var recoveryDocument: AuthorizationInvitationDocument?
     @State private var pendingModuleID: String?
     @State private var isBusy = false
     @State private var message = "导入首次绑定资料或恢复资料，将此 iPhone 注册为模块管理员。"
     @State private var errorMessage: String?
     @State private var authorizedDeviceCount: Int?
+    @State private var didAttemptVerification = false
 
     var body: some View {
         List {
             Section {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(authorizedDeviceCount == nil ? "尚未验证长期授权" : "长期授权已启用")
+                        Text(authorizationTitle)
                             .font(.headline)
                         Text(message)
                             .font(.subheadline)
@@ -794,6 +796,11 @@ private struct ModuleAuthorizationSettingsView: View {
                 }
                 .disabled(isBusy)
 
+                Button("重新验证长期授权", systemImage: "arrow.clockwise.shield") {
+                    Task { await verifySavedAuthorization() }
+                }
+                .disabled(isBusy)
+
                 if let moduleID = pendingModuleID, recoveryDocument == nil {
                     Button("已安全保存恢复资料，完成绑定") {
                         finishEnrollment(moduleID: moduleID)
@@ -812,6 +819,13 @@ private struct ModuleAuthorizationSettingsView: View {
         }
         .navigationTitle("iPhone 长期授权")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await verifySavedAuthorization() }
+        .alert("保存新的恢复文件", isPresented: $isConfirmingRecoveryExport) {
+            Button("取消", role: .cancel) {}
+            Button("导出并继续") { isExportingRecovery = true }
+        } message: {
+            Text("完成本次绑定后，刚才导入的旧恢复文件将永久失效。新导出的文件会成为唯一可用于脱离 Mac 恢复模块管理权限的凭据，请保存到密码管理器或离线位置。")
+        }
         .fileImporter(
             isPresented: $isImporting,
             allowedContentTypes: [.json],
@@ -835,6 +849,58 @@ private struct ModuleAuthorizationSettingsView: View {
         }
     }
 
+    private var authorizationTitle: String {
+        if authorizedDeviceCount != nil { return "长期授权已启用" }
+        return didAttemptVerification ? "未找到有效长期授权" : "正在验证长期授权"
+    }
+
+    @MainActor
+    private func verifySavedAuthorization() async {
+        guard !isBusy else { return }
+        isBusy = true
+        errorMessage = nil
+        defer {
+            didAttemptVerification = true
+            isBusy = false
+        }
+        do {
+            let moduleIDs = try model.savedModuleIDs()
+            guard !moduleIDs.isEmpty else {
+                authorizedDeviceCount = nil
+                message = "此 iPhone 尚未保存长期授权，请导入首次绑定资料或恢复资料。"
+                return
+            }
+            var lastError: Error?
+            for moduleID in moduleIDs {
+                do {
+                    let status = try await model.status(moduleID: moduleID)
+                    authorizedDeviceCount = status.devices.count
+                    do {
+                        let session = try await model.voiceSession(moduleID: moduleID)
+                        guard let key = AuthorizationSecret.decode(session.credential) else {
+                            throw ModuleAuthorizationError.invalidData
+                        }
+                        voiceControl.configure(pairingKey: key)
+                        message = "长期授权验证成功，电话控制已使用 15 分钟短期会话。"
+                    } catch {
+                        message = "长期授权验证成功；短期电话会话暂时不可用，继续使用旧配对密钥。"
+                        errorMessage = error.localizedDescription
+                    }
+                    return
+                } catch {
+                    lastError = error
+                }
+            }
+            authorizedDeviceCount = nil
+            message = "已找到本机授权资料，但当前模块未接受该授权。"
+            errorMessage = lastError?.localizedDescription
+        } catch {
+            authorizedDeviceCount = nil
+            message = "读取长期授权资料失败。"
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func importInvitation(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else {
             if case .failure(let error) = result { errorMessage = error.localizedDescription }
@@ -852,8 +918,8 @@ private struct ModuleAuthorizationSettingsView: View {
                 pendingModuleID = invitation.moduleID
                 if let replacement = try model.replacementRecoveryInvitation(moduleID: invitation.moduleID) {
                     recoveryDocument = try AuthorizationInvitationDocument(invitation: replacement)
-                    message = "请先导出新的恢复资料；保存成功后才会启用此 iPhone。"
-                    isExportingRecovery = true
+                    message = "必须先保存新的恢复文件。完成绑定后，原恢复文件将失效。"
+                    isConfirmingRecoveryExport = true
                 } else {
                     message = "模块已准备绑定。确认 Mac 生成的 recovery.json 已安全保存后完成绑定。"
                 }
@@ -879,9 +945,9 @@ private struct ModuleAuthorizationSettingsView: View {
                         throw ModuleAuthorizationError.invalidData
                     }
                     voiceControl.configure(pairingKey: sessionKey)
-                    message = "长期授权已启用，电话控制已切换到 15 分钟短期会话；旧配对密钥暂时保留为回退。"
+                    message = "长期授权已启用，电话控制已切换到 15 分钟短期会话。请保留刚导出的新恢复文件；旧恢复文件已经失效。"
                 } catch {
-                    message = "长期授权已启用；短期电话会话暂时不可用，当前继续使用旧配对密钥。"
+                    message = "长期授权已启用；短期电话会话暂时不可用，当前继续使用旧配对密钥。请保留刚导出的新恢复文件；旧恢复文件已经失效。"
                     errorMessage = error.localizedDescription
                 }
             } catch {

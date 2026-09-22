@@ -1,0 +1,30 @@
+#!/bin/sh
+directory=/usrdata/djonehub/notify
+binary=$directory/djonehub-notify.armv7
+pidfile=$directory/notify.pid
+registry=/usrdata/djonehub/pairing/registry.json
+owned() {
+    test -s "$pidfile" || return 1
+    read pid < "$pidfile"
+    case "$pid" in ''|*[!0-9]*) return 1;; esac
+    test "$(readlink "/proc/$pid/exe" 2>/dev/null)" = "$binary"
+}
+case "${1:-start}" in
+start)
+    if owned; then exit 0; fi
+    rm -f "$pidfile"
+    ulimit -c 0
+    registry_arg=
+    if test -f "$registry"; then registry_arg="-experimental-pairing-registry $registry"; fi
+    env GOMEMLIMIT=6MiB GOGC=25 GOMAXPROCS=1 \
+        SSL_CERT_FILE="$directory/ca.pem" LD_LIBRARY_PATH=/usr/lib \
+        "$binary" -config "$directory/config.json" \
+        -monitor "$directory/djonehub-notify-monitor.armv7" \
+        -log-file "$directory/notify.log" $registry_arg </dev/null >/dev/null 2>&1 &
+    printf '%s\n' "$!" > "$pidfile"
+    ;;
+stop)
+    if owned; then kill -TERM "$pid"; fi
+    rm -f "$pidfile"
+    ;;
+esac
