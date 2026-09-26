@@ -92,13 +92,23 @@ final class SystemCallCoordinator: NSObject, ObservableObject {
     func requestAnswer(callID: UInt8) {
         AppRingtone.shared.stop()
         guard let uuid = uuidByCallID[callID] else {
+            ConnectionLog.shared.append("CallKit 无来电映射，使用 App 音频接听")
+            lifecycle.endSystemCallAudio()
             lifecycle.answer(callID: callID)
             return
         }
         let transaction = CXTransaction(action: CXAnswerCallAction(call: uuid))
         callController.request(transaction) { [weak self] error in
-            guard error != nil else { return }
-            Task { @MainActor in self?.lifecycle.answer(callID: callID) }
+            Task { @MainActor in
+                guard let self else { return }
+                guard let error else {
+                    ConnectionLog.shared.append("CallKit 接听事务已提交，等待系统激活音频")
+                    return
+                }
+                ConnectionLog.shared.append("CallKit 接听事务失败，切换 App 音频：\(error.localizedDescription)")
+                self.lifecycle.endSystemCallAudio()
+                self.lifecycle.answer(callID: callID)
+            }
         }
     }
 
@@ -334,6 +344,7 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
         confirm(action.callUUID)
         lifecycle.answer(callID: callID)
         action.fulfill()
+        ConnectionLog.shared.append("CallKit 已执行接听，等待 didActivate")
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
@@ -349,12 +360,14 @@ extension SystemCallCoordinator: @preconcurrency CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        ConnectionLog.shared.append("CallKit didActivate，允许启动 PCM")
         AppRingtone.shared.stop(deactivateSession: false)
         isCallKitAudioActive = true
         lifecycle.systemCallAudioDidActivate()
     }
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        ConnectionLog.shared.append("CallKit didDeactivate，暂停 PCM")
         isCallKitAudioActive = false
         lifecycle.systemCallAudioDidDeactivate()
     }

@@ -3,6 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct InCallView: View {
+    @State private var showsKeypad = false
+    @State private var dtmfDigits = ""
     @EnvironmentObject private var voiceControl: VoiceControlModel
     @EnvironmentObject private var callAudio: CallAudioCoordinator
     @EnvironmentObject private var contacts: ContactsModel
@@ -26,6 +28,65 @@ struct InCallView: View {
             CallAudioRouteControl(audio: callAudio)
         }
         .onAppear { callAudio.refreshAvailableAudioRoutes() }
+        .overlay(alignment: .topTrailing) {
+            if isActive {
+                Button { showsKeypad = true } label: {
+                    Label("拨号键盘", systemImage: "circle.grid.3x3.fill")
+                        .padding(12)
+                }
+                .tint(.white)
+                .padding(.top, 16)
+                .padding(.trailing, 16)
+            }
+        }
+        .sheet(isPresented: $showsKeypad) {
+            NavigationStack {
+                VStack(spacing: 24) {
+                    Text(dtmfDigits.isEmpty ? " " : dtmfDigits)
+                        .font(.title.monospaced())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
+                        ForEach(Array("123456789*0#").map(String.init), id: \.self) { digit in
+                            Button {
+                                guard let callID = displayedPhase?.callID else { return }
+                                dtmfDigits.append(digit)
+                                voiceControl.sendDTMF(digit, callID: callID)
+                            } label: {
+                                Text(digit)
+                                    .font(.largeTitle)
+                                    .frame(width: 72, height: 72)
+                                    .background(.quaternary, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!isActive || voiceControl.isBusy)
+                        }
+                    }
+                    if voiceControl.stateText == "控制请求失败" {
+                        Text(voiceControl.detailText).font(.footnote).foregroundStyle(.red)
+                    }
+                    Button(role: .destructive) {
+                        if let callID = displayedPhase?.callID { onEnd(callID) }
+                        showsKeypad = false
+                    } label: {
+                        Label("挂断", systemImage: "phone.down.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(24)
+                .navigationTitle("拨号键盘")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { showsKeypad = false }
+                    }
+                }
+            }
+            .presentationDetents([.large])
+        }
+        .onChange(of: isActive) { _, active in
+            if !active { showsKeypad = false }
+        }
     }
 
     private var displayedPhase: ProductCallPhase? {
@@ -402,11 +463,23 @@ struct ModulePanelView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        ModuleAccessoryButton(
-                            onOpen: nil,
-                            compact: true,
-                            showsStatusLabels: true
-                        )
+                        HStack {
+                            ModuleAccessoryButton(
+                                onOpen: nil,
+                                compact: true,
+                                showsStatusLabels: true
+                            )
+                            Spacer(minLength: 12)
+                            Button {
+                                voiceControl.refreshStatus()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("刷新模块状态")
+                            .disabled(noDevice || !voiceControl.isConfigured || voiceControl.isBusy || !voiceControl.calls.isEmpty)
+                        }
                         if lifecycle.phase != .ready {
                             Text(connectionDescription)
                                 .font(.subheadline)
@@ -541,11 +614,6 @@ struct ModulePanelView: View {
             .onChange(of: callAudio.lastRecordingURL) { _, _ in reloadRecordings() }
             .onDisappear { recordingPlayer.stop() }
             .fullScreenCover(isPresented: $isShowingCallPreview) { CallScreenPreview() }
-            .refreshable {
-                guard !noDevice, voiceControl.isConfigured, !voiceControl.isBusy,
-                      voiceControl.calls.isEmpty else { return }
-                voiceControl.refreshStatus()
-            }
         }
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)

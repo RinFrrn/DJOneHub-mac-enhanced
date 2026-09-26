@@ -130,6 +130,17 @@ static int test_request_authentication(void)
     frame[6] = 4U;
     CHECK(djonehub_control_decode_request(key, nonce, frame, length,
                                           &request) == -1);
+    {
+        const uint8_t digit[] = {1U, '#'};
+        const uint8_t invalid[] = {1U, '+'};
+        length = djonehub_control_encode_request(key, nonce, DJONEHUB_VOICE_DTMF,
+            2U, digit, sizeof(digit), frame, sizeof(frame));
+        CHECK(length != 0U);
+        CHECK(djonehub_control_decode_request(key, nonce, frame, length, &request) == 0);
+        CHECK(request.operation == DJONEHUB_VOICE_DTMF);
+        CHECK(djonehub_control_encode_request(key, nonce, DJONEHUB_VOICE_DTMF,
+            3U, invalid, sizeof(invalid), frame, sizeof(frame)) == 0U);
+    }
     return 0;
 }
 

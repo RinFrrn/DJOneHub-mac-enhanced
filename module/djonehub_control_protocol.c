@@ -93,6 +93,8 @@ static int operation_from_wire(uint8_t wire,
         *operation = DJONEHUB_VOICE_ANSWER;
     } else if (wire == 4U) {
         *operation = DJONEHUB_VOICE_END;
+    } else if (wire == 7U) {
+        *operation = DJONEHUB_VOICE_DTMF;
     } else if (wire == 6U) {
         *operation = DJONEHUB_INTERNET;
     } else if (wire == 5U) {
@@ -118,6 +120,8 @@ static uint8_t operation_to_wire(enum djonehub_voice_operation operation)
         return 5U;
     case DJONEHUB_INTERNET:
         return 6U;
+    case DJONEHUB_VOICE_DTMF:
+        return 7U;
     default:
         return 0U;
     }
@@ -147,6 +151,10 @@ static int valid_dial_payload(const uint8_t *payload, size_t length)
 static int valid_operation_payload(enum djonehub_voice_operation operation,
                                    const uint8_t *payload, size_t length)
 {
+    if (operation == DJONEHUB_VOICE_DTMF) {
+        return length == 2U && payload != NULL && payload[0] != 0U &&
+            ((payload[1] >= '0' && payload[1] <= '9') || payload[1] == '*' || payload[1] == '#');
+    }
     if (operation == DJONEHUB_VOICE_STATUS) {
         return length == 0U;
     }

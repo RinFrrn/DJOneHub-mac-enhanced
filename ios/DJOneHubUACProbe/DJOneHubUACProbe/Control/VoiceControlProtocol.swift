@@ -22,6 +22,7 @@ enum VoiceControlOperation: UInt8, Sendable {
     case end = 4
     case usbAudio = 5
     case internet = 6
+    case dtmf = 7
 }
 
 enum VoiceControlStatus: UInt8, Sendable {
@@ -231,6 +232,12 @@ enum VoiceControlProtocol {
         internetEnabled: Bool? = nil
     ) throws -> Data {
         switch operation {
+        case .dtmf:
+            guard let callID, callID != 0, let phoneNumber,
+                  phoneNumber.utf8.count == 1, "0123456789*#".contains(phoneNumber) else {
+                throw VoiceControlProtocolError.invalidOperation
+            }
+            return Data([callID]) + Data(phoneNumber.utf8)
         case .status:
             return Data()
         case .dial:
@@ -269,6 +276,11 @@ enum VoiceControlProtocol {
 
     private static func validatePayload(operation: VoiceControlOperation, payload: Data) throws {
         switch operation {
+        case .dtmf:
+            guard payload.count == 2, payload[0] != 0,
+                  Array("0123456789*#".utf8).contains(payload[1]) else {
+                throw VoiceControlProtocolError.invalidOperation
+            }
         case .status:
             guard payload.isEmpty else { throw VoiceControlProtocolError.invalidOperation }
         case .dial:
@@ -291,6 +303,10 @@ enum VoiceControlProtocol {
 
     private static func validateResultSemantics(_ result: VoiceControlResult) throws {
         switch result.operation {
+        case .dtmf:
+            guard result.actionCallID != 0, result.confirmed else {
+                throw VoiceControlProtocolError.invalidSnapshot
+            }
         case .status:
             guard result.actionCallID == 0, !result.confirmed else {
                 throw VoiceControlProtocolError.invalidSnapshot

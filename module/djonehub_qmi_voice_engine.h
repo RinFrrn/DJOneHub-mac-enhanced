@@ -30,8 +30,8 @@ struct djonehub_qmi_voice_result {
 };
 
 /*
- * Executes one fixed QMI Voice operation.  number is used only for DIAL;
- * call_id is used only for ANSWER/END.  Mutating operations enforce policy
+ * Executes one fixed QMI Voice operation. number is a phone number for DIAL
+ * or a single digit for DTMF; call_id selects ANSWER/END/DTMF. Operations enforce policy
  * against a fresh snapshot and confirm the resulting state by read-back.
  */
 enum djonehub_qmi_voice_error djonehub_qmi_voice_execute(

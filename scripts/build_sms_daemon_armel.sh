@@ -33,7 +33,7 @@ case ${DJONEHUB_QMI_BUILD_TARGET:-sms} in
     voice)
         BINARY_BASE=djonehub-voice-daemon
         AUDIT_LISTEN=192.168.225.1:45750
-        AUDIT_SCOPE=status/dial/answer/end/usb-audio/read-only-nas-signal
+        AUDIT_SCOPE=status/dial/answer/end/dtmf/usb-audio/read-only-nas-signal
         SOURCES="
 $PROJECT_DIR/module/djonehub_voice_daemon.c
 $PROJECT_DIR/module/djonehub_internet_policy.c

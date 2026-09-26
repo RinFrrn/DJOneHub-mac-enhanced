@@ -429,6 +429,13 @@ final class VoiceControlModel: ObservableObject {
         }
     }
 
+    func sendDTMF(_ digit: String, callID: UInt8) {
+        guard let client, canControlCalls else { return }
+        perform(state: nil, success: nil, operation: {
+            try await client.sendDTMF(digit, callID: callID)
+        })
+    }
+
     func end(callID: UInt8) {
         guard let client, requireCallControl() else { return }
         perform(state: "挂断中…", success: "挂断命令已确认") {
@@ -645,6 +652,11 @@ actor VoiceControlClient {
     func answer(callID: UInt8) async throws -> VoiceControlResult {
         let payload = try VoiceControlProtocol.payload(for: .answer, callID: callID)
         return try await perform(.answer, payload: payload)
+    }
+
+    func sendDTMF(_ digit: String, callID: UInt8) async throws -> VoiceControlResult {
+        let payload = try VoiceControlProtocol.payload(for: .dtmf, phoneNumber: digit, callID: callID)
+        return try await perform(.dtmf, payload: payload)
     }
 
     func end(callID: UInt8) async throws -> VoiceControlResult {

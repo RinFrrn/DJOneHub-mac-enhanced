@@ -58,6 +58,9 @@ int djonehub_voice_action_allowed(
         return call->state == QMI_VOICE_STATE_INCOMING ||
                call->state == QMI_VOICE_STATE_WAITING;
     }
+    if (operation == DJONEHUB_VOICE_DTMF) {
+        return call->state == QMI_VOICE_STATE_CONVERSATION;
+    }
     if (operation == DJONEHUB_VOICE_END) {
         return call->state != QMI_VOICE_STATE_END;
     }

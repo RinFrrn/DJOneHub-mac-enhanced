@@ -146,6 +146,8 @@ func updateModuleAuthorizationRuntime(artifactDir string) error {
 		{filepath.Join(artifactDir, "djonehub-notify.armv7"), moduleNotifyDir + "/djonehub-notify.armv7", 0100700, nil},
 		{filepath.Join(artifactDir, "djonehub-notify-monitor.armv7"), moduleNotifyDir + "/djonehub-notify-monitor.armv7", 0100700, nil},
 		{filepath.Join(artifactDir, "djonehub-voice-daemon.armv7"), voiceTestRemoteBinary, 0100700, nil},
+		{filepath.Join(artifactDir, "djonehub-sms-daemon.armv7"), voiceTestRemoteSMS, 0100700, nil},
+		{filepath.Join(artifactDir, "mavo-pcm-bridge.armv7"), voiceTestRemoteUplink, 0100700, nil},
 		{"", moduleNotifyDir + "/start-on-boot.sh", 0100700, []byte(moduleNotifyStartScript)},
 		{"", voiceTestRemoteScript, 0100700, []byte(voiceTestStartScript)},
 	}
@@ -226,6 +228,12 @@ func updateModuleAuthorizationRuntime(artifactDir string) error {
 	if err := stopVoiceTestProcess(adb); err != nil {
 		return err
 	}
+	if err := stopVoiceTestUplinkProcess(adb); err != nil {
+		return err
+	}
+	if err := stopVoiceTestSMSProcess(adb); err != nil {
+		return err
+	}
 	for _, file := range files {
 		current, pullErr := adb.pull(file.remote, 9*1024*1024, 120*time.Second)
 		if pullErr != nil || len(current) == 0 {
@@ -252,7 +260,14 @@ func updateModuleAuthorizationRuntime(artifactDir string) error {
 	if err := sentinelShell(adb, startNotify, 15*time.Second); err != nil {
 		return err
 	}
-	if err := sentinelShell(adb, "nohup setsid '"+voiceTestRemoteScript+"' </dev/null >/tmp/djonehub-session-launch.log 2>&1 & sleep 2; test -f '"+voiceTestRemoteState+"'", 12*time.Second); err != nil {
+	launch := "rm -f '" + voiceTestRemoteState + "' /tmp/djonehub-session-launch.log; " +
+		"nohup setsid '" + voiceTestRemoteScript + "' </dev/null >/tmp/djonehub-session-launch.log 2>&1 & " +
+		"ready=0; attempt=0; while test \"$attempt\" -lt 120; do " +
+		"state=$(cat '" + voiceTestRemoteState + "' 2>/dev/null); " +
+		"if test \"$state\" = listener-ready; then ready=1; break; fi; " +
+		"case \"$state\" in *-failed|daemon-exit:*) break;; esac; " +
+		"attempt=$((attempt + 1)); sleep 0.1; done; test \"$ready\" = 1"
+	if err := sentinelShell(adb, launch, 20*time.Second); err != nil {
 		return fmt.Errorf("新电话服务启动失败: %w", err)
 	}
 	fmt.Println("Updated authorization runtime; existing identity, recovery authority, notification config and legacy call key were preserved.")

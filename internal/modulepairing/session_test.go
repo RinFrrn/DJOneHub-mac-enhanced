@@ -47,3 +47,26 @@ func TestVoiceSessionRegistryIsPrivateAndVolatile(t *testing.T) {
 		t.Fatal("session survived clear")
 	}
 }
+
+func TestVoiceSessionRegistryReusesUnexpiredSession(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	registry := SessionRegistry{Path: filepath.Join(t.TempDir(), "voice-sessions.v1")}
+	first, err := registry.Issue(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.Issue(now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Credential != first.Credential || second.ExpiresAt != first.ExpiresAt {
+		t.Fatal("unexpired session was unexpectedly rotated")
+	}
+	third, err := registry.Issue(now.Add(VoiceSessionLifetime))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Credential == first.Credential || third.ExpiresAt <= first.ExpiresAt {
+		t.Fatal("expired session was not replaced")
+	}
+}

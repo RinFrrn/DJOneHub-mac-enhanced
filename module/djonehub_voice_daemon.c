@@ -314,7 +314,11 @@ static enum djonehub_qmi_voice_error execute_request(
     uint8_t call_id = 0U;
 
     memset(number, 0, sizeof(number));
-    if (request->operation == DJONEHUB_VOICE_DIAL) {
+    if (request->operation == DJONEHUB_VOICE_DTMF) {
+        call_id = request->payload[0];
+        number[0] = (char)request->payload[1];
+        number_argument = number;
+    } else if (request->operation == DJONEHUB_VOICE_DIAL) {
         memcpy(number, request->payload, request->payload_length);
         number_argument = number;
     } else if (request->operation == DJONEHUB_VOICE_ANSWER ||

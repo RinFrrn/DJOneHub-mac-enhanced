@@ -141,12 +141,12 @@ remove_ephemeral_key() {
             if test "$start_uplink" = 1; then
                 (ulimit -s 256 || exit 1; export LD_LIBRARY_PATH=/usr/lib; exec "$uplink" --uplink-listener \
                     --listen-address 192.168.225.1 --audio-port 45751 \
-                    --token-file "$key" --interface bridge0) >>"$log" 2>&1 &
+                    --token-file "$key" --session-file "$session_file" --interface bridge0) >>"$log" 2>&1 &
                 uplink_pid=$!
                 printf '%s\n' "$uplink_pid" >"$uplink_pidfile"
             fi
             if test "$start_sms" = 1; then
-                LD_LIBRARY_PATH=/usr/lib "$sms_binary" --read-only --key-file "$key" >>"$log" 2>&1 &
+                LD_LIBRARY_PATH=/usr/lib "$sms_binary" --read-only --key-file "$key" --session-file "$session_file" >>"$log" 2>&1 &
                 sms_pid=$!
                 printf '%s\n' "$sms_pid" >"$sms_pidfile"
             fi

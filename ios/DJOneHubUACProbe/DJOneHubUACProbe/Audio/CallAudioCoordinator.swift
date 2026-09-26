@@ -1273,6 +1273,7 @@ final class CallAudioCoordinator: ObservableObject {
     }
 
     private func trace(_ message: String) {
+        ConnectionLog.shared.append("音频：\(message)")
 #if DEBUG
         print("DJOneHubAudio \(message)")
 #endif

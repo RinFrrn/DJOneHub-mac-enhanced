@@ -306,7 +306,20 @@ static enum djonehub_qmi_voice_error run_operation(
                                        requested_call_id)) {
         return DJONEHUB_QMI_VOICE_PRECONDITION;
     }
-    if (operation == DJONEHUB_VOICE_DIAL) {
+    if (operation == DJONEHUB_VOICE_DTMF) {
+        if (number == NULL || number[1] != '\0' ||
+            !((number[0] >= '0' && number[0] <= '9') || number[0] == '*' || number[0] == '#')) {
+            return DJONEHUB_QMI_VOICE_INVALID_INPUT;
+        }
+        request[0] = 0x01U;
+        request[1] = 3U;
+        request[2] = 0U;
+        request[3] = requested_call_id;
+        request[4] = 1U;
+        request[5] = (uint8_t)number[0];
+        request_length = 6U;
+        message_id = 0x0028U;
+    } else if (operation == DJONEHUB_VOICE_DIAL) {
         if (djonehub_voice_build_dial_request(
                 number, request, sizeof(request), &request_length) != 0) {
             return DJONEHUB_QMI_VOICE_INVALID_INPUT;
@@ -335,6 +348,10 @@ static enum djonehub_qmi_voice_error run_operation(
     if (operation != DJONEHUB_VOICE_DIAL &&
         result->action_call_id != requested_call_id) {
         return DJONEHUB_QMI_VOICE_CALL_ID_MISMATCH;
+    }
+    if (operation == DJONEHUB_VOICE_DTMF) {
+        result->confirmed = 1U;
+        return DJONEHUB_QMI_VOICE_SUCCESS;
     }
     confirmation_result = wait_for_confirmation(
         api, client, operation, result->action_call_id, result);

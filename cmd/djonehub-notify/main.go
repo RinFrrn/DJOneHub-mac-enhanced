@@ -189,7 +189,6 @@ func run() (runErr error) {
 		defer cancel()
 		results := make(chan error, 2)
 		sessions := &modulepairing.SessionRegistry{Path: *voiceSessions}
-		_ = sessions.Clear()
 		go func() {
 			results <- (modulepairing.Server{Store: store, Sessions: sessions}).Serve(managedContext, listener)
 		}()
