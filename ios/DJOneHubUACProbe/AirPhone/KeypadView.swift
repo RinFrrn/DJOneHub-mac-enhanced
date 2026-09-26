@@ -473,7 +473,7 @@ private struct DialpadCallButtonStyle: ViewModifier {
 }
 
 @MainActor
-private final class DialpadTonePlayer: ObservableObject {
+final class DialpadTonePlayer: ObservableObject {
     private var sounds: [String: SystemSoundID] = [:]
     private var isPreparing = false
 

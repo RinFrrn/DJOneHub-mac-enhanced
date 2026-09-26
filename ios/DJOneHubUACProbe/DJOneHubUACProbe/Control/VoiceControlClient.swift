@@ -37,6 +37,8 @@ final class VoiceControlModel: ObservableObject {
     private var requestWatchdogTask: Task<Void, Never>?
     private var requestGeneration = 0
     private var requestArbitration = VoiceControlRequestArbitration()
+    private var pendingDTMF: [(digit: String, callID: UInt8)] = []
+    private var dtmfRetryTask: Task<Void, Never>?
 
     var isConfigured: Bool { client != nil }
     var hasTestPairing: Bool { legacyClient != nil }
@@ -58,6 +60,7 @@ final class VoiceControlModel: ObservableObject {
         requestTask?.cancel()
         requestWatchdogTask?.cancel()
         authorizationTask?.cancel()
+        dtmfRetryTask?.cancel()
     }
 
     /// Injects a key only for the lifetime of this model; it is never persisted.
@@ -430,10 +433,44 @@ final class VoiceControlModel: ObservableObject {
     }
 
     func sendDTMF(_ digit: String, callID: UInt8) {
-        guard let client, canControlCalls else { return }
+        guard canControlCalls, digit.utf8.count == 1,
+              "0123456789*#".contains(digit), callID != 0 else { return }
+        pendingDTMF.append((digit, callID))
+        ConnectionLog.shared.append("DTMF 已加入发送队列：\(digit)，待发送 \(pendingDTMF.count) 个")
+        drainDTMFQueue()
+    }
+
+    private func drainDTMFQueue() {
+        guard let client, canControlCalls, let next = pendingDTMF.first else { return }
+        guard !isBusy else {
+            scheduleDTMFRetry()
+            return
+        }
+        pendingDTMF.removeFirst()
         perform(state: nil, success: nil, operation: {
-            try await client.sendDTMF(digit, callID: callID)
+            do {
+                return try await client.sendDTMF(next.digit, callID: next.callID)
+            } catch {
+                await MainActor.run { [weak self] in
+                    ConnectionLog.shared.append("DTMF 发送失败：\(next.digit)，\(error.localizedDescription)")
+                    self?.scheduleDTMFRetry()
+                }
+                throw error
+            }
+        }, onSuccess: { [weak self] _ in
+            ConnectionLog.shared.append("DTMF 发送成功：\(next.digit)")
+            self?.drainDTMFQueue()
         })
+    }
+
+    private func scheduleDTMFRetry() {
+        guard dtmfRetryTask == nil, !pendingDTMF.isEmpty else { return }
+        dtmfRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            self?.dtmfRetryTask = nil
+            self?.drainDTMFQueue()
+        }
     }
 
     func end(callID: UInt8) {

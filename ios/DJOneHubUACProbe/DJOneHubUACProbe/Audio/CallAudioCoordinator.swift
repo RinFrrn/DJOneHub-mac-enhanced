@@ -64,6 +64,26 @@ final class CallAudioCoordinator: ObservableObject {
     private var pipeline: PCMTransport?
     private var downlinkPlayer: DownlinkPCMPlayer?
     private var playerNode: AVAudioPlayerNode?
+    private var keypadToneNode: AVAudioPlayerNode?
+
+    func playKeypadTone(_ digit: String) {
+        let keys = Array("123456789*0#").map(String.init)
+        guard let index = keys.firstIndex(of: digit),
+              let engine, engine.isRunning, let keypadToneNode,
+              let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 5_760),
+              let samples = buffer.floatChannelData?[0] else { return }
+        buffer.frameLength = 5_760
+        let low = [697.0, 770.0, 852.0, 941.0][index / 3]
+        let high = [1209.0, 1336.0, 1477.0][index % 3]
+        for frame in 0..<Int(buffer.frameLength) {
+            let time = Double(frame) / format.sampleRate
+            let envelope = min(1.0, Double(min(frame, Int(buffer.frameLength) - 1 - frame)) / 240.0)
+            samples[frame] = Float(0.16 * envelope * (sin(2 * .pi * low * time) + sin(2 * .pi * high * time)))
+        }
+        keypadToneNode.scheduleBuffer(buffer)
+        if !keypadToneNode.isPlaying { keypadToneNode.play() }
+    }
     private var networkFormat: AVAudioFormat?
     private var notificationObservers: [NSObjectProtocol] = []
     private var desiredUplinkEnabled = false
@@ -445,6 +465,7 @@ final class CallAudioCoordinator: ObservableObject {
         converter = nil
         downlinkPlayer = nil
         playerNode = nil
+        keypadToneNode = nil
         networkFormat = nil
         engine = nil
         activeRouteSignature = ""
@@ -536,6 +557,11 @@ final class CallAudioCoordinator: ObservableObject {
             }
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
+            let keypadTone = AVAudioPlayerNode()
+            engine.attach(keypadTone)
+            engine.connect(keypadTone, to: engine.mainMixerNode,
+                           format: AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+            keypadToneNode = keypadTone
 
             input.installTap(onBus: 0, bufferSize: 768, format: inputFormat) { buffer, _ in
                 do {

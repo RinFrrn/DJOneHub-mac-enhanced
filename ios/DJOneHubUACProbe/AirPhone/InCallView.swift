@@ -21,69 +21,15 @@ struct InCallView: View {
             isRecording: callAudio.isRecording, isMuted: lifecycle.isMuted,
             isActive: isActive, isRecovering: isRecovering, incomingCallID: incomingCallID,
             callID: displayedPhase?.callID, canSelectAudioRoute: callAudio.canSelectAudioRoute,
+            showsKeypad: showsKeypad, keypadDigits: dtmfDigits,
             recordingErrorText: callAudio.recordingErrorText, audioRouteErrorText: callAudio.audioRouteErrorText,
             onAnswer: onAnswer, onEnd: onEnd, onToggleMute: onToggleMute,
-            onToggleRecording: onToggleRecording
+            onShowKeypad: { showsKeypad = true }, onHideKeypad: { showsKeypad = false },
+            onKeypadDigit: sendDTMF, onToggleRecording: onToggleRecording
         ) {
             CallAudioRouteControl(audio: callAudio)
         }
         .onAppear { callAudio.refreshAvailableAudioRoutes() }
-        .overlay(alignment: .topTrailing) {
-            if isActive {
-                Button { showsKeypad = true } label: {
-                    Label("拨号键盘", systemImage: "circle.grid.3x3.fill")
-                        .padding(12)
-                }
-                .tint(.white)
-                .padding(.top, 16)
-                .padding(.trailing, 16)
-            }
-        }
-        .sheet(isPresented: $showsKeypad) {
-            NavigationStack {
-                VStack(spacing: 24) {
-                    Text(dtmfDigits.isEmpty ? " " : dtmfDigits)
-                        .font(.title.monospaced())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
-                        ForEach(Array("123456789*0#").map(String.init), id: \.self) { digit in
-                            Button {
-                                guard let callID = displayedPhase?.callID else { return }
-                                dtmfDigits.append(digit)
-                                voiceControl.sendDTMF(digit, callID: callID)
-                            } label: {
-                                Text(digit)
-                                    .font(.largeTitle)
-                                    .frame(width: 72, height: 72)
-                                    .background(.quaternary, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!isActive || voiceControl.isBusy)
-                        }
-                    }
-                    if voiceControl.stateText == "控制请求失败" {
-                        Text(voiceControl.detailText).font(.footnote).foregroundStyle(.red)
-                    }
-                    Button(role: .destructive) {
-                        if let callID = displayedPhase?.callID { onEnd(callID) }
-                        showsKeypad = false
-                    } label: {
-                        Label("挂断", systemImage: "phone.down.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding(24)
-                .navigationTitle("拨号键盘")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { showsKeypad = false }
-                    }
-                }
-            }
-            .presentationDetents([.large])
-        }
         .onChange(of: isActive) { _, active in
             if !active { showsKeypad = false }
         }
@@ -91,6 +37,13 @@ struct InCallView: View {
 
     private var displayedPhase: ProductCallPhase? {
         lifecycle.presentedCallPhase
+    }
+
+    private func sendDTMF(_ digit: String) {
+        guard isActive, let callID = displayedPhase?.callID else { return }
+        callAudio.playKeypadTone(digit)
+        dtmfDigits.append(digit)
+        voiceControl.sendDTMF(digit, callID: callID)
     }
 
     private var isRecovering: Bool {
@@ -147,11 +100,16 @@ private struct CallScreenLayout<RouteControl: View>: View {
     let incomingCallID: UInt8?
     let callID: UInt8?
     let canSelectAudioRoute: Bool
+    let showsKeypad: Bool
+    let keypadDigits: String
     let recordingErrorText: String
     let audioRouteErrorText: String
     let onAnswer: (UInt8) -> Void
     let onEnd: (UInt8) -> Void
     let onToggleMute: () -> Void
+    let onShowKeypad: () -> Void
+    let onHideKeypad: () -> Void
+    let onKeypadDigit: (String) -> Void
     let onToggleRecording: () -> Void
     @ViewBuilder let routeControl: () -> RouteControl
 
@@ -175,14 +133,17 @@ private struct CallScreenLayout<RouteControl: View>: View {
                     .font(.title3.monospacedDigit())
                     .foregroundStyle(isRecording ? .red : .white.opacity(0.68))
 
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 120, height: 120)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 52))
-                            .foregroundStyle(.white.opacity(0.82))
-                    }
+                if !showsKeypad || !isActive {
+                    Circle()
+                        .fill(.white.opacity(0.13))
+                        .frame(width: 120, height: 120)
+                        .overlay {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 52))
+                                .foregroundStyle(.white.opacity(0.82))
+                        }
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
 
                 if isRecovering {
                     Spacer()
@@ -205,16 +166,43 @@ private struct CallScreenLayout<RouteControl: View>: View {
                     }
                 } else {
                     Spacer()
-                    routeControl()
-                        .disabled(!isActive || !canSelectAudioRoute)
-                        .opacity(isActive && canSelectAudioRoute ? 1 : 0.45)
-                    HStack(spacing: 54) {
+                    if showsKeypad && isActive {
+                        InlineCallKeypad(digits: keypadDigits, onDigit: onKeypadDigit)
+
+                        HStack(spacing: 48) {
+                            CallActionButton(
+                                title: "隐藏",
+                                systemImage: "circle.grid.3x3.fill",
+                                color: .white,
+                                foreground: .black,
+                                action: onHideKeypad
+                            )
+                            if let callID {
+                                CallActionButton(title: "挂断", systemImage: "phone.down.fill", color: .red) {
+                                    onEnd(callID)
+                                }
+                            }
+                        }
+                    } else {
+                        routeControl()
+                            .disabled(!isActive || !canSelectAudioRoute)
+                            .opacity(isActive && canSelectAudioRoute ? 1 : 0.45)
+                        HStack(spacing: 28) {
                         CallActionButton(
                             title: "静音",
                             systemImage: isMuted ? "mic.slash.fill" : "mic.fill",
                             color: isMuted ? .white : .white.opacity(0.18),
                             foreground: isMuted ? .black : .white,
                             action: onToggleMute
+                        )
+                        .disabled(!isActive)
+                        .opacity(isActive ? 1 : 0.45)
+
+                        CallActionButton(
+                            title: "键盘",
+                            systemImage: "circle.grid.3x3.fill",
+                            color: .white.opacity(0.18),
+                            action: onShowKeypad
                         )
                         .disabled(!isActive)
                         .opacity(isActive ? 1 : 0.45)
@@ -227,33 +215,71 @@ private struct CallScreenLayout<RouteControl: View>: View {
                         )
                         .disabled(!isActive)
                         .opacity(isActive ? 1 : 0.45)
-                    }
-
-                    if !recordingErrorText.isEmpty {
-                        Text(recordingErrorText)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-
-                    if !audioRouteErrorText.isEmpty {
-                        Text(audioRouteErrorText)
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    if let callID {
-                        CallActionButton(title: "挂断", systemImage: "phone.down.fill", color: .red) {
-                            onEnd(callID)
                         }
-                    } else {
-                        ProgressView().tint(.white)
+
+                        if !recordingErrorText.isEmpty {
+                            Text(recordingErrorText)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+
+                        if !audioRouteErrorText.isEmpty {
+                            Text(audioRouteErrorText)
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        if let callID {
+                            CallActionButton(title: "挂断", systemImage: "phone.down.fill", color: .red) {
+                                onEnd(callID)
+                            }
+                        } else {
+                            ProgressView().tint(.white)
+                        }
                     }
                 }
                 Spacer(minLength: 30)
             }
             .padding(.horizontal, 28)
+            .animation(.spring(response: 0.32, dampingFraction: 1), value: showsKeypad)
         }
+    }
+}
+
+private struct InlineCallKeypad: View {
+    @StateObject private var tonePlayer = DialpadTonePlayer()
+    let digits: String
+    let onDigit: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(digits.isEmpty ? "拨号键盘" : digits)
+                .font(digits.isEmpty ? .headline : .title2.monospaced())
+                .foregroundStyle(digits.isEmpty ? .white.opacity(0.6) : .white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .frame(height: 28)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                ForEach(Array("123456789*0#").map(String.init), id: \.self) { digit in
+                    Button {
+                        tonePlayer.play(digit)
+                        onDigit(digit)
+                    } label: {
+                        Text(digit)
+                            .font(.system(size: 30, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(width: 62, height: 62)
+                            .background(.white.opacity(0.16), in: Circle())
+                    }
+                    .buttonStyle(PhoneCircleButtonStyle())
+                    .accessibilityLabel("按键 \(digit)")
+                }
+            }
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .task { await tonePlayer.prepare() }
     }
 }
 
@@ -262,6 +288,8 @@ private struct CallScreenPreview: View {
     @Environment(\.dismiss) private var dismiss
     @State private var incoming = false
     @State private var muted = false
+    @State private var showsKeypad = false
+    @State private var keypadDigits = ""
     @State private var recordingStarted: Date?
     @State private var connectedAt = Date()
     @State private var selectedRoute = "receiver"
@@ -279,10 +307,14 @@ private struct CallScreenPreview: View {
                 isRecording: recordingStarted != nil, isMuted: muted,
                 isActive: !incoming, isRecovering: false, incomingCallID: incoming ? 1 : nil,
                 callID: 1, canSelectAudioRoute: true,
+                showsKeypad: showsKeypad, keypadDigits: keypadDigits,
                 recordingErrorText: "", audioRouteErrorText: "",
                 onAnswer: { _ in reset(incoming: false) },
                 onEnd: { _ in dismiss() },
                 onToggleMute: { muted.toggle() },
+                onShowKeypad: { showsKeypad = true },
+                onHideKeypad: { showsKeypad = false },
+                onKeypadDigit: { keypadDigits.append($0) },
                 onToggleRecording: { recordingStarted = recordingStarted == nil ? Date() : nil }
             ) {
                 CallAudioRoutePicker(routes: routes, selectedID: selectedRoute) {
@@ -329,6 +361,8 @@ private struct CallScreenPreview: View {
     private func reset(incoming: Bool) {
         self.incoming = incoming
         muted = false
+        showsKeypad = false
+        keypadDigits = ""
         recordingStarted = nil
         connectedAt = Date()
         selectedRoute = "receiver"

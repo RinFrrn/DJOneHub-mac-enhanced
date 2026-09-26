@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	voiceDaemonExpectedSHA256         = "b801117d9737e1227215840b293004e5843595b7d081cf72ccd017542de892f5"
+	voiceDaemonExpectedSHA256         = "320ff8223c3e4ba5136b2366d8ecb3fa80e847c1ac8d3b0206d83a406f69e199"
 	voiceSMSExpectedSHA256            = "540fd5685e9282607db4ee901940ca753993e176150f9c30119167c44a29100b"
 	voiceUplinkExpectedSHA256         = "801f8ba302e1bc60c9b5a680fa84daf4e78c398ed1232aa3a63ae6dd1913ef83"
 	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
