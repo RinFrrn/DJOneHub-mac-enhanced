@@ -8,6 +8,13 @@
 #define DJONEHUB_VOICE_MAX_NUMBER_BYTES 81U
 #define DJONEHUB_VOICE_MAX_REMOTE_NUMBER_BYTES 81U
 #define DJONEHUB_OPERATOR_NAME_BYTES 32U
+#define DJONEHUB_VOICE_MAX_END_EVENTS 16U
+
+struct djonehub_voice_end_event {
+    uint64_t sequence;
+    uint8_t call_id;
+    uint16_t reason;
+};
 
 struct djonehub_voice_call {
     uint8_t id;
@@ -36,7 +43,23 @@ struct djonehub_voice_snapshot {
     struct djonehub_radio_status radio;
     size_t count;
     struct djonehub_voice_call calls[DJONEHUB_VOICE_MAX_CALLS];
+    size_t end_reason_count;
+    struct {
+        uint8_t call_id;
+        uint16_t reason;
+    } end_reasons[DJONEHUB_VOICE_MAX_CALLS];
+    uint64_t event_session;
+    size_t end_event_count;
+    struct djonehub_voice_end_event end_events[DJONEHUB_VOICE_MAX_END_EVENTS];
 };
+
+/* Raw QMI reason array: count followed by (call ID, little-endian uint16).
+ * Query response uses TLV 0x18; all-call-status indication uses 0x14. */
+int djonehub_voice_parse_end_reasons(const uint8_t *message, size_t length,
+                                    uint8_t tlv_type,
+                                    struct djonehub_voice_snapshot *snapshot);
+int djonehub_voice_parse_indication(const uint8_t *message, size_t length,
+                                    struct djonehub_voice_snapshot *snapshot);
 
 /*
  * Response parsers return 0 for QMI success, 1 for a QMI service error and

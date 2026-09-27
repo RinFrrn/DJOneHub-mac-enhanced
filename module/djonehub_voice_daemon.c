@@ -39,7 +39,10 @@ __asm__(".symver fcntl,fcntl@GLIBC_2.4");
 
 #define CONTROL_ADDRESS "192.168.225.1"
 #define CONTROL_INTERFACE "bridge0"
-#define CONTROL_PORT 45750U
+#ifndef DJONEHUB_CONTROL_PORT
+#define DJONEHUB_CONTROL_PORT 45750U
+#endif
+#define CONTROL_PORT DJONEHUB_CONTROL_PORT
 #define CONTROL_BACKLOG 4
 #define CONTROL_TIMEOUT_SECONDS 5
 #define RANDOM_DEVICE "/dev/urandom"

@@ -92,12 +92,30 @@ struct ModuleRadioStatus: Equatable, Sendable {
     }
 }
 
+struct VoiceCallEndEvent: Equatable, Sendable {
+    let sequence: UInt64
+    let callID: UInt8
+    let rawReason: UInt16
+
+    var title: String {
+        switch rawReason {
+        case 146: return "对方忙"
+        case 147, 148: return "无人接听"
+        case 149: return "呼叫被拒绝"
+        case 142, 157...160: return "网络暂时无法接通"
+        default: return "呼叫已结束"
+        }
+    }
+}
+
 struct VoiceControlResult: Equatable, Sendable {
     let operation: VoiceControlOperation
     let actionCallID: UInt8
     let confirmed: Bool
     let calls: [VoiceCallSnapshot]
     var radio: ModuleRadioStatus? = nil
+    var eventSession: UInt64? = nil
+    var endEvents: [VoiceCallEndEvent] = []
     var internetEnabled: Bool? = nil
 }
 
@@ -120,7 +138,8 @@ enum VoiceControlProtocol {
     static let resultExtensionHeaderBytes = 3
     static let remotePartyNumbersExtensionType: UInt8 = 1
     static let maxSnapshotBytes = snapshotBaseBytes + maxCalls * callRecordBytes
-        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes) + 10
+        + resultExtensionHeaderBytes + 1 + maxCalls * (3 + maxRemoteNumberBytes)
+        + 11 + 32 + 12 + 16 * 11
     static let maxPayloadBytes = 81
     static let maxDialBytes = 80
     static let maxResponseFrameBytes = headerBytes + maxSnapshotBytes + tagBytes
@@ -312,9 +331,11 @@ enum VoiceControlProtocol {
                 throw VoiceControlProtocolError.invalidSnapshot
             }
         case .dial:
-            guard result.actionCallID != 0, result.confirmed,
-                  let call = result.calls.first(where: { $0.id == result.actionCallID }),
-                  [UInt8(0x01), 0x03, 0x04, 0x05].contains(call.state) else {
+            let hasLiveCall = result.calls.contains {
+                $0.id == result.actionCallID && [UInt8(0x01), 0x03, 0x04, 0x05].contains($0.state)
+            }
+            let hasEndedCall = result.endEvents.contains { $0.callID == result.actionCallID }
+            guard result.actionCallID != 0, result.confirmed, hasLiveCall || hasEndedCall else {
                 throw VoiceControlProtocolError.invalidSnapshot
             }
         case .answer:
@@ -378,6 +399,8 @@ enum VoiceControlProtocol {
 
         var radio: ModuleRadioStatus?
         var internetEnabled: Bool?
+        var eventSession: UInt64?
+        var endEvents: [VoiceCallEndEvent] = []
         var extensionOffset = fixedRecordsEnd
         while extensionOffset < payload.count {
             guard payload.count - extensionOffset >= resultExtensionHeaderBytes else {
@@ -439,6 +462,30 @@ enum VoiceControlProtocol {
                 guard extensionOffset == extensionEnd else {
                     throw VoiceControlProtocolError.invalidSnapshot
                 }
+            } else if extensionType == 4 {
+                guard extensionLength >= 9, eventSession == nil else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                let session = readBE64(payload, extensionOffset)
+                let eventCount = Int(payload[extensionOffset + 8])
+                guard session != 0, eventCount <= 16,
+                      extensionLength == 9 + eventCount * 11 else {
+                    throw VoiceControlProtocolError.invalidSnapshot
+                }
+                eventSession = session
+                extensionOffset += 9
+                var previous: UInt64 = 0
+                for _ in 0..<eventCount {
+                    let sequence = readBE64(payload, extensionOffset)
+                    let callID = payload[extensionOffset + 8]
+                    guard sequence > previous, callID != 0 else {
+                        throw VoiceControlProtocolError.invalidSnapshot
+                    }
+                    endEvents.append(VoiceCallEndEvent(sequence: sequence, callID: callID,
+                        rawReason: readBE16(payload, extensionOffset + 9)))
+                    previous = sequence
+                    extensionOffset += 11
+                }
             } else if extensionType == 3 {
                 guard extensionLength == 1, internetEnabled == nil,
                       (1...2).contains(payload[extensionOffset]) else {
@@ -485,6 +532,8 @@ enum VoiceControlProtocol {
             confirmed: payload[2] != 0,
             calls: calls,
             radio: radio,
+            eventSession: eventSession,
+            endEvents: endEvents,
             internetEnabled: internetEnabled
         )
     }

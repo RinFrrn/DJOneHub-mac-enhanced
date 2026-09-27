@@ -304,7 +304,8 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
     size_t required;
     size_t index;
 
-    if (result == NULL || result->snapshot.count > DJONEHUB_VOICE_MAX_CALLS) {
+    if (result == NULL || result->snapshot.count > DJONEHUB_VOICE_MAX_CALLS ||
+        result->snapshot.end_event_count > DJONEHUB_VOICE_MAX_END_EVENTS) {
         return 0U;
     }
     required = 4U + result->snapshot.count * 7U;
@@ -330,6 +331,8 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         required += 7U + result->snapshot.radio.operator_name_length;
     }
     if (result->snapshot.internet_state != 0U) required += 4U;
+    if (result->snapshot.event_session != 0U)
+        required += 12U + result->snapshot.end_event_count * 11U;
     if (capacity < required || operation_to_wire(result->operation) == 0U) {
         return 0U;
     }
@@ -376,7 +379,8 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
     if (result->snapshot.radio.valid) {
         size_t radio_length = 4U + result->snapshot.radio.operator_name_length;
         size_t offset = required - (3U + radio_length) -
-            (result->snapshot.internet_state != 0U ? 4U : 0U);
+            (result->snapshot.internet_state != 0U ? 4U : 0U) -
+            (result->snapshot.event_session != 0U ? 12U + result->snapshot.end_event_count * 11U : 0U);
         output[offset] = 2U;
         store_be16(output + offset + 1U, (uint16_t)radio_length);
         output[offset + 3U] = 1U;
@@ -389,11 +393,28 @@ static size_t encode_result_payload(const struct djonehub_control_result *result
         }
     }
     if (result->snapshot.internet_state != 0U) {
-        size_t offset = required - 4U;
+        size_t offset = required - 4U -
+            (result->snapshot.event_session != 0U ? 12U + result->snapshot.end_event_count * 11U : 0U);
         if (result->snapshot.internet_state > 2U) return 0U;
         output[offset] = 3U;
         store_be16(output + offset + 1U, 1U);
         output[offset + 3U] = result->snapshot.internet_state;
+    }
+    if (result->snapshot.event_session != 0U) {
+        size_t length = 9U + result->snapshot.end_event_count * 11U;
+        size_t offset = required - 3U - length;
+        output[offset] = 4U;
+        store_be16(output + offset + 1U, (uint16_t)length);
+        store_be64(output + offset + 3U, result->snapshot.event_session);
+        output[offset + 11U] = (uint8_t)result->snapshot.end_event_count;
+        offset += 12U;
+        for (index = 0U; index < result->snapshot.end_event_count; ++index) {
+            const struct djonehub_voice_end_event *event = &result->snapshot.end_events[index];
+            store_be64(output + offset, event->sequence);
+            output[offset + 8U] = event->call_id;
+            store_be16(output + offset + 9U, event->reason);
+            offset += 11U;
+        }
     }
     return required;
 }
@@ -543,6 +564,25 @@ static int decode_result_payload(const uint8_t *payload, size_t length,
                 }
                 if (offset != extension_end) {
                     return -1;
+                }
+            } else if (extension_type == 4U) {
+                size_t i, event_count;
+                uint64_t previous = 0U;
+                if (extension_length < 9U || result->snapshot.event_session != 0U) return -1;
+                event_count = payload[offset + 8U];
+                if (event_count > DJONEHUB_VOICE_MAX_END_EVENTS || extension_length != 9U + event_count * 11U) return -1;
+                result->snapshot.event_session = load_be64(payload + offset);
+                if (result->snapshot.event_session == 0U) return -1;
+                result->snapshot.end_event_count = event_count;
+                offset += 9U;
+                for (i = 0U; i < event_count; ++i) {
+                    struct djonehub_voice_end_event *event = &result->snapshot.end_events[i];
+                    event->sequence = load_be64(payload + offset);
+                    event->call_id = payload[offset + 8U];
+                    event->reason = load_be16(payload + offset + 9U);
+                    if (event->sequence <= previous || event->call_id == 0U) return -1;
+                    previous = event->sequence;
+                    offset += 11U;
                 }
             } else if (extension_type == 3U) {
                 if (extension_length != 1U || result->snapshot.internet_state != 0U ||

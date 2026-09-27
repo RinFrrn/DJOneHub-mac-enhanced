@@ -85,6 +85,33 @@ static int parse_result(const uint8_t *response, size_t response_length,
     return 0;
 }
 
+int djonehub_voice_parse_end_reasons(const uint8_t *message, size_t length,
+                                    uint8_t tlv_type,
+                                    struct djonehub_voice_snapshot *snapshot)
+{
+    const uint8_t *value = NULL;
+    size_t value_length = 0U, index;
+    uint8_t seen[256] = {0};
+    int result;
+
+    if (snapshot == NULL) return -1;
+    snapshot->end_reason_count = 0U;
+    result = find_tlv(message, length, tlv_type, &value, &value_length);
+    if (result == 1) return 0;
+    if (result != 0 || value_length < 1U ||
+        value[0] > DJONEHUB_VOICE_MAX_CALLS ||
+        value_length != 1U + (size_t)value[0] * 3U) return -1;
+    for (index = 0U; index < value[0]; ++index) {
+        const uint8_t *record = value + 1U + index * 3U;
+        if (record[0] == 0U || seen[record[0]]) return -1;
+        seen[record[0]] = 1U;
+        snapshot->end_reasons[index].call_id = record[0];
+        snapshot->end_reasons[index].reason = read_le16(record + 1U);
+    }
+    snapshot->end_reason_count = value[0];
+    return 0;
+}
+
 static int valid_remote_number(const uint8_t *number, size_t length)
 {
     size_t index;
@@ -167,10 +194,10 @@ static int parse_remote_party_numbers(
     return offset == value_length ? 0 : -1;
 }
 
-int djonehub_voice_parse_snapshot(const uint8_t *response,
+static int parse_snapshot(const uint8_t *response,
                                   size_t response_length,
                                   struct djonehub_voice_snapshot *snapshot,
-                                  unsigned int *service_error)
+                                  unsigned int *service_error, int indication)
 {
     const uint8_t *value = NULL;
     size_t value_length = 0U;
@@ -182,14 +209,16 @@ int djonehub_voice_parse_snapshot(const uint8_t *response,
         return -1;
     }
     memset(snapshot, 0, sizeof(*snapshot));
-    result = parse_result(response, response_length, service_error);
+    result = indication ? 0 : parse_result(response, response_length, service_error);
     if (result != 0) {
         return result;
     }
-    result = find_tlv(response, response_length, QMI_CALL_INFORMATION_TLV,
+    result = find_tlv(response, response_length, indication ? 0x01U : QMI_CALL_INFORMATION_TLV,
                       &value, &value_length);
     if (result == 1) {
-        return 0;
+        if (indication) return -1;
+        return djonehub_voice_parse_end_reasons(response, response_length,
+                                                indication ? 0x14U : 0x18U, snapshot);
     }
     if (result != 0 || value_length < 1U ||
         (size_t)value[0] > DJONEHUB_VOICE_MAX_CALLS) {
@@ -225,7 +254,7 @@ int djonehub_voice_parse_snapshot(const uint8_t *response,
         }
     }
     result = find_tlv(response, response_length,
-                      QMI_REMOTE_PARTY_NUMBER_TLV, &value, &value_length);
+                      indication ? 0x10U : QMI_REMOTE_PARTY_NUMBER_TLV, &value, &value_length);
     if (result == 0 &&
         parse_remote_party_numbers(value, value_length, snapshot) != 0) {
         memset(snapshot, 0, sizeof(*snapshot));
@@ -235,7 +264,26 @@ int djonehub_voice_parse_snapshot(const uint8_t *response,
         memset(snapshot, 0, sizeof(*snapshot));
         return -1;
     }
+    if (djonehub_voice_parse_end_reasons(response, response_length,
+                                        indication ? 0x14U : 0x18U, snapshot) != 0) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        return -1;
+    }
     return 0;
+}
+
+int djonehub_voice_parse_snapshot(const uint8_t *response, size_t length,
+                                  struct djonehub_voice_snapshot *snapshot,
+                                  unsigned int *service_error)
+{
+    return parse_snapshot(response, length, snapshot, service_error, 0);
+}
+
+int djonehub_voice_parse_indication(const uint8_t *message, size_t length,
+                                    struct djonehub_voice_snapshot *snapshot)
+{
+    unsigned int ignored = 0U;
+    return parse_snapshot(message, length, snapshot, &ignored, 1);
 }
 
 int djonehub_voice_parse_action_response(const uint8_t *response,

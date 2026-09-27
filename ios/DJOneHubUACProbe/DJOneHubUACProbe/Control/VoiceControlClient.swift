@@ -15,6 +15,9 @@ final class VoiceControlModel: ObservableObject {
     @Published private(set) var radio: ModuleRadioStatus?
     @Published private(set) var radioUpdatedAt: Date?
     @Published private(set) var calls: [VoiceCallSnapshot] = []
+    @Published private(set) var eventSession: UInt64?
+    @Published private(set) var endEvents: [VoiceCallEndEvent] = []
+    private(set) var lastDialCallID: UInt8?
     @Published private(set) var shouldPollStatus = false
     @Published private(set) var statusSuccessGeneration: UInt64 = 0
     @Published private(set) var moduleUSBAudioEnabled: Bool?
@@ -419,6 +422,7 @@ final class VoiceControlModel: ObservableObject {
 
     func dial() {
         guard let client, requireCallControl() else { return }
+        lastDialCallID = nil
         let number = dialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         perform(state: "拨号中…", success: "拨号命令已确认") {
             try await client.dial(number)
@@ -555,6 +559,9 @@ final class VoiceControlModel: ObservableObject {
                     }
                     self.radio = result.radio
                     self.radioUpdatedAt = result.radio == nil ? nil : Date()
+                    self.eventSession = result.eventSession
+                    if result.operation == .dial { self.lastDialCallID = result.actionCallID }
+                    self.endEvents = result.endEvents
                     self.calls = result.calls.filter { $0.state != 0x09 }
                     if enablePollingOnSuccess {
                         self.shouldPollStatus = true

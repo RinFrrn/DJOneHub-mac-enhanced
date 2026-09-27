@@ -198,6 +198,20 @@ struct VoiceControlProtocolOfflineTest {
             _ = try radioReply([3,0,1,2], operation: .internet, action: 0, confirmed: 1)
             preconditionFailure("Conflicting internet acknowledgement accepted")
         } catch VoiceControlProtocolError.invalidSnapshot {}
+        let endExtension: [UInt8] = [4,0,20, 0,0,0,0,0,0,0,1, 1,
+                                    0,0,0,0,0,0,0,2, 7,0,146]
+        let ended = try radioReply(endExtension)
+        precondition(ended.result?.eventSession == 1)
+        precondition(ended.result?.endEvents.first?.title == "对方忙")
+        precondition(ended.result?.endEvents.first?.sequence == 2)
+        precondition(VoiceCallEndEvent(sequence: 1, callID: 1, rawReason: 17).title == "呼叫已结束")
+        for invalid: [UInt8] in [[4,0,0], [4,0,9,0,0,0,0,0,0,0,0,0],
+                                endExtension + endExtension] {
+            do {
+                _ = try radioReply(invalid)
+                preconditionFailure("Invalid end-event extension accepted")
+            } catch VoiceControlProtocolError.invalidSnapshot {}
+        }
         print("VoiceControlProtocolOfflineTest: PASS")
     }
 }

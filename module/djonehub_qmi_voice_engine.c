@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
@@ -40,9 +41,11 @@ struct qmi_client_os_params {
 
 typedef qmi_idl_service_object_type (*voice_get_service_object_fn)(
     int32_t major, int32_t minor, int32_t tool);
+typedef void (*qmi_indication_fn)(qmi_client_type, unsigned int, void *,
+                                  unsigned int, void *);
 typedef int (*qmi_client_init_instance_fn)(
     qmi_idl_service_object_type service_object, unsigned int instance_id,
-    void *indication_callback, void *indication_data, void *os_params,
+    qmi_indication_fn indication_callback, void *indication_data, void *os_params,
     uint32_t timeout_ms, qmi_client_type *client);
 typedef int (*qmi_client_send_raw_msg_sync_fn)(
     qmi_client_type client, unsigned int message_id, void *request,
@@ -79,6 +82,105 @@ struct qmi_voice_context {
 static struct qmi_voice_context qmi_context = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
+
+/* Never take the synchronous QMI mutex from the CCI callback. */
+static pthread_mutex_t events_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t events_session, events_sequence, indication_revision;
+static uint8_t active_ids[256];
+static uint64_t last_end_sequence[256];
+static size_t event_count;
+static struct djonehub_voice_end_event events[DJONEHUB_VOICE_MAX_END_EVENTS];
+
+static void log_end_event(const struct djonehub_voice_end_event *event)
+{
+    char line[128];
+    int length = snprintf(line, sizeof(line),
+        "voice-end-event sequence=%llu call_id=%u raw_reason=%u\n",
+        (unsigned long long)event->sequence, (unsigned int)event->call_id,
+        (unsigned int)event->reason);
+    if (length > 0 && (size_t)length < sizeof(line)) {
+        ssize_t ignored = write(STDERR_FILENO, line, (size_t)length);
+        (void)ignored;
+    }
+}
+
+static void retain_end(uint8_t id, uint16_t reason)
+{
+    size_t i;
+    if (last_end_sequence[id] != 0U) {
+        for (i = 0U; i < event_count; ++i) {
+            if (events[i].sequence == last_end_sequence[id]) {
+                if (reason != 0xFFFFU && events[i].reason != reason) {
+                    events[i].reason = reason;
+                    log_end_event(&events[i]);
+                }
+                return;
+            }
+        }
+        return;
+    }
+    if (event_count == DJONEHUB_VOICE_MAX_END_EVENTS) {
+        memmove(events, events + 1, (event_count - 1U) * sizeof(events[0]));
+        --event_count;
+    }
+    events[event_count].sequence = ++events_sequence;
+    events[event_count].call_id = id;
+    events[event_count].reason = reason;
+    last_end_sequence[id] = events_sequence;
+    log_end_event(&events[event_count]);
+    ++event_count;
+}
+
+static void observe_snapshot(struct djonehub_voice_snapshot *snapshot)
+{
+    uint8_t present[256] = {0};
+    size_t i;
+    if (events_session == 0U) {
+        struct timespec now;
+        (void)clock_gettime(CLOCK_REALTIME, &now);
+        events_session = ((uint64_t)now.tv_sec << 32U) ^
+                         (uint64_t)now.tv_nsec ^ (uint64_t)getpid();
+        if (events_session == 0U) events_session = 1U;
+    }
+    for (i = 0U; i < snapshot->count; ++i) {
+        uint8_t id = snapshot->calls[i].id;
+        if (snapshot->calls[i].state != 0x09U) {
+            present[id] = 1U;
+            if (!active_ids[id]) last_end_sequence[id] = 0U;
+        } else {
+            retain_end(id, 0xFFFFU);
+        }
+    }
+    for (i = 1U; i < 256U; ++i) {
+        if (active_ids[i] && !present[i]) retain_end((uint8_t)i, 0xFFFFU);
+    }
+    memcpy(active_ids, present, sizeof(active_ids));
+    for (i = 0U; i < snapshot->end_reason_count; ++i) {
+        uint8_t id = snapshot->end_reasons[i].call_id;
+        /* Reasons for still-active IDs must not end a newer reused call. */
+        if (!present[id]) retain_end(id, snapshot->end_reasons[i].reason);
+    }
+}
+
+static void copy_events(struct djonehub_voice_snapshot *snapshot)
+{
+    snapshot->event_session = events_session;
+    snapshot->end_event_count = event_count;
+    memcpy(snapshot->end_events, events, event_count * sizeof(events[0]));
+}
+
+static void voice_indication(qmi_client_type client, unsigned int message_id,
+                              void *data, unsigned int length, void *context)
+{
+    struct djonehub_voice_snapshot snapshot;
+    (void)client; (void)context;
+    if (message_id != 0x002EU || length > RESPONSE_CAPACITY ||
+        djonehub_voice_parse_indication(data, length, &snapshot) != 0) return;
+    (void)pthread_mutex_lock(&events_mutex);
+    ++indication_revision;
+    observe_snapshot(&snapshot);
+    (void)pthread_mutex_unlock(&events_mutex);
+}
 
 static void qmi_phase(const char *text)
 {
@@ -188,7 +290,7 @@ static int ensure_qmi_client_locked(int *transport_error)
     memset(&qmi_context.os_params, 0, sizeof(qmi_context.os_params));
     qmi_phase("qmi phase=init-client\n");
     init_result = qmi_context.api.client_init_instance(
-        qmi_context.service_object, QMI_CLIENT_INSTANCE_ANY, NULL, NULL,
+        qmi_context.service_object, QMI_CLIENT_INSTANCE_ANY, voice_indication, NULL,
         &qmi_context.os_params, QMI_TIMEOUT_MS, &qmi_context.client);
     *transport_error = init_result;
     if (init_result != QMI_NO_ERR || qmi_context.client == NULL) {
@@ -206,9 +308,13 @@ static int query_snapshot(const struct qmi_api *api, qmi_client_type client,
     uint8_t response[RESPONSE_CAPACITY];
     uint8_t empty_request = 0U;
     unsigned int response_length = 0U;
+    uint64_t revision;
     int result;
 
     memset(response, 0, sizeof(response));
+    (void)pthread_mutex_lock(&events_mutex);
+    revision = indication_revision;
+    (void)pthread_mutex_unlock(&events_mutex);
     qmi_phase("qmi phase=status-query\n");
     result = api->send_raw_sync(
         client, QMI_VOICE_GET_ALL_CALL_INFO, &empty_request, 0U, response,
@@ -219,8 +325,15 @@ static int query_snapshot(const struct qmi_api *api, qmi_client_type client,
         response_length > (unsigned int)sizeof(response)) {
         return -2;
     }
-    return djonehub_voice_parse_snapshot(
+    result = djonehub_voice_parse_snapshot(
         response, (size_t)response_length, snapshot, service_error);
+    if (result == 0) {
+        (void)pthread_mutex_lock(&events_mutex);
+        if (revision == indication_revision) observe_snapshot(snapshot);
+        copy_events(snapshot);
+        (void)pthread_mutex_unlock(&events_mutex);
+    }
+    return result;
 }
 
 static int send_action(const struct qmi_api *api, qmi_client_type client,
@@ -264,6 +377,8 @@ static int wait_for_confirmation(const struct qmi_api *api,
 {
     const struct timespec interval = {0, CONFIRM_INTERVAL_NS};
     unsigned int attempt;
+    uint64_t baseline = result->snapshot.end_event_count == 0U ? 0U :
+        result->snapshot.end_events[result->snapshot.end_event_count - 1U].sequence;
 
     for (attempt = 0U; attempt < CONFIRM_ATTEMPTS; ++attempt) {
         int query_result = query_snapshot(
@@ -276,6 +391,13 @@ static int wait_for_confirmation(const struct qmi_api *api,
         if (djonehub_voice_action_confirmed(operation, &result->snapshot,
                                              call_id)) {
             return 0;
+        }
+        if (operation == DJONEHUB_VOICE_DIAL) {
+            size_t i;
+            for (i = 0U; i < result->snapshot.end_event_count; ++i) {
+                const struct djonehub_voice_end_event *event = &result->snapshot.end_events[i];
+                if (event->call_id == call_id && event->sequence > baseline) return 0;
+            }
         }
         (void)nanosleep(&interval, NULL);
     }

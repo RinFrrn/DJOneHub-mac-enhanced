@@ -6,6 +6,21 @@ final class CallLifecycleCoordinator: ObservableObject {
     @Published private(set) var hasStarted = false
     @Published private(set) var activeCallDurationSeconds: UInt64 = 0
     @Published private(set) var isMuted = false
+    @Published private(set) var endedCallTitle: String?
+    @Published private(set) var endedCallNumber: String?
+    private var displayedEndedHistoryID: UUID?
+    private var endedCallDeadline = ContinuousClock.now
+    private var trackedCallID: UInt8?
+    private var trackedEventSession: UInt64?
+    private var trackedEventBaseline: UInt64 = 0
+    private struct EndedHistory {
+        let historyID: UUID
+        let callID: UInt8
+        let session: UInt64
+        let baseline: UInt64
+        var sequence: UInt64?
+    }
+    private var endedHistory: [EndedHistory] = []
 
     private let voiceControl: VoiceControlModel
     private let callAudio: CallAudioCoordinator
@@ -95,7 +110,15 @@ final class CallLifecycleCoordinator: ObservableObject {
     }
 
     func dial() {
+        endedCallTitle = nil
+        endedCallNumber = nil
+        displayedEndedHistoryID = nil
+        // An unresolved old record must not claim a future reused call ID.
+        endedHistory.removeAll { $0.sequence == nil }
         if trackedHistoryID == nil {
+            trackedCallID = nil
+            trackedEventSession = voiceControl.eventSession
+            trackedEventBaseline = voiceControl.endEvents.last?.sequence ?? 0
             trackedDirection = .outgoing
             trackedHistoryID = history.begin(
                 direction: .outgoing,
@@ -250,9 +273,29 @@ final class CallLifecycleCoordinator: ObservableObject {
     }
 
     private func synchronizeCallHistory(with derivedPhase: ProductCallPhase) {
+        if endedCallTitle != nil, ContinuousClock.now >= endedCallDeadline {
+            endedCallTitle = nil
+            endedCallNumber = nil
+        }
+        for index in endedHistory.indices {
+            guard endedHistory[index].session == voiceControl.eventSession else { continue }
+            let record = endedHistory[index]
+            let event = voiceControl.endEvents.first {
+                $0.callID == record.callID &&
+                (record.sequence == nil ? $0.sequence > record.baseline : $0.sequence == record.sequence)
+            }
+            if let event {
+                endedHistory[index].sequence = event.sequence
+                history.updateEndReason(event.rawReason, for: record.historyID)
+                if endedCallTitle != nil, displayedEndedHistoryID == record.historyID {
+                    endedCallTitle = event.title
+                }
+            }
+        }
         if trackedHistoryID == nil,
            let callID = derivedPhase.callID,
            let call = voiceControl.calls.first(where: { $0.id == callID }) {
+            endedHistory.removeAll { $0.callID == callID && $0.sequence == nil }
             let direction: CallHistoryDirection = call.direction == 2 ? .incoming : .outgoing
             trackedDirection = direction
             trackedHistoryID = history.begin(
@@ -261,6 +304,19 @@ final class CallLifecycleCoordinator: ObservableObject {
             )
             trackedWasConnected = false
             trackedUserEnded = false
+            trackedCallID = callID
+            trackedEventSession = voiceControl.eventSession
+            trackedEventBaseline = voiceControl.endEvents.last?.sequence ?? 0
+        }
+
+        if trackedHistoryID != nil, let id = derivedPhase.callID {
+            trackedCallID = id
+        }
+        if trackedHistoryID != nil, trackedDirection == .outgoing, trackedCallID == nil {
+            trackedCallID = voiceControl.lastDialCallID
+        }
+        if trackedHistoryID != nil, trackedEventSession == nil {
+            trackedEventSession = voiceControl.eventSession
         }
 
         if case .active = derivedPhase,
@@ -282,10 +338,28 @@ final class CallLifecycleCoordinator: ObservableObject {
             outcome = trackedUserEnded ? .canceled : .failed
         }
         history.finish(trackedHistoryID, outcome: outcome)
+        if let id = trackedCallID, let session = trackedEventSession,
+           session == voiceControl.eventSession {
+            let event = voiceControl.endEvents.first {
+                $0.callID == id && $0.sequence > trackedEventBaseline
+            }
+            if let event { history.updateEndReason(event.rawReason, for: trackedHistoryID) }
+            endedHistory.append(EndedHistory(historyID: trackedHistoryID, callID: id,
+                session: session, baseline: trackedEventBaseline, sequence: event?.sequence))
+            if endedHistory.count > 16 { endedHistory.removeFirst() }
+            if !trackedUserEnded, trackedDirection == .outgoing, !trackedWasConnected {
+                endedCallTitle = event?.title ?? "呼叫已结束"
+                displayedEndedHistoryID = trackedHistoryID
+                endedCallNumber = history.entries.first { $0.id == trackedHistoryID }?.number
+                endedCallDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+            }
+        }
         self.trackedHistoryID = nil
         self.trackedDirection = nil
         trackedWasConnected = false
         trackedUserEnded = false
+        trackedCallID = nil
+        trackedEventSession = nil
         isMuted = false
     }
 

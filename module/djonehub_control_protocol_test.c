@@ -223,6 +223,15 @@ static int test_response(void)
     CHECK(decoded.snapshot.calls[0].state == 3U);
 
     encoded.snapshot.calls[0].remote_number_present = 1U;
+    encoded.snapshot.event_session = 1234U;
+    encoded.snapshot.end_event_count = 1U;
+    encoded.snapshot.end_events[0].sequence = 42U;
+    encoded.snapshot.end_events[0].call_id = 7U;
+    encoded.snapshot.end_events[0].reason = 146U;
+    encoded.snapshot.radio.valid = 1U;
+    encoded.snapshot.radio.dbm = -60;
+    encoded.snapshot.radio.technology = 8U;
+    encoded.snapshot.internet_state = 2U;
     encoded.snapshot.calls[0].remote_number_presentation = 0U;
     encoded.snapshot.calls[0].remote_number_length = 14U;
     memcpy(encoded.snapshot.calls[0].remote_number, "+8613800138000", 14U);
@@ -233,6 +242,11 @@ static int test_response(void)
     CHECK(djonehub_control_decode_response(key, nonce, frame, length, &status,
                                            &request_id, &decoded) == 0);
     CHECK(request_id == 46U);
+    CHECK(decoded.snapshot.event_session == 1234U);
+    CHECK(decoded.snapshot.end_event_count == 1U);
+    CHECK(decoded.snapshot.end_events[0].sequence == 42U);
+    CHECK(decoded.snapshot.end_events[0].reason == 146U);
+    CHECK(decoded.snapshot.radio.dbm == -60 && decoded.snapshot.internet_state == 2U);
     CHECK(decoded.snapshot.calls[0].remote_number_present == 1U);
     CHECK(decoded.snapshot.calls[0].remote_number_presentation == 0U);
     CHECK(decoded.snapshot.calls[0].remote_number_length == 14U);

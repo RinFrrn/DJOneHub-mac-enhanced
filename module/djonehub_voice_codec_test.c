@@ -261,8 +261,33 @@ static int test_action_policy(void)
     return 0;
 }
 
+static int test_end_reasons(void)
+{
+    const uint8_t query[] = {
+        2, 4, 0, 0, 0, 0, 0,
+        0x18, 7, 0, 2, 1, 146, 0, 2, 148, 0};
+    const uint8_t indication[] = {0x14, 4, 0, 1, 7, 149, 0};
+    const uint8_t duplicate[] = {0x14, 7, 0, 2, 7, 146, 0, 7, 149, 0};
+    const uint8_t truncated[] = {0x14, 4, 0, 2, 7, 149, 0};
+    const uint8_t unknown[] = {0x14, 4, 0, 1, 7, 0xFE, 0xFF};
+    struct djonehub_voice_snapshot snapshot;
+    unsigned int error;
+    CHECK(djonehub_voice_parse_snapshot(query, sizeof(query), &snapshot, &error) == 0);
+    CHECK(snapshot.count == 0 && snapshot.end_reason_count == 2);
+    CHECK(snapshot.end_reasons[0].call_id == 1 && snapshot.end_reasons[0].reason == 146);
+    CHECK(djonehub_voice_parse_end_reasons(indication, sizeof(indication), 0x14, &snapshot) == 0);
+    CHECK(snapshot.end_reasons[0].call_id == 7 && snapshot.end_reasons[0].reason == 149);
+    CHECK(djonehub_voice_parse_end_reasons(duplicate, sizeof(duplicate), 0x14, &snapshot) == -1);
+    CHECK(snapshot.end_reason_count == 0);
+    CHECK(djonehub_voice_parse_end_reasons(truncated, sizeof(truncated), 0x14, &snapshot) == -1);
+    CHECK(djonehub_voice_parse_end_reasons(unknown, sizeof(unknown), 0x14, &snapshot) == 0);
+    CHECK(snapshot.end_reasons[0].reason == 65534);
+    return 0;
+}
+
 int main(void)
 {
+    CHECK(test_end_reasons() == 0);
     CHECK(test_empty_snapshot() == 0);
     CHECK(test_call_snapshot() == 0);
     CHECK(test_call_snapshot_with_remote_party_number() == 0);

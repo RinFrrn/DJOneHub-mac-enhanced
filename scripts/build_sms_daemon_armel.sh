@@ -44,6 +44,17 @@ $PROJECT_DIR/module/djonehub_control_protocol.c
 $PROJECT_DIR/module/djonehub_crypto.c
 "
         ;;
+    voice-idle-probe)
+        BINARY_BASE=djonehub-voice-idle-preflight
+        AUDIT_LISTEN=none
+        AUDIT_SCOPE=read-only-voice-status
+        SOURCES="
+$PROJECT_DIR/module/djonehub_voice_status_probe.c
+$PROJECT_DIR/module/djonehub_qmi_voice_engine.c
+$PROJECT_DIR/module/djonehub_voice_codec.c
+$PROJECT_DIR/module/djonehub_voice_policy.c
+"
+        ;;
     notify-monitor)
         BINARY_BASE=djonehub-notify-monitor
         AUDIT_LISTEN=none

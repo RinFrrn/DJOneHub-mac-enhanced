@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	voiceDaemonExpectedSHA256         = "320ff8223c3e4ba5136b2366d8ecb3fa80e847c1ac8d3b0206d83a406f69e199"
+	voiceDaemonExpectedSHA256         = "4ab2ebaff08fba594ca9d0c736618a723858ace2353681f41bdd8d173cd2e49f"
 	voiceSMSExpectedSHA256            = "540fd5685e9282607db4ee901940ca753993e176150f9c30119167c44a29100b"
 	voiceUplinkExpectedSHA256         = "801f8ba302e1bc60c9b5a680fa84daf4e78c398ed1232aa3a63ae6dd1913ef83"
 	voiceTestAPRv3ExpectedSHA256      = "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
@@ -59,7 +59,7 @@ const (
 	voiceControlTagBytes           = 32
 	voiceControlMaxRequestPayload  = 81
 	voiceControlMaxRemoteNumber    = 81
-	voiceControlMaxResponsePayload = 10 + 4 + 8*7 + 3 + 1 + 8*(3+voiceControlMaxRemoteNumber)
+	voiceControlMaxResponsePayload = 11 + 32 + 12 + 16*11 + 4 + 8*7 + 3 + 1 + 8*(3+voiceControlMaxRemoteNumber)
 	voiceControlRemoteNumbersExt   = 1
 )
 
@@ -502,7 +502,7 @@ remove_ephemeral_key() {
                 sms_pid=$!
                 printf '%s\n' "$sms_pid" >"$sms_pidfile"
             fi
-            LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" --session-file "$session_file" >>"$log" 2>&1 &
+            (ulimit -s 256 || exit 1; export LD_LIBRARY_PATH=/usr/lib; exec "$binary" $daemon_args --key-file "$key" --session-file "$session_file") >>"$log" 2>&1 &
             daemon_pid=$!
             printf '%s\n' "$daemon_pid" >"$pidfile"
             ready=0

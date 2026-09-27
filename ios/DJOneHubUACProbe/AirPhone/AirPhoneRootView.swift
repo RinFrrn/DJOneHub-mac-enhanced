@@ -66,6 +66,23 @@ struct AirPhoneRootView: View {
                 .transition(.opacity.combined(with: .scale(scale: 1.02)))
                 .zIndex(2)
             }
+            if let title = lifecycle.endedCallTitle, !shouldPresentCallScreen {
+                VStack(spacing: 24) {
+                    Text(lifecycle.endedCallNumber ?? "蜂窝电话").font(.title2)
+                    Text(title).font(.title).accessibilityAddTraits(.isStaticText)
+                    if let number = lifecycle.endedCallNumber {
+                        Button("重新拨打") {
+                            voiceControl.dialNumber = number
+                            lifecycle.dial()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!voiceControl.canControlCalls || voiceControl.isBusy)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
+                .zIndex(3)
+            }
         }
         .animation(.spring(response: 0.35, dampingFraction: 1), value: shouldPresentCallScreen)
         .task {

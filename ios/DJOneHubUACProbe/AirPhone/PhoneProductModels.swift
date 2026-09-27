@@ -27,6 +27,13 @@ struct CallHistoryEntry: Identifiable, Codable, Equatable, Sendable {
     var endedAt: Date?
     var outcome: CallHistoryOutcome?
     var recordingFilename: String?
+    var endReason: UInt16?
+
+    var endReasonTitle: String? {
+        guard let endReason, direction == .outgoing,
+              outcome != .canceled, outcome != .completed else { return nil }
+        return VoiceCallEndEvent(sequence: 0, callID: 0, rawReason: endReason).title
+    }
 
     var duration: TimeInterval {
         guard let connectedAt, let endedAt else { return 0 }
@@ -81,6 +88,13 @@ final class CallHistoryStore: ObservableObject {
         guard filename == URL(fileURLWithPath: filename).lastPathComponent,
               let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].recordingFilename = filename
+        persist()
+    }
+
+    func updateEndReason(_ reason: UInt16, for id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+              entries[index].endReason != reason else { return }
+        entries[index].endReason = reason
         persist()
     }
 

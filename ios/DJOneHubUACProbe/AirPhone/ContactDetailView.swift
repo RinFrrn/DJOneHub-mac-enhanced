@@ -383,6 +383,7 @@ private struct CallHistoryDetailRow: View {
     }
 
     private var outcomeText: String {
+        if let title = entry.endReasonTitle { return title }
         switch entry.outcome {
         case .completed: return entry.direction == .outgoing ? "已拨电话" : "已接电话"
         case .missed: return "未接来电"
