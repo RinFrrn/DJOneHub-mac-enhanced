@@ -150,7 +150,7 @@ remove_ephemeral_key() {
                 sms_pid=$!
                 printf '%s\n' "$sms_pid" >"$sms_pidfile"
             fi
-            LD_LIBRARY_PATH=/usr/lib "$binary" $daemon_args --key-file "$key" --session-file "$session_file" >>"$log" 2>&1 &
+            (ulimit -s 256 || exit 1; export LD_LIBRARY_PATH=/usr/lib; exec "$binary" $daemon_args --key-file "$key" --session-file "$session_file") >>"$log" 2>&1 &
             daemon_pid=$!
             printf '%s\n' "$daemon_pid" >"$pidfile"
             ready=0

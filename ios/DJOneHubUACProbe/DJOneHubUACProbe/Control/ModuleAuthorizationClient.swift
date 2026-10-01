@@ -9,7 +9,7 @@ struct ModuleAuthorizationTransport: Sendable {
         _ operation: String, credential: String, body: Body, response: Response.Type
     ) async throws -> Response {
         try identity.validate()
-        guard ["prepare", "commit", "status", "session", "revoke", "cancel"].contains(operation),
+        guard ["prepare", "commit", "status", "session", "revoke", "cancel", "traffic"].contains(operation),
               AuthorizationSecret.isValid(credential) else { throw ModuleAuthorizationError.invalidData }
         let payload = try JSONEncoder().encode(body)
         guard payload.count <= 4096 else { throw ModuleAuthorizationError.invalidData }
@@ -95,6 +95,15 @@ struct ModuleAuthorizationTransport: Sendable {
 }
 
 private struct EmptyAuthorizationRequest: Codable, Sendable {}
+private struct TrafficRequest: Encodable, Sendable {
+    let expectedSIM: String?
+    let history: Bool
+    let unix: Int64
+    let offsetMinutes: Int
+    let planGB: Double?
+    let billingDay: Int?
+    enum CodingKeys: String, CodingKey { case unix, history; case expectedSIM = "expected_sim", offsetMinutes = "offset_minutes", planGB = "plan_gb", billingDay = "billing_day" }
+}
 private struct RemoteAuthorizationError: Decodable { let error: String }
 private struct RevokeAuthorizationRequest: Encodable, Sendable {
     let deviceID: String
@@ -109,6 +118,17 @@ final class ModuleAuthorizationModel {
     private var isBusy = false
 
     func savedModuleIDs() throws -> [String] { try store.moduleIDs() }
+
+    func traffic(moduleID: String, planGB: Double? = nil, billingDay: Int? = nil, history: Bool = false, expectedSIM: String? = nil) async throws -> ModuleTrafficSnapshot {
+        guard let record = try store.load(moduleID: moduleID), let active = record.active else {
+            throw ModuleAuthorizationError.unauthorized
+        }
+        return try await ModuleAuthorizationTransport(identity: record.identity).request(
+            "traffic", credential: active.credential,
+            body: TrafficRequest(expectedSIM: expectedSIM, history: history, unix: Int64(Date().timeIntervalSince1970), offsetMinutes: TimeZone.current.secondsFromGMT() / 60, planGB: planGB, billingDay: billingDay),
+            response: ModuleTrafficSnapshot.self
+        )
+    }
 
     func begin(invitation: ModuleInvitation, name: String) throws {
         guard !isBusy else { throw ModuleAuthorizationError.pendingChange }

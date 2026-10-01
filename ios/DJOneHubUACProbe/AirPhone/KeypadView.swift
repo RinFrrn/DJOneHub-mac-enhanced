@@ -141,7 +141,10 @@ struct ModuleAccessoryButton: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !noDevice && !showsStatusLabels {
-                    statusIcons(at: date)
+                    ModuleAccessoryTraffic(
+                        connected: voiceControl.shouldPollStatus,
+                        internetEnabled: voiceControl.moduleInternetEnabled
+                    )
                 }
             }
 
@@ -177,37 +180,6 @@ struct ModuleAccessoryButton: View {
         .foregroundStyle(active ? Color.accentColor : Color.secondary)
     }
 
-    private func statusIcons(at date: Date) -> some View {
-        HStack(spacing: compact ? 8 : 12) {
-            automaticRecordingStatusIcon
-            internetStatusIcon(at: date)
-            ModuleNotificationStatusIcon(
-                pairingKey: voiceControl.sessionKeyForModuleServices(),
-                connected: voiceControl.shouldPollStatus
-            )
-        }
-        .font(.system(size: 15, weight: .medium))
-        .fixedSize()
-        .padding(.trailing, compact ? 4 : 8)
-    }
-
-    private var automaticRecordingStatusIcon: some View {
-        Image(systemName: automaticCallRecordingEnabled ? "record.circle.fill" : "record.circle")
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(automaticCallRecordingEnabled ? Color.accentColor : Color.secondary)
-            .accessibilityLabel(automaticCallRecordingEnabled ? "自动录音已开启" : "自动录音已关闭")
-    }
-
-    private func internetStatusIcon(at date: Date) -> some View {
-        let enabled: Bool? = voiceControl.internetUpdatedAt.flatMap { updated in
-            date.timeIntervalSince(updated) < 30 ? voiceControl.moduleInternetEnabled : nil
-        }
-        return Image(systemName: enabled == false ? "network.slash" : "network")
-            .foregroundStyle(enabled == true ? Color.accentColor : Color.secondary)
-            .opacity(enabled == nil ? 0.4 : 1)
-            .accessibilityLabel(enabled.map { $0 ? "模块以太网上网已开启" : "模块以太网上网已关闭" } ?? "模块以太网状态未知")
-    }
-
     private func freshRadio(at date: Date) -> ModuleRadioStatus? {
         guard !noDevice, let updated = voiceControl.radioUpdatedAt,
               date.timeIntervalSince(updated) < 30 else { return nil }
@@ -224,6 +196,71 @@ struct ModuleAccessoryButton: View {
         }
     }
 
+}
+
+private struct ModuleAccessoryTraffic: View {
+    let connected: Bool
+    let internetEnabled: Bool?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var sample: ModuleTrafficSnapshot?
+
+    private var shouldPoll: Bool {
+        connected && internetEnabled == true && scenePhase == .active
+    }
+
+    var body: some View {
+        Group {
+            if internetEnabled == false {
+                Image(systemName: "network.slash")
+                    .font(.system(size: 17, weight: .medium))
+                    .accessibilityLabel("模块上网已关闭")
+            } else {
+                VStack(alignment: .trailing, spacing: 2) {
+                    speedRow("arrow.up", value: sample?.uploadRate, label: "上传")
+                    speedRow("arrow.down", value: sample?.downloadRate, label: "下载")
+                }
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+            }
+        }
+        .foregroundStyle(.secondary)
+        .frame(width: 76, alignment: .trailing)
+        .padding(.trailing, 8)
+        .task(id: shouldPoll) {
+            sample = nil
+            guard shouldPoll else { return }
+            let model = ModuleAuthorizationModel()
+            while !Task.isCancelled {
+                do {
+                    guard let id = try model.savedModuleIDs().first else {
+                        throw ModuleAuthorizationError.unauthorized
+                    }
+                    let value = try await model.traffic(moduleID: id)
+                    try Task.checkCancellation()
+                    sample = value.available ? value : nil
+                } catch is CancellationError { return }
+                catch { sample = nil }
+                do { try await Task.sleep(for: .seconds(sample == nil ? 5 : 1)) }
+                catch { return }
+            }
+        }
+    }
+
+    private func speedRow(_ icon: String, value: Double?, label: String) -> some View {
+        let text = formattedRate(value)
+        return HStack(spacing: 3) {
+            Image(systemName: icon)
+            Text(text).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) \(text)")
+    }
+
+    private func formattedRate(_ value: Double?) -> String {
+        guard let value, value.isFinite, value >= 0 else { return "—" }
+        if value >= 1_000_000 { return String(format: "%.1f MB/s", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1f KB/s", value / 1_000) }
+        return String(format: "%.0f B/s", value)
+    }
 }
 
 struct ModuleStatusIcon: View {

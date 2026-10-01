@@ -470,6 +470,209 @@ private struct CallActionButton: View {
     }
 }
 
+private struct ModuleTrafficSummaryRow: View {
+    let active: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var sample: ModuleTrafficSnapshot?
+    @State private var fresh = false
+    private func rate(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(min(value, Double(Int64.max / 2))), countStyle: .decimal) + "/s"
+    }
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("网速与流量")
+                if fresh, let sample {
+                    Text("↓ \(rate(sample.downloadRate))   ↑ \(rate(sample.uploadRate))")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Text("本周期已用 \(ByteCountFormatter.string(fromByteCount: Int64(clamping: sample.cycleBytes ?? 0), countStyle: .decimal))")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else { Text("网速暂不可用").font(.caption).foregroundStyle(.secondary) }
+            }
+        } icon: { Image(systemName: "arrow.up.arrow.down") }
+        .task(id: active && scenePhase == .active) {
+            guard active, scenePhase == .active else { fresh = false; return }
+            let model = ModuleAuthorizationModel()
+            while !Task.isCancelled {
+                do {
+                    guard let id = try model.savedModuleIDs().first else { throw ModuleAuthorizationError.unauthorized }
+                    let value = try await model.traffic(moduleID: id)
+                    try Task.checkCancellation()
+                    sample = value; fresh = value.available
+                } catch is CancellationError { return }
+                catch { fresh = false }
+                do { try await Task.sleep(for: .seconds(fresh ? 1 : 5)) } catch { return }
+            }
+        }
+    }
+}
+
+private struct ModuleTrafficHistoryView: View {
+    @State private var days: [String: UInt64] = [:]
+    @State private var errorText: String?
+    @State private var loaded = false
+    private var months: [String] { Set(days.keys.map { String($0.prefix(7)) }).sorted(by: >) }
+    var body: some View {
+        List {
+            if let errorText { Text(errorText).foregroundStyle(.secondary) }
+            if loaded, days.isEmpty { ContentUnavailableView("暂无历史用量", systemImage: "chart.bar", description: Text("校时后的每日用量会自动记录在模块上。")) }
+            ForEach(months, id: \.self) { month in
+                Section {
+                    ForEach(days.keys.filter { $0.hasPrefix(month) }.sorted(by: >), id: \.self) { day in
+                        LabeledContent(day, value: ByteCountFormatter.string(fromByteCount: Int64(clamping: days[day] ?? 0), countStyle: .decimal))
+                    }
+                } header: {
+                    let total = days.filter { $0.key.hasPrefix(month) }.values.reduce(UInt64(0), +)
+                    Text("\(month) · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: total), countStyle: .decimal))")
+                }
+            }
+            Section { Text("保留最近一年记录。月份按自然月汇总；套餐用量按结算日计算。未校时的流量不计入每日记录。").font(.footnote).foregroundStyle(.secondary) }
+        }
+        .navigationTitle("用量历史")
+        .monospacedDigit()
+        .task { await load() }
+        .refreshable { await load() }
+    }
+    private func load() async {
+        do {
+            let model = ModuleAuthorizationModel()
+            guard let id = try model.savedModuleIDs().first else { throw ModuleAuthorizationError.unauthorized }
+            let sample = try await model.traffic(moduleID: id, history: true)
+            try Task.checkCancellation()
+            days = sample.days ?? [:]; loaded = true; errorText = nil
+        } catch is CancellationError { }
+        catch { errorText = "无法读取历史用量，请下拉重试" }
+    }
+}
+
+private struct ModuleTrafficView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var sample: ModuleTrafficSnapshot?
+    @State private var updatedAt: Date?
+    @State private var errorText: String?
+    @State private var editingPlan = false
+    @State private var planText = ""
+    @State private var billingDay = 1
+    @State private var savingPlan = false
+    @State private var planError: String?
+
+    private func bytes(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .decimal)
+    }
+    private func rate(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "—" }
+        return bytes(UInt64(min(value, Double(Int64.max)))) + "/s"
+    }
+    var body: some View {
+        List {
+            Section {
+                if let label = sample?.simLabel { LabeledContent("当前统计", value: label) }
+                LabeledContent("已用流量", value: sample.map { bytes($0.cycleBytes ?? 0) } ?? "—")
+                if let sample, let gb = sample.planGB, gb > 0 {
+                    let used = Double(sample.cycleBytes ?? 0)
+                    let quota = gb * 1_000_000_000
+                    ProgressView(value: min(used / quota, 1))
+                    LabeledContent(used > quota ? "超出套餐" : "剩余流量", value: bytes(UInt64(abs(quota - used))))
+                }
+                if let start = sample?.cycleStart { LabeledContent("周期开始", value: start) }
+                if let pending = sample?.unassigned, pending > 0 {
+                    LabeledContent("未归入周期", value: bytes(pending))
+                    Text("模块校时前的用量保留在累计流量中。").font(.footnote).foregroundStyle(.secondary)
+                }
+                Button("套餐设置") {
+                    planText = (sample?.planGB ?? 0) > 0 ? String(sample?.planGB ?? 0) : ""
+                    billingDay = sample?.billingDay ?? 1
+                    planError = nil
+                    editingPlan = true
+                }
+            } header: { Text("本周期") } footer: {
+                Text("用量从启用周期统计后开始记录，不包含此前运营商已计费的流量。")
+            }
+            Section("实时网速") {
+                LabeledContent("下载", value: errorText == nil && sample?.available == true ? rate(sample?.downloadRate ?? 0) : "—")
+                LabeledContent("上传", value: errorText == nil && sample?.available == true ? rate(sample?.uploadRate ?? 0) : "—")
+            }
+            Section("本次开机") {
+                LabeledContent("下载", value: sample.map { bytes($0.bootRX) } ?? "—")
+                LabeledContent("上传", value: sample.map { bytes($0.bootTX) } ?? "—")
+            }
+            Section {
+                NavigationLink { ModuleTrafficHistoryView() } label: { Label("用量历史", systemImage: "chart.bar") }
+                if let value = sample?.unknownBytes, value > 0 {
+                    LabeledContent("未识别 SIM 用量", value: bytes(value))
+                    Text("包含启用按卡统计前的用量与换卡过渡流量，不归入当前套餐。").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                LabeledContent("下载", value: sample.map { bytes($0.totalRX) } ?? "—")
+                LabeledContent("上传", value: sample.map { bytes($0.totalTX) } ?? "—")
+            } header: { Text("累计流量") } footer: {
+                Text("从启用统计起累计，模块独立记录。模块统计仅供参考，以运营商账单为准。")
+            }
+            if let errorText { Text(errorText).foregroundStyle(.secondary) }
+            if let updatedAt { Text("更新于 \(updatedAt.formatted(date: .omitted, time: .standard))").font(.footnote).foregroundStyle(.secondary) }
+        }
+        .monospacedDigit()
+        .navigationTitle("网速与流量")
+        .sheet(isPresented: $editingPlan) {
+            NavigationStack {
+                Form {
+                    Section {
+                        TextField("套餐流量（GB）", text: $planText).keyboardType(.decimalPad)
+                        Picker("每月结算日", selection: $billingDay) {
+                            ForEach(1...28, id: \.self) { Text("每月 \($0) 日").tag($0) }
+                        }
+                    } footer: { Text("留空表示不设置套餐总量。设置保存在模块上；修改结算日会按已有每日记录重新计算。") }
+                    if let planError { Text(planError).foregroundStyle(.red) }
+                }
+                .navigationTitle("套餐设置")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { editingPlan = false }.disabled(savingPlan) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") {
+                            guard let gb = planText.isEmpty ? 0 : Double(planText.replacingOccurrences(of: ",", with: ".")), gb.isFinite, gb >= 0, gb <= 100000 else {
+                                planError = "请输入有效的套餐流量"; return
+                            }
+                            savingPlan = true
+                            Task {
+                                defer { savingPlan = false }
+                                do {
+                                    let model = ModuleAuthorizationModel()
+                                    guard let id = try model.savedModuleIDs().first else { throw ModuleAuthorizationError.unauthorized }
+                                    sample = try await model.traffic(moduleID: id, planGB: gb, billingDay: billingDay, expectedSIM: sample?.simID)
+                                    editingPlan = false
+                                } catch { planError = "保存失败，请检查模块连接后重试" }
+                            }
+                        }.disabled(savingPlan)
+                    }
+                }
+                .interactiveDismissDisabled(savingPlan)
+            }
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            let model = ModuleAuthorizationModel()
+            while !Task.isCancelled {
+                if editingPlan {
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                    continue
+                }
+                do {
+                    guard let id = try model.savedModuleIDs().first else { throw ModuleAuthorizationError.unauthorized }
+                    let value = try await model.traffic(moduleID: id)
+                    try Task.checkCancellation()
+                    sample = value; updatedAt = Date()
+                    errorText = value.available ? nil : "蜂窝流量计数暂不可用"
+                } catch is CancellationError { return }
+                catch { errorText = "无法读取模块流量，请检查连接与长期配对" }
+                do { try await Task.sleep(for: .seconds(errorText == nil ? 1 : 5)) }
+                catch { return }
+            }
+        }
+    }
+}
+
 struct ModulePanelView: View {
     @ObservedObject private var network = ConnectionLog.shared
     private var noDevice: Bool { lifecycle.phase.showNoDevice(network.noWiredInterface) }
@@ -487,7 +690,7 @@ struct ModulePanelView: View {
     @State private var recordingPendingDeletion: CallRecordingInfo?
     @State private var isShowingCallPreview = false
 
-    private enum Page: Hashable { case notifications, recordings, settings, authorization, diagnostics, logs }
+    private enum Page: Hashable { case notifications, recordings, settings, authorization, diagnostics, logs, traffic }
     @State private var path: [Page] = []
     @State private var detent: PresentationDetent = .medium
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -578,6 +781,11 @@ struct ModulePanelView: View {
                     Text("功能")
                 }
                 Section {
+                    NavigationLink(value: Page.traffic) {
+                        ModuleTrafficSummaryRow(active: path.isEmpty && !noDevice)
+                    }
+                }
+                Section {
                     NavigationLink(value: Page.notifications) {
                         ModuleNotificationSummaryRow(pairingKey: voiceControl.sessionKeyForModuleServices(),
                                                      connected: voiceControl.shouldPollStatus && !noDevice)
@@ -623,6 +831,7 @@ struct ModulePanelView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Page.self) { page in
                 switch page {
+                case .traffic: ModuleTrafficView()
                 case .notifications:
                     ModuleNotificationSettingsView(
                         pairingKey: voiceControl.sessionKeyForModuleServices(),

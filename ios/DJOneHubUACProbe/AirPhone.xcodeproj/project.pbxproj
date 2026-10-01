@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		247F95603069029D00024DAB /* AirphoneIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 247F955F3069029D00024DAB /* AirphoneIcon.icon */; };
+		247F95613069029D00024DAB /* AirphoneIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 247F955F3069029D00024DAB /* AirphoneIcon.icon */; };
 		376CC5B3D752CC63BF738D66 /* ContactDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4DDFC07A5921ABC4C57A59 /* ContactDetailView.swift */; };
 		A10000000000000000000001 /* DJOneHubUACProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* DJOneHubUACProbeApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
@@ -59,6 +61,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		247F955F3069029D00024DAB /* AirphoneIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AirphoneIcon.icon; sourceTree = "<group>"; };
 		A20000000000000000000001 /* DJOneHubUACProbeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJOneHubUACProbeApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* AudioProbeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioProbeModel.swift; sourceTree = "<group>"; };
@@ -123,6 +126,7 @@
 				A40000000000000000000002 /* DJOneHubUACProbe */,
 				B40000000000000000000001 /* AirPhone */,
 				A20000000000000000000006 /* README.md */,
+				247F955F3069029D00024DAB /* AirphoneIcon.icon */,
 				A40000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -288,6 +292,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				247F95613069029D00024DAB /* AirphoneIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -296,6 +301,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B10000000000000000000040 /* DialpadSounds in Resources */,
+				247F95603069029D00024DAB /* AirphoneIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -409,6 +415,7 @@
 		A90000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = M4Z7KWKY5J;
@@ -429,6 +436,7 @@
 		A90000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = M4Z7KWKY5J;
@@ -449,6 +457,7 @@
 		B90000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AirphoneIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = M4Z7KWKY5J;
@@ -469,6 +478,7 @@
 		B90000000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AirphoneIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = M4Z7KWKY5J;

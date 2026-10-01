@@ -80,6 +80,7 @@ func (s *Store) TLSConfig() (*tls.Config, error) {
 type Server struct {
 	Store    *Store
 	Sessions *SessionRegistry
+	Traffic  *TrafficMeter
 }
 
 // Serve accepts a prebound USB listener so deployment cannot accidentally use
@@ -190,6 +191,21 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var result any
 	var err error
 	switch r.URL.Path {
+	case "/v1/traffic":
+		var request TrafficRequest
+		if err = decode(&request); err == nil {
+			if _, err = s.Store.Status(authority); err == nil {
+				if s.Traffic == nil {
+					err = ErrStorage
+				} else {
+					if request.Unix == 0 {
+						result = s.Traffic.Snapshot()
+					} else {
+						result, err = s.Traffic.Configure(request)
+					}
+				}
+			}
+		}
 	case "/v1/prepare":
 		var request PrepareRequest
 		if err = decode(&request); err == nil {

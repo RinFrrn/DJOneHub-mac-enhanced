@@ -13,6 +13,7 @@
 
 #include "djonehub_qmi_voice_engine.h"
 #include "djonehub_qmi_wms_engine.h"
+#include "djonehub_sim_identity.h"
 
 static volatile sig_atomic_t stopped;
 static void stop_monitor(int sig) { (void)sig; stopped = 1; }
@@ -104,6 +105,7 @@ int main(int argc, char **argv)
     int voice;
     int once;
     struct sigaction action;
+    if (argc == 2 && strcmp(argv[1], "--sim") == 0) { return sim_identity(); }
     if ((argc != 2 && argc != 3) ||
         (strcmp(argv[1], "--calls") && strcmp(argv[1], "--sms")) ||
         (argc == 3 && strcmp(argv[2], "--once"))) {

@@ -402,7 +402,7 @@ func (a *adbClient) openServiceLocked(service string) (adbStream, error) {
 			}
 		case cmdCLSE:
 			if msg.arg1 == localID {
-				return adbStream{}, errors.New("模块拒绝 ADB 服务")
+				return adbStream{}, fmt.Errorf("模块拒绝 ADB 服务：收到 CLSE（local=%d remote=%d）", localID, msg.arg0)
 			}
 			if msg.arg0 != 0 && msg.arg1 != 0 {
 				if err := a.sendLocked(cmdCLSE, msg.arg1, msg.arg0, nil, 2*time.Second); err != nil {
@@ -418,7 +418,7 @@ func (a *adbClient) openServiceLocked(service string) (adbStream, error) {
 			}
 			continue
 		default:
-			return adbStream{}, errors.New("模块拒绝 ADB 服务")
+			return adbStream{}, fmt.Errorf("模块拒绝 ADB 服务：打开服务时收到意外消息 0x%08x（arg0=%d arg1=%d）", msg.command, msg.arg0, msg.arg1)
 		}
 	}
 	return adbStream{}, fmt.Errorf("等待模块打开 ADB 服务超时")

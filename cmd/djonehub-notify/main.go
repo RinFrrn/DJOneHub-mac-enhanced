@@ -189,8 +189,11 @@ func run() (runErr error) {
 		defer cancel()
 		results := make(chan error, 2)
 		sessions := &modulepairing.SessionRegistry{Path: *voiceSessions}
+		traffic := &modulepairing.TrafficMeter{Path: filepath.Join(filepath.Dir(*pairingRegistry), "traffic.json"), Monitor: *monitor}
+		trafficDone := make(chan struct{})
+		go func() { defer close(trafficDone); traffic.Run(managedContext) }()
 		go func() {
-			results <- (modulepairing.Server{Store: store, Sessions: sessions}).Serve(managedContext, listener)
+			results <- (modulepairing.Server{Store: store, Sessions: sessions, Traffic: traffic}).Serve(managedContext, listener)
 		}()
 		go func() {
 			results <- serveManaged(managedContext, sender, *monitor, *statePath, *controlAddress, *pairingKey, *voiceSessions, *configPath)
@@ -198,6 +201,7 @@ func run() (runErr error) {
 		first := <-results
 		cancel()
 		<-results
+		<-trafficDone
 		return first
 	}
 	return serveManaged(ctx, sender, *monitor, *statePath, *controlAddress, *pairingKey, "", *configPath)

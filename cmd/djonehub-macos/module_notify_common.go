@@ -53,6 +53,10 @@ func moduleNotifyCommand(action string) (string, error) {
 	config := " -config " + moduleNotifyDir + "/config.json"
 	owned := `owned() { test -s '` + moduleNotifyDir + `/notify.pid' || return 1; read pid < '` + moduleNotifyDir + `/notify.pid'; case "$pid" in ''|*[!0-9]*) return 1;; esac; test "$(readlink "/proc/$pid/exe" 2>/dev/null)" = '` + binary + `'; }; `
 	switch action {
+	case "probe-sim":
+		return "value=$(LD_LIBRARY_PATH=/usr/lib /usrdata/djonehub/notify/djonehub-notify-monitor.armv7 --sim) && test ${#value} -ge 19 && echo sim-identity-ready", nil
+	case "probe-traffic":
+		return "cat /proc/net/dev; cat /proc/net/route; ip -6 route; cat /proc/uptime; ls /sys/class/net; cat /usrdata/djonehub/pairing/traffic.json 2>/dev/null || true", nil
 	case "storage":
 		return "date +%s; ls -ln /run/djonehub/voice-sessions.v1 2>/dev/null || true; od -An -tu1 -N16 /run/djonehub/voice-sessions.v1 2>/dev/null || true; df -k /usrdata; du -k /usrdata/djonehub/* 2>/dev/null; ls -la /usrdata/djonehub/notify /usrdata/djonehub/voice-test; echo voice-state:; cat /usrdata/djonehub/voice-test/last-start.state 2>/dev/null || true; echo voice-log:; tail -n 80 /usrdata/djonehub/voice-test/last-start.log 2>/dev/null || true; echo launch-log:; tail -n 40 /tmp/djonehub-session-launch.log 2>/dev/null || true", nil
 	case "status":

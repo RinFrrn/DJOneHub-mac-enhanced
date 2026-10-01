@@ -139,6 +139,36 @@ struct ModuleVoiceSession: Codable, Sendable {
     }
 }
 
+struct ModuleTrafficSnapshot: Codable, Sendable {
+    let unknownBytes: UInt64?
+    let simID: String?
+    let simLabel: String?
+    let days: [String: UInt64]?
+    let planGB: Double?
+    let billingDay: Int?
+    let cycleStart: String?
+    let cycleBytes: UInt64?
+    let unassigned: UInt64?
+    let available: Bool
+    let interface: String
+    let downloadRate: Double
+    let uploadRate: Double
+    let bootRX: UInt64
+    let bootTX: UInt64
+    let totalRX: UInt64
+    let totalTX: UInt64
+    enum CodingKeys: String, CodingKey {
+        case unknownBytes = "unknown_bytes"
+        case simID = "sim_id"
+        case simLabel = "sim_label"
+        case days
+        case planGB = "plan_gb", billingDay = "billing_day", cycleStart = "cycle_start", cycleBytes = "cycle_bytes", unassigned
+        case available, interface
+        case downloadRate = "download_rate", uploadRate = "upload_rate"
+        case bootRX = "boot_rx", bootTX = "boot_tx", totalRX = "total_rx", totalTX = "total_tx"
+    }
+}
+
 struct AuthorizedModuleDevice: Codable, Sendable {
     let id: String
     let name: String
